@@ -37,6 +37,16 @@ npx wrangler deploy --dry-run           # validates the worker bundles
 An Android SDK (platform 34, build-tools 34.0.0) is required for both Gradle
 commands; CI provisions it.
 
+## Workflow
+
+Finish each feature: commit it, push the branch, open the pull request, and
+merge it once CI is green. Don't leave completed work sitting on a branch or a
+PR waiting to be asked about.
+
+Green CI is part of "finished", not a separate step to skip — the unit tests are
+what stand between a bad video id and the player, and merging past a red run
+publishes a build to every installed device.
+
 ## Conventions
 
 - **`Catalog.kt` and `Player.kt` must stay free of Android imports.** They are
