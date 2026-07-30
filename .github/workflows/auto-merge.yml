@@ -15,9 +15,14 @@ on:
     workflows: ["android"]
     types: [completed]
 
+# A permissions block REPLACES the defaults rather than adding to them, so
+# every scope this job touches has to be listed. Leaving one out does not fail
+# loudly: the call 403s with "Resource not accessible by integration", naming
+# only the endpoint. That is how `checks` went missing here for four runs.
 permissions:
   contents: write        # perform the merge
   pull-requests: write   # read PR state, merge
+  checks: read           # list the commit's other check runs
   actions: write         # dispatch the publish run, see the last step
 
 jobs:
@@ -80,27 +85,46 @@ jobs:
           # itself fails: a job that can read enough to merge but not enough to
           # check a label should still merge, and the android run — the check
           # that actually gates what reaches a device — has already passed.
-          DRAFT=$(gh api "repos/$REPO/pulls/$PR" --jq .draft 2>/dev/null || echo "")
+          #
+          # Skipping has to be driven by gh's EXIT STATUS, not by whether the
+          # output is empty. On an error gh prints the API's JSON to stdout, so
+          # `x=$(gh ... ) || x=""` still captures that body — which is how a
+          # 403 on the check-runs call below came out looking like the name of
+          # a failing check, and silently held up a merge while reporting
+          # success.
+          DRAFT=""
+          if OUT=$(gh api "repos/$REPO/pulls/$PR" --jq .draft 2>/dev/null); then DRAFT="$OUT"; fi
           if [ "$DRAFT" = "true" ]; then
             echo "PR #$PR is a draft — leaving it alone."
             exit 0
           fi
 
           # Escape hatch: label a PR no-auto-merge to hold it open.
-          if gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' 2>/dev/null | grep -qx 'no-auto-merge'; then
-            echo "PR #$PR is labelled no-auto-merge — leaving it alone."
-            exit 0
+          LABELS=""
+          if OUT=$(gh api "repos/$REPO/pulls/$PR" --jq '[.labels[].name] | join(" ")' 2>/dev/null); then
+            LABELS="$OUT"
           fi
+          for l in $LABELS; do
+            if [ "$l" = "no-auto-merge" ]; then
+              echo "PR #$PR is labelled no-auto-merge — leaving it alone."
+              exit 0
+            fi
+          done
 
           # This job only knows that the android run passed. Anything else
           # reporting on the commit — the Cloudflare Workers build, whatever
           # gets added later — gets a say too. Checks still running are not
           # counted: waiting on them would mean polling.
-          FAILED=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
+          FAILED=""
+          if OUT=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
             --jq '[.check_runs[]
                    | select(.status == "completed")
                    | select([.conclusion] | inside(["success","neutral","skipped"]) | not)
-                   | .name] | join(", ")' 2>/dev/null || echo "")
+                   | .name] | join(", ")' 2>/dev/null); then
+            FAILED="$OUT"
+          else
+            echo "Could not read the commit's check runs; proceeding on the android result alone."
+          fi
           if [ -n "$FAILED" ]; then
             echo "Not merging PR #$PR — failing checks: $FAILED"
             exit 0
