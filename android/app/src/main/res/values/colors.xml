@@ -3,17 +3,19 @@
      by switching the one line there back to following the system — they are
      kept in step with values-night/colors.xml deliberately, not left to rot. -->
 <resources>
-    <!-- Warm and high-contrast: the tiles carry the colour, so the surfaces
-         behind them stay calm. -->
-    <color name="bg">#FFF7ED</color>
+    <color name="bg">#F1F7FC</color>
     <color name="surface">#FFFFFF</color>
-    <color name="accent">#E8590C</color>
+
+    <!-- The dark palette's light blue is unreadable on white, so the light one
+         takes the same hue much darker. -->
+    <color name="accent">#0B6FB8</color>
     <color name="on_accent">#FFFFFF</color>
-    <color name="text">#1F2933</color>
-    <color name="text_muted">#5C6B7A</color>
+
+    <color name="text">#12212E</color>
+    <color name="text_muted">#52657A</color>
     <color name="black">#000000</color>
 
     <!-- Sits behind a poster until it loads. Has to read as "empty tile"
          rather than as a broken image, in either palette. -->
-    <color name="thumb_placeholder">#E5E7EB</color>
+    <color name="thumb_placeholder">#DCE6EF</color>
 </resources>

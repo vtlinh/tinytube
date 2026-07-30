@@ -55,6 +55,8 @@ class MainActivity : AppCompatActivity() {
         videos.addAll(Library.collate(ChannelFeeds.cached(this)))
         adapter.notifyDataSetChanged()
         render()
+
+        askForNotificationsIfNeeded()
     }
 
     private val parentGate =
@@ -63,6 +65,22 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(this, ParentActivity::class.java))
             }
         }
+
+    private val askNotifications =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    /* Asked on first launch rather than waiting for someone to open About.
+       The notification is the only thing that says an update is ready, and a
+       parent who never visits About would never be asked at all.
+
+       The cost is that the dialog can appear to whoever opens the app first,
+       and two dismissals deny it permanently with no way back except Settings.
+       About still explains the state and links there when that happens. */
+    private fun askForNotificationsIfNeeded() {
+        if (NotificationPrompt.state(this) != Notifications.State.ASKABLE) return
+        NotificationPrompt.markAsked(this)
+        askNotifications.launch(NotificationPrompt.PERMISSION)
+    }
 
     override fun onResume() {
         super.onResume()

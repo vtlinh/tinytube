@@ -1,9 +1,7 @@
 package dev.vtlinh.ytkids
 
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
@@ -11,15 +9,15 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
 /* The parent-facing screen, reached by long-pressing the grid header.
 
-   It is not a settings screen — curation happens in the repository, not here.
-   It exists so an adult can see what version is running, whether a newer one is
-   waiting, and install it without hunting for the notification. */
+   Not a settings screen and not where curation happens — channels are approved
+   in parent mode. This exists so an adult can see what version is running,
+   whether a newer one is waiting, and install it without hunting for the
+   notification, plus fix notifications when they're off. */
 class AboutActivity : AppCompatActivity() {
 
     private lateinit var status: TextView
@@ -48,7 +46,6 @@ class AboutActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.version).text = getString(
             R.string.version_fmt,
             packageManager.getPackageInfo(packageName, 0).versionName,
-            Updater.currentVersionCode(this),
         )
         val approved = ChannelStore.get(this).all().size
         findViewById<TextView>(R.id.catalog_count).text =
@@ -65,16 +62,8 @@ class AboutActivity : AppCompatActivity() {
 
     /* ---- notifications ---- */
 
-    private fun notificationState(): Notifications.State = Notifications.state(
-        sdkInt = Build.VERSION.SDK_INT,
-        enabled = NotificationManagerCompat.from(this).areNotificationsEnabled(),
-        askedBefore = prefs().getBoolean(ASKED_KEY, false),
-        showRationale = Build.VERSION.SDK_INT >= Notifications.RUNTIME_PERMISSION_SDK &&
-            shouldShowRequestPermissionRationale(PERMISSION),
-    )
-
     private fun renderNotifications() {
-        when (notificationState()) {
+        when (NotificationPrompt.state(this)) {
             Notifications.State.OK -> {
                 /* nothing to say when it works — this screen is for the two
                    cases where an update could otherwise go unnoticed */
@@ -87,8 +76,8 @@ class AboutActivity : AppCompatActivity() {
                 notifStatus.setText(R.string.notif_off_explain)
                 notifAction.setText(R.string.notif_turn_on)
                 notifAction.setOnClickListener {
-                    prefs().edit().putBoolean(ASKED_KEY, true).apply()
-                    askNotifications.launch(PERMISSION)
+                    NotificationPrompt.markAsked(this)
+                    askNotifications.launch(NotificationPrompt.PERMISSION)
                 }
             }
             Notifications.State.BLOCKED -> {
@@ -187,16 +176,5 @@ class AboutActivity : AppCompatActivity() {
                    there is deliberately nothing to do in that branch */
             }
         }.start()
-    }
-
-    private fun prefs() = getSharedPreferences("app", Context.MODE_PRIVATE)
-
-    private companion object {
-        const val PERMISSION = "android.permission.POST_NOTIFICATIONS"
-        /* Android gives no way to ask "have I requested this before?", and
-           shouldShowRequestPermissionRationale returns false both before the
-           first request and after a permanent denial — so the two are
-           indistinguishable without remembering it ourselves. */
-        const val ASKED_KEY = "askedNotificationPermission"
     }
 }

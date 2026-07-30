@@ -34,7 +34,9 @@
     <string name="parent_already_approved">“%1$s” was already approved</string>
 
     <string name="about_title">About</string>
-    <string name="version_fmt">Version %1$s (build %2$d)</string>
+    <!-- The versionCode is what the updater actually compares, but it means
+         nothing to a parent — the version name is the human-facing one. -->
+    <string name="version_fmt">Version %1$s</string>
     <plurals name="approved_channels">
         <item quantity="one">%d approved channel</item>
         <item quantity="other">%d approved channels</item>
