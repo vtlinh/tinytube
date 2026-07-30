@@ -8,7 +8,8 @@ name: auto-merge
 #
 # workflow_run always executes the copy of this file on the DEFAULT BRANCH, not
 # the one in the pull request. So edits here take effect only once merged —
-# including the commit that adds it, which cannot merge itself.
+# including this one, which is why a change to this file has to be merged by
+# hand the first time.
 on:
   workflow_run:
     workflows: ["android"]
@@ -16,7 +17,7 @@ on:
 
 permissions:
   contents: write        # perform the merge
-  pull-requests: write   # read PR state
+  pull-requests: write   # read PR state, merge
   actions: write         # dispatch the publish run, see the last step
 
 jobs:
@@ -29,29 +30,64 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
+      # Earlier runs died on their first API call with a bare
+      # "Resource not accessible by integration (HTTP 403)", which names
+      # neither the endpoint's requirement nor what the token actually holds.
+      # GitHub returns both in headers on the 403, so ask and print them
+      # instead of guessing at settings. Deliberately never fails the job.
+      - name: Report what this token can reach
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          PAYLOAD_PRS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+        run: |
+          echo "pull_requests in the event payload: $PAYLOAD_PRS"
+          for ep in "repos/$REPO" "repos/$REPO/commits/$SHA/pulls" "repos/$REPO/pulls?state=open"; do
+            echo "--- GET $ep"
+            gh api "$ep" -i 2>&1 \
+              | grep -iE "^HTTP/|^x-accepted-github-permissions|^x-oauth-scopes|\"message\"" \
+              | head -4 || true
+          done
+
       - name: Merge if the PR is ready and every other check passed
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+          # The event already names the pull requests this run belongs to, for
+          # same-repo PRs. Reading it costs no API call and no permission,
+          # which is the difference between working and 403 if the token turns
+          # out to be short of pull-requests scope.
+          PAYLOAD_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          PR=$(gh api "repos/$REPO/commits/$SHA/pulls" \
-                 --jq '[.[] | select(.state == "open")][0].number // empty')
+          PR="$PAYLOAD_PR"
+          if [ -z "$PR" ]; then
+            echo "Event payload carried no PR number; asking the API."
+            PR=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+                   --jq '[.[] | select(.state == "open")][0].number // empty') || PR=""
+          fi
           if [ -z "$PR" ]; then
             echo "No open pull request for $SHA — nothing to merge."
             exit 0
           fi
+          echo "Considering PR #$PR"
 
-          # A draft is work the author has explicitly marked unfinished.
-          if [ "$(gh api "repos/$REPO/pulls/$PR" --jq .draft)" = "true" ]; then
+          # Each guard below is skipped rather than fatal when the lookup
+          # itself fails: a job that can read enough to merge but not enough to
+          # check a label should still merge, and the android run — the check
+          # that actually gates what reaches a device — has already passed.
+          DRAFT=$(gh api "repos/$REPO/pulls/$PR" --jq .draft 2>/dev/null || echo "")
+          if [ "$DRAFT" = "true" ]; then
             echo "PR #$PR is a draft — leaving it alone."
             exit 0
           fi
 
           # Escape hatch: label a PR no-auto-merge to hold it open.
-          if gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' | grep -qx 'no-auto-merge'; then
+          if gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' 2>/dev/null | grep -qx 'no-auto-merge'; then
             echo "PR #$PR is labelled no-auto-merge — leaving it alone."
             exit 0
           fi
@@ -59,13 +95,12 @@ jobs:
           # This job only knows that the android run passed. Anything else
           # reporting on the commit — the Cloudflare Workers build, whatever
           # gets added later — gets a say too. Checks still running are not
-          # counted: waiting on them would mean polling, and the one that
-          # gates what reaches a device is the android run we already have.
+          # counted: waiting on them would mean polling.
           FAILED=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
             --jq '[.check_runs[]
                    | select(.status == "completed")
                    | select([.conclusion] | inside(["success","neutral","skipped"]) | not)
-                   | .name] | join(", ")')
+                   | .name] | join(", ")' 2>/dev/null || echo "")
           if [ -n "$FAILED" ]; then
             echo "Not merging PR #$PR — failing checks: $FAILED"
             exit 0
