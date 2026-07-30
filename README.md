@@ -65,19 +65,38 @@ instead, which is a small change.
 
 ## How the safety boundary works
 
-Two files carry it, both covered by plain JVM unit tests that run in CI before
-anything is published:
+Every decision that can put the wrong thing in front of a child lives in a file
+with no Android in it, so a plain JVM can test it — and CI runs those tests
+before anything is published:
 
-- **`VideoId.kt`** decides which ids are usable at all. Ids must be exactly 11
-  URL-safe characters, anchored — so nothing carrying a `/`, `?`, `&`, or a
-  quote can reach the player, where it would otherwise address a different
-  video or break out of the JS string it is interpolated into. Every id off a
-  channel feed goes through it.
-- **`Player.kt`** decides where the player's WebView may navigate. Matching is
-  on the parsed host against an allowlist, which is what makes
-  `youtube.com.attacker.example` and `https://www.youtube.com@attacker.example/`
-  refusals rather than matches. Non-`http(s)` schemes — `intent:`,
-  `javascript:`, `file:` — have no host and are refused outright.
+| File | Decides |
+| --- | --- |
+| `VideoId.kt` | which video ids are usable at all |
+| `Player.kt` | where the player's WebView may navigate |
+| `YouTubeUrls.kt` | channel ids, and where parent mode may browse |
+| `Feed.kt` | what comes out of a channel's upload feed |
+| `Challenge.kt` | the parent-mode gate |
+| `Schema.kt` | the SQL behind the approved list |
+| `Library.kt` | how feeds become the grid |
+
+Two of them matter most:
+
+- **`VideoId.kt`** — ids must be exactly 11 URL-safe characters, anchored, so
+  nothing carrying a `/`, `?`, `&`, or a quote can reach the player, where it
+  would otherwise address a different video or break out of the JS string it is
+  interpolated into. Every id off a channel feed goes through it, and
+  `Player.pageFor` checks it again rather than trusting its caller.
+- **`Player.kt`** — navigation is matched on the *parsed host* against an
+  allowlist, which is what makes `youtube.com.attacker.example` and
+  `https://www.youtube.com@attacker.example/` refusals rather than matches.
+  Non-`http(s)` schemes — `intent:`, `javascript:`, `file:` — have no host and
+  are refused outright.
+
+`Feed.kt` parses the Atom feed with regex on purpose. Nothing in a feed is
+trusted, and every id still goes through `VideoId` before it can become a tile,
+so the worst a malformed or hostile feed can do is yield *fewer* videos, never
+a bad one — while a DOM parser would add an XXE surface for correctness that
+isn't needed.
 
 On top of that the player disables the long-press context menu, popups, file and
 content access, and closes itself the moment the video ends, before the
@@ -105,9 +124,17 @@ it to a fixed `android-latest` release.
   a build they then fail to download.
 - **Installing**: the app checks on every foreground, pre-downloads a newer APK,
   and offers it in a notification. The install itself always waits for a tap,
-  because it restarts the app. From the first self-performed update onward the
-  app is its own installer of record, so Android 12+ applies later ones with no
-  further confirmation.
+  because it restarts the app — it is never applied mid-video. From the first
+  self-performed update onward the app is its own installer of record, so
+  Android 12+ applies later ones with no further confirmation.
+- **Notifications**: asked for on first launch, because the notification is the
+  only thing that says an update is ready. If they're off, the About screen
+  says so and offers to turn them on — and its **Check for updates** button
+  works regardless.
+
+Two one-time hurdles on the very first update: the app needs Android's "Install
+unknown apps" permission, and Android shows one confirmation while the app
+claims update ownership. Silent from then on.
 
 ### About that committed key
 
@@ -117,15 +144,30 @@ update. That is acceptable while the repo is private and the app is
 family-scale. If this app is ever distributed more widely, move the keystore to
 an encrypted GitHub secret and have the workflow write it out at build time.
 
+## Appearance
+
+The app is dark, not dark-when-the-phone-is: nearly all of its screen time is a
+video on black, and a grid that alternates with the system setting flashes on
+every return from the player. The theme is still `DayNight` and the light
+palette is kept in step, so `MODE_NIGHT_FOLLOW_SYSTEM` in `App.kt` hands the
+choice back to the phone without a re-theme.
+
 ## Setting it up
 
+Already configured for this repo; this is what it took, and what to redo if it
+is ever rebuilt elsewhere.
+
 The Android build needs nothing but the repo — CI provisions the JDK, Gradle,
-and the SDK. The Worker needs one secret, set once:
+and the SDK. The Worker is deployed by a git-connected Cloudflare build on
+every push to `main`, and needs one secret, set once:
 
 ```bash
 npx wrangler deploy                  # if the git-connected build isn't on
 npx wrangler secret put GH_TOKEN     # fine-grained token, Contents:read, this repo only
 ```
+
+Cloudflare's preview deployments for non-`main` branches get their own
+hostnames and cannot affect installed apps, which only ever talk to production.
 
 The Worker's name in `wrangler.toml` decides its hostname, and the app has that
 hostname compiled in (`Endpoints.kt`). Renaming it orphans every installed copy:
@@ -141,3 +183,11 @@ gradle -p android assembleRelease       # → android/app/build/outputs/apk/rele
 
 Local builds get `versionCode 1` and `versionName "dev"`, since both come from
 CI environment variables.
+
+Merging is automated: `auto-merge.yml` merges a pull request once `android`
+passes and nothing else on the commit has failed. Label a PR `no-auto-merge` to
+hold it open.
+
+---
+
+By Linh Vu.
