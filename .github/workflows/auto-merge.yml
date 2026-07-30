@@ -1,0 +1,83 @@
+name: auto-merge
+
+# Merges a pull request once the android workflow passes on it.
+#
+# GitHub's own auto-merge needs "Allow auto-merge" plus a branch protection
+# rule naming a required check, and both are paid-plan features on a private
+# repository. This does the same job with nothing but a workflow.
+#
+# workflow_run always executes the copy of this file on the DEFAULT BRANCH, not
+# the one in the pull request. So edits here take effect only once merged —
+# including the commit that adds it, which cannot merge itself.
+on:
+  workflow_run:
+    workflows: ["android"]
+    types: [completed]
+
+permissions:
+  contents: write        # perform the merge
+  pull-requests: write   # read PR state
+  actions: write         # dispatch the publish run, see the last step
+
+jobs:
+  merge:
+    # Only PR runs, and only passing ones. Excluding workflow_dispatch here is
+    # also what stops the dispatch at the end of this job from looping back
+    # round into another merge.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge if the PR is ready and every other check passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          PR=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+                 --jq '[.[] | select(.state == "open")][0].number // empty')
+          if [ -z "$PR" ]; then
+            echo "No open pull request for $SHA — nothing to merge."
+            exit 0
+          fi
+
+          # A draft is work the author has explicitly marked unfinished.
+          if [ "$(gh api "repos/$REPO/pulls/$PR" --jq .draft)" = "true" ]; then
+            echo "PR #$PR is a draft — leaving it alone."
+            exit 0
+          fi
+
+          # Escape hatch: label a PR no-auto-merge to hold it open.
+          if gh api "repos/$REPO/pulls/$PR" --jq '.labels[].name' | grep -qx 'no-auto-merge'; then
+            echo "PR #$PR is labelled no-auto-merge — leaving it alone."
+            exit 0
+          fi
+
+          # This job only knows that the android run passed. Anything else
+          # reporting on the commit — the Cloudflare Workers build, whatever
+          # gets added later — gets a say too. Checks still running are not
+          # counted: waiting on them would mean polling, and the one that
+          # gates what reaches a device is the android run we already have.
+          FAILED=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
+            --jq '[.check_runs[]
+                   | select(.status == "completed")
+                   | select([.conclusion] | inside(["success","neutral","skipped"]) | not)
+                   | .name] | join(", ")')
+          if [ -n "$FAILED" ]; then
+            echo "Not merging PR #$PR — failing checks: $FAILED"
+            exit 0
+          fi
+
+          echo "Merging PR #$PR"
+          gh pr merge "$PR" --repo "$REPO" --merge
+
+          # A push made with GITHUB_TOKEN deliberately does not trigger further
+          # workflow runs, which would leave this merge sitting on main with no
+          # build and no published release — a change that never reaches a
+          # single device, silently. Kick the publish off by hand; android.yml
+          # carries workflow_dispatch for exactly this.
+          echo "Dispatching the publish build on main"
+          gh workflow run android.yml --repo "$REPO" --ref main

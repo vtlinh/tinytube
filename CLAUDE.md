@@ -47,6 +47,16 @@ Green CI is part of "finished", not a separate step to skip — the unit tests a
 what stand between a bad video id and the player, and merging past a red run
 publishes a build to every installed device.
 
+`auto-merge.yml` does the merging: a PR that isn't a draft merges itself once
+`android` passes and nothing else on the commit has failed. Label a PR
+`no-auto-merge` to hold it open. Two things follow from how it works:
+
+- It runs the copy of itself on `main`, so changes to it only take effect after
+  they land, and the PR that changes it must be merged by hand.
+- `android.yml`'s `pull_request` trigger is deliberately not path-filtered. A
+  filtered run that doesn't match never reports at all, and auto-merge waits
+  for it — a catalog-only PR would never merge.
+
 ## Conventions
 
 - **`Catalog.kt` and `Player.kt` must stay free of Android imports.** They are
