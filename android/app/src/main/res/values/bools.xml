@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark status bar icons, for the light background. Overridden in
+         values-night. Kept as a bool so the theme itself has one definition
+         rather than two copies that drift. -->
+    <bool name="light_status_bar">true</bool>
+</resources>
