@@ -44,6 +44,36 @@ object YouTubeUrls {
         return m.groupValues[1].takeIf { isValidChannelId(it) }
     }
 
+    /* Hosts that serve channel pages. Narrower than PARENT_HOSTS, which also
+       covers the images and media a page pulls in — none of those is ever
+       somewhere a channel can be approved from. */
+    private val PAGE_HOSTS = setOf("www.youtube.com", "m.youtube.com", "youtube.com")
+
+    /* The path, with query and fragment removed. Returns null for anything
+       without an http(s) host, so a non-navigable scheme can't be probed. */
+    fun pathOf(url: String): String? {
+        val m = Regex("^https?://[^/?#]+([^?#]*)", RegexOption.IGNORE_CASE).find(url.trim())
+            ?: return null
+        return m.groupValues[1].ifEmpty { "/" }
+    }
+
+    private val CHANNEL_PATH = Regex("^/channel/UC[A-Za-z0-9_-]{22}(?:/.*)?$")
+    private val HANDLE_PATH = Regex("^/@[A-Za-z0-9._\\-]{3,30}(?:/.*)?$")
+
+    /* Is the parent standing on a channel, such that "approve" means something
+       unambiguous?
+
+       Anchored at the start of the path on purpose. A watch page mentions its
+       uploader and a search result lists a dozen channels, but neither IS a
+       channel — approving from one would be a guess about which channel was
+       meant, and the guess would sometimes be wrong in a child's grid. */
+    fun isChannelPage(url: String): Boolean {
+        val host = Player.hostOf(url) ?: return false
+        if (host !in PAGE_HOSTS) return false
+        val path = pathOf(url) ?: return false
+        return CHANNEL_PATH.matches(path) || HANDLE_PATH.matches(path)
+    }
+
     /* The @handle, for the many YouTube URLs that carry one instead. A handle
        is not a channel id and cannot be turned into one locally — it has to be
        resolved against the page, see channelIdFromHtml. */

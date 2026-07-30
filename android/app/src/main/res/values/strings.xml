@@ -24,10 +24,10 @@
     <string name="parent_none_approved">No channels approved yet. Find one and tap “Approve channel”.</string>
     <string name="parent_remove">Remove</string>
     <string name="parent_remove_confirm">Remove “%1$s”? Its videos will stop appearing.</string>
-    <string name="parent_browse_hint">Find a channel, then tap “Approve channel”.</string>
-    <string name="parent_on_channel">On a channel page (%1$s)</string>
-    <string name="parent_on_handle">On @%1$s</string>
-    <string name="parent_on_video">On a video — approving adds the channel that posted it.</string>
+    <string name="parent_browse_hint">Open a channel to approve it.</string>
+    <string name="parent_on_channel">Approve this channel (%1$s)</string>
+    <string name="parent_on_handle">Approve @%1$s</string>
+    <string name="parent_on_channel_generic">Approve this channel</string>
     <string name="parent_resolving">Working out which channel this is…</string>
     <string name="parent_no_channel_here">Couldn\'t identify a channel on this page.</string>
     <string name="parent_approved">Approved “%1$s”</string>

@@ -7,6 +7,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -27,7 +28,7 @@ class ParentActivity : AppCompatActivity() {
 
     private var web: WebView? = null
     private lateinit var current: TextView
-    private lateinit var addButton: Button
+    private lateinit var addButton: ImageButton
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,8 +39,10 @@ class ParentActivity : AppCompatActivity() {
         addButton = findViewById(R.id.add_channel)
 
         findViewById<Button>(R.id.kids_mode).setOnClickListener { finish() }
-        findViewById<Button>(R.id.approved).setOnClickListener { showApproved() }
+        findViewById<ImageButton>(R.id.approved).setOnClickListener { showApproved() }
         addButton.setOnClickListener { addCurrentChannel() }
+        /* Nothing is loaded yet, so there is certainly no channel to approve. */
+        updateApproveButton(null)
 
         val w = findViewById<WebView>(R.id.web)
         web = w
@@ -65,22 +68,44 @@ class ParentActivity : AppCompatActivity() {
                 !YouTubeUrls.isParentBrowsable(url.orEmpty())
 
             override fun onPageFinished(view: WebView, url: String?) {
-                showWhereWeAre(url.orEmpty())
+                updateApproveButton(url)
+            }
+
+            /* YouTube's mobile site is a single-page app: tapping a channel
+               swaps the content with pushState and never loads a page, so
+               onPageFinished does not fire and the button would stay stuck at
+               whatever the last real navigation left it. This fires on those
+               history updates, which is what actually keeps it honest. */
+            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                super.doUpdateVisitedHistory(view, url, isReload)
+                updateApproveButton(url)
             }
         }
         w.loadUrl(YouTubeUrls.PARENT_START)
     }
 
-    /* Tell the parent what approving right now would add, before they tap.
-       A watch page approves the uploader, which is not obvious. */
-    private fun showWhereWeAre(url: String) {
-        val id = YouTubeUrls.channelIdFromUrl(url)
-        val handle = YouTubeUrls.handleFromUrl(url)
+    /* The approve button is live only on a channel page, and the line under
+       the bar says which channel that is — or, when it's off, what to do to
+       turn it on. A disabled button with no explanation is the kind of thing
+       people tap three times and then give up on. */
+    private fun updateApproveButton(url: String?) {
+        val on = url != null && YouTubeUrls.isChannelPage(url)
+        addButton.isEnabled = on
+        /* alpha as well as isEnabled: an ImageButton's drawable does not dim on
+           its own, so without this the button looks tappable when it isn't */
+        addButton.alpha = if (on) 1f else 0.35f
+
         current.text = when {
-            id != null -> getString(R.string.parent_on_channel, id)
-            handle != null -> getString(R.string.parent_on_handle, handle)
-            url.contains("/watch") -> getString(R.string.parent_on_video)
-            else -> getString(R.string.parent_browse_hint)
+            !on -> getString(R.string.parent_browse_hint)
+            else -> {
+                val handle = YouTubeUrls.handleFromUrl(url!!)
+                val id = YouTubeUrls.channelIdFromUrl(url)
+                when {
+                    handle != null -> getString(R.string.parent_on_handle, handle)
+                    id != null -> getString(R.string.parent_on_channel, id)
+                    else -> getString(R.string.parent_on_channel_generic)
+                }
+            }
         }
     }
 
@@ -91,7 +116,11 @@ class ParentActivity : AppCompatActivity() {
         current.setText(R.string.parent_resolving)
         lifecycleScope.launch {
             val resolved = ChannelResolver.resolve(url)
-            addButton.isEnabled = true
+            /* Re-derive rather than just re-enabling: resolving hits the
+               network, and the parent may have navigated somewhere with no
+               channel on it while it ran. Enabling unconditionally would leave
+               a live button on a page it can't act on. */
+            updateApproveButton(web?.url)
             if (resolved == null) {
                 current.setText(R.string.parent_no_channel_here)
                 return@launch
@@ -177,7 +206,6 @@ class ParentActivity : AppCompatActivity() {
        does after a page load. */
     override fun onStart() {
         super.onStart()
-        if (current.text.isNullOrEmpty()) current.setText(R.string.parent_browse_hint)
         findViewById<View>(R.id.web).requestFocus()
     }
 }
