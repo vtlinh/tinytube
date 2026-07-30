@@ -1,0 +1,28 @@
+package dev.vtlinh.ytkids
+
+/* What counts as a video id.
+
+   Curation is channel-level: a parent approves channels in parent mode, and
+   the grid is built from those channels' upload feeds. Nothing hand-lists
+   individual videos any more. But every id arriving from a feed still has to
+   be checked before it can become a tile, and this is where that happens.
+
+   Deliberately free of Android so it runs under a plain JVM test. A mistake
+   here doesn't produce a crash or an empty screen — it puts a child in front
+   of something nobody approved. */
+object VideoId {
+
+    /* YouTube video ids are exactly 11 characters of URL-safe base64. Anchored,
+       because an unanchored match would accept "…/watch?v=BAD" as containing a
+       valid id and hand the whole string to the player. */
+    private val PATTERN = Regex("^[A-Za-z0-9_-]{11}$")
+
+    fun isValid(id: String): Boolean = PATTERN.matches(id)
+}
+
+data class Video(val id: String, val title: String) {
+    /* i.ytimg.com serves thumbnails for any public video with no key and no
+       cookie. hqdefault exists for every video; maxresdefault does not, and a
+       missing one 404s into an empty tile. */
+    val thumbnailUrl: String get() = "https://i.ytimg.com/vi/$id/hqdefault.jpg"
+}

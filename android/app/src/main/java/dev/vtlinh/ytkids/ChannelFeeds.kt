@@ -28,9 +28,11 @@ object ChannelFeeds {
     private fun cacheDir(context: Context) = File(context.filesDir, "feeds").apply { mkdirs() }
     private fun cacheFile(context: Context, channelId: String) = File(cacheDir(context), "$channelId.xml")
 
-    /* Whatever was last fetched, with no network. Same reason CatalogStore
-       caches: a child opening the app on dropped wifi should still see what
-       was approved, not an empty screen they can't interpret. */
+    /* Whatever was last fetched, with no network.
+
+       The cache is not an optimisation. A child opening the app on dropped
+       wifi should still get the channels their parent approved, rather than an
+       empty screen they have no way to interpret or fix. */
     fun cached(context: Context): List<Video> {
         val out = mutableListOf<Video>()
         for (channel in ChannelStore.get(context).all()) {

@@ -11,21 +11,20 @@ A child sees a grid of approved videos and can reach nothing else. See
 ## Layout
 
 ```
-catalog.json                     the approved-video list — the parental control
-worker.js / wrangler.toml        Cloudflare Worker: catalog + release assets
+worker.js / wrangler.toml        Cloudflare Worker: release assets only
 .github/workflows/android.yml    build, sign, publish to the android-latest release
+.github/workflows/auto-merge.yml merge a PR once android passes
 android/                         the app
   signing.p12                    committed keystore; see README for why
   app/src/main/java/dev/vtlinh/ytkids/
-    Catalog.kt      pure: which ids are valid         (unit-tested)
+    VideoId.kt      pure: which video ids are valid   (unit-tested)
     Player.kt       pure: page + navigation allowlist (unit-tested)
     Challenge.kt    pure: the parent-mode gate        (unit-tested)
     YouTubeUrls.kt  pure: channel ids, parent allowlist (unit-tested)
     Feed.kt         pure: channel upload feed         (unit-tested)
     Schema.kt       pure: the SQL                     (unit-tested)
-    Library.kt      pure: catalog + uploads merge     (unit-tested)
-    CatalogStore.kt fetch + on-disk cache
-    ChannelStore.kt approved channels, SQLite on the device
+    Library.kt      pure: collate uploads into the grid (unit-tested)
+    ChannelStore.kt approved channels, SQLite on the device — the parental control
     ChannelFeeds.kt per-channel uploads + cache
     MainActivity.kt the grid
     PlayerActivity.kt the locked-down WebView
@@ -63,18 +62,23 @@ publishes a build to every installed device.
   they land, and the PR that changes it must be merged by hand.
 - `android.yml`'s `pull_request` trigger is deliberately not path-filtered. A
   filtered run that doesn't match never reports at all, and auto-merge waits
-  for it — a catalog-only PR would never merge.
+  for it — a docs-only PR would never merge.
 
 ## Conventions
 
-- **`Catalog.kt` and `Player.kt` must stay free of Android imports.** They are
-  the app's safety boundary and they are testable precisely because a plain JVM
-  can run them. Anything needing a `Context` belongs in the Activity or Store
-  that calls them.
-- **Validate video ids at every hop.** `Catalog` refuses malformed ids and
-  `Player.pageFor` refuses them again rather than trusting its caller. An id is
-  interpolated into both a URL and a JS string literal, so a partially-checked
-  one is how the wrong video gets played.
+- **The pure files must stay free of Android imports.** `VideoId`, `Player`,
+  `Challenge`, `YouTubeUrls`, `Feed`, `Schema` and `Library` are the app's
+  safety boundary and they are testable precisely because a plain JVM can run
+  them. Anything needing a `Context` belongs in the Activity or Store that
+  calls them.
+- **Validate video ids at every hop.** `Feed` refuses malformed ids coming off
+  a channel's feed and `Player.pageFor` refuses them again rather than trusting
+  its caller. An id is interpolated into both a URL and a JS string literal, so
+  a partially-checked one is how the wrong video gets played.
+- **Curation is channel-level and on the device.** There is no hand-listed
+  video catalog and no server-side list; `ChannelStore` is the parental
+  control. Don't reintroduce a remote source of approvals without saying what
+  happens when it disagrees with the device.
 - **The player's WebView may not navigate off the allowlist.** Match on the
   parsed host, never a substring of the URL. If you add a host, add the
   lookalike test cases for it too.
@@ -85,14 +89,18 @@ publishes a build to every installed device.
 - **`ParentActivity` must never be reachable without the gate.** It is real
   YouTube. It is not exported, and the only thing that starts it is a
   `RESULT_OK` from `ChallengeActivity`. Don't add another caller.
-- **Channel approval is weaker than video approval**, because future uploads
-  arrive unreviewed. Anything that widens it further — auto-approving related
-  channels, following playlists — is a bigger change than it looks.
+- **Approving a channel approves its future uploads**, which no adult has seen.
+  That is the deal the app now makes, and it is the weakest point in it.
+  Anything that widens it further — auto-approving related channels, following
+  playlists, surfacing recommendations — is a bigger change than it looks.
 - **`version.json` is published last, in its own upload.** It is what tells an
   app a new build exists; landing it before the APK advertises a version that
   can't be downloaded.
 - **Don't rename the Worker.** Its hostname is compiled into `Endpoints.kt`, and
   installed copies can only learn a new one via an update they'd fetch from the
   old one.
+- **The Worker serves release assets only.** It holds a GitHub token; every
+  route is fixed and takes nothing from the caller. Adding a route that does is
+  how that token becomes everyone's.
 - Never commit API keys or tokens. The Worker's `GH_TOKEN` is a wrangler secret;
   `signing.p12` is committed on purpose and is not a secret (see README).

@@ -50,9 +50,9 @@ class AboutActivity : AppCompatActivity() {
             packageManager.getPackageInfo(packageName, 0).versionName,
             Updater.currentVersionCode(this),
         )
-        val approved = CatalogStore.cached(this).size
+        val approved = ChannelStore.get(this).all().size
         findViewById<TextView>(R.id.catalog_count).text =
-            resources.getQuantityString(R.plurals.approved_videos, approved, approved)
+            resources.getQuantityString(R.plurals.approved_channels, approved, approved)
     }
 
     override fun onResume() {

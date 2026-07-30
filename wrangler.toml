@@ -1,6 +1,9 @@
 # Cloudflare Worker config. A git-connected Workers Build deploys worker.js on
-# every push to main, which is also what publishes an edit to catalog.json —
-# the catalog is bundled into the Worker rather than fetched at request time.
+# every push to main. Non-main branches get their own preview hostnames and
+# cannot affect what installed apps talk to.
+#
+# The Worker serves the app's own release assets and nothing else. Curation
+# lives on the device — see README.
 #
 # The `name` here decides the hostname, and the Android app has that hostname
 # compiled in (android/.../Endpoints.kt). Renaming the worker orphans every

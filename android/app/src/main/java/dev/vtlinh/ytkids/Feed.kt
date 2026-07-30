@@ -4,7 +4,7 @@ package dev.vtlinh.ytkids
 
    The feed is Atom XML. Parsing it with regex rather than a real parser is a
    deliberate limit, not laziness: nothing here is trusted. Every id is put
-   through Catalog.isValidId before it can become a tile, so the worst a
+   through VideoId.isValid before it can become a tile, so the worst a
    malformed or hostile feed can do is produce fewer videos than it should —
    never a bad one. A DOM parser would buy correctness we don't need and an
    XXE surface we very much don't want.
@@ -26,7 +26,7 @@ object Feed {
             for (entry in ENTRY.findAll(xml)) {
                 val body = entry.groupValues[1]
                 val id = VIDEO_ID.find(body)?.groupValues?.get(1)?.trim() ?: continue
-                if (!Catalog.isValidId(id)) continue
+                if (!VideoId.isValid(id)) continue
                 if (!seen.add(id)) continue
                 val title = TITLE.find(body)?.groupValues?.get(1)?.let { unescape(it).trim() }
                 out.add(Video(id = id, title = title?.ifEmpty { null } ?: id))

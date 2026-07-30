@@ -8,36 +8,27 @@ class LibraryTest {
 
     private fun v(id: String, title: String = id) = Video(id, title)
 
-    @Test fun `catalog comes first, then channel uploads`() {
-        val merged = Library.merge(
-            listOf(v("aaaaaaaaaaa"), v("bbbbbbbbbbb")),
-            listOf(v("ccccccccccc"), v("ddddddddddd")),
-        )
-        assertEquals(
-            listOf("aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"),
-            merged.map { it.id },
-        )
+    @Test fun `keeps feed order`() {
+        val out = Library.collate(listOf(v("aaaaaaaaaaa"), v("bbbbbbbbbbb"), v("ccccccccccc")))
+        assertEquals(listOf("aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"), out.map { it.id })
     }
 
-    /* A video can easily be both hand-approved and in its channel's feed. One
-       tile, and the title the parent wrote rather than the uploader's. */
-    @Test fun `an id in both sources appears once, with the catalog title`() {
-        val merged = Library.merge(
-            listOf(v("aaaaaaaaaaa", "Bedtime song")),
-            listOf(v("aaaaaaaaaaa", "BEDTIME SONG!!! (NEW) 10 HOURS")),
+    /* The same video legitimately appears in two channels' feeds after a
+       collaboration or a re-upload. Two identical tiles reads as a bug. */
+    @Test fun `a video in two channels' feeds appears once`() {
+        val out = Library.collate(
+            listOf(
+                v("aaaaaaaaaaa", "As posted by channel one"),
+                v("bbbbbbbbbbb"),
+                v("aaaaaaaaaaa", "As posted by channel two"),
+            ),
         )
-        assertEquals(1, merged.size)
-        assertEquals("Bedtime song", merged.single().title)
+        assertEquals(listOf("aaaaaaaaaaa", "bbbbbbbbbbb"), out.map { it.id })
+        /* first occurrence wins, so the newest-approved channel's copy leads */
+        assertEquals("As posted by channel one", out[0].title)
     }
 
-    @Test fun `duplicates within the channel uploads collapse too`() {
-        val merged = Library.merge(emptyList(), listOf(v("aaaaaaaaaaa"), v("aaaaaaaaaaa")))
-        assertEquals(1, merged.size)
-    }
-
-    @Test fun `either side may be empty`() {
-        assertEquals(1, Library.merge(listOf(v("aaaaaaaaaaa")), emptyList()).size)
-        assertEquals(1, Library.merge(emptyList(), listOf(v("aaaaaaaaaaa"))).size)
-        assertTrue(Library.merge(emptyList(), emptyList()).isEmpty())
+    @Test fun `no approved channels means an empty grid`() {
+        assertTrue(Library.collate(emptyList()).isEmpty())
     }
 }

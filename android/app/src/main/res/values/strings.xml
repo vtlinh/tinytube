@@ -3,8 +3,10 @@
     <string name="app_name">Kids Videos</string>
 
     <!-- Written to be read out loud by a parent, not by the child: an empty
-         catalog is a setup step nobody has done yet, not a fault. -->
-    <string name="empty_catalog">No videos yet.\n\nA grown-up needs to add some.</string>
+         grid is a setup step nobody has done yet, not a fault. It names the
+         button that fixes it, because the parent reading it is standing in
+         front of that button. -->
+    <string name="empty_catalog">No videos yet.\n\nA grown-up can add channels with the Parent button.</string>
 
     <!-- parent mode and its gate -->
     <string name="parent_mode">Parent</string>
@@ -33,9 +35,9 @@
 
     <string name="about_title">About</string>
     <string name="version_fmt">Version %1$s (build %2$d)</string>
-    <plurals name="approved_videos">
-        <item quantity="one">%d approved video</item>
-        <item quantity="other">%d approved videos</item>
+    <plurals name="approved_channels">
+        <item quantity="one">%d approved channel</item>
+        <item quantity="other">%d approved channels</item>
     </plurals>
 
     <string name="notif_off_explain">Notifications are off, so nothing will tell you when an update is ready. Updates still download, and you can install them from this screen.</string>

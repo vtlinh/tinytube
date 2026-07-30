@@ -1,10 +1,14 @@
 /* The Worker behind the Android app.
  *
  * It exists because the repository is private. A private repo's release assets
- * answer 404 to anyone without a credential, so an installed app could neither
- * fetch its catalog nor ever discover an update — and nothing on the device
- * could recover from that. This holds a read-only GitHub token and re-serves
- * the handful of files installed copies need, without one.
+ * answer 404 to anyone without a credential, so an installed app could never
+ * discover an update — and nothing on the device could recover from that, the
+ * update mechanism being the thing that broke. This holds a read-only GitHub
+ * token and re-serves those assets, without one.
+ *
+ * Curation is not served from here. Approved channels live on the device and
+ * their uploads come straight from YouTube's per-channel feeds; this Worker is
+ * only about the app updating itself.
  *
  * Every route is public and every route is fixed. None of them takes a URL, a
  * repo or a path from the caller: the path decides the asset, the constants
@@ -15,8 +19,6 @@
  *   npx wrangler deploy                  # if the git-connected build isn't on
  *   npx wrangler secret put GH_TOKEN     # fine-grained, Contents:read, this repo only
  */
-
-import catalog from "./catalog.json";
 
 const RELEASE_REPO = "vtlinh/yt_kids";
 const RELEASE_TAG = "android-latest";
@@ -82,45 +84,12 @@ async function releaseAsset(env, name) {
   return new Response(r.body, { status: 200, headers });
 }
 
-/* The approved-video list.
- *
- * Bundled into the Worker at build time rather than fetched from the GitHub
- * API: the git-connected Cloudflare build redeploys on every push to main, so
- * editing catalog.json and pushing is already the publish step. That also means
- * serving it costs no GitHub request and cannot fail while GitHub is down —
- * which matters, because this is the request that decides whether a child sees
- * any videos at all.
- *
- * The `_comment` key in the source file is stripped here; it is instructions
- * for whoever edits the file, not something to ship to every device on every
- * open. */
-function catalogResponse() {
-  const videos = Array.isArray(catalog.videos) ? catalog.videos : [];
-  const body = JSON.stringify({
-    videos: videos.map(v => ({ id: String(v.id ?? ""), title: String(v.title ?? "") })),
-  });
-  return new Response(body, {
-    status: 200,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      /* Long enough that opening the app repeatedly is not a request storm,
-       * short enough that a newly approved video appears the same day. */
-      "cache-control": "public, max-age=900",
-      "access-control-allow-origin": "*",
-    },
-  });
-}
-
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
       return new Response("ok\n", { headers: { "content-type": "text/plain" } });
-    }
-
-    if (url.pathname === "/catalog.json") {
-      return catalogResponse();
     }
 
     if (url.pathname in RELEASE_ASSETS) {

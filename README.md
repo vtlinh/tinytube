@@ -4,10 +4,10 @@ An Android app for watching YouTube videos for kids.
 
 ## What this is
 
-A kid-friendly viewer for a **parent-curated** set of YouTube videos. Instead of
-the full YouTube interface — endless recommendations, comments, search, and ads
-for everything under the sun — a child sees a grid of big poster tiles holding
-exactly the videos an adult approved, and nothing else.
+A kid-friendly viewer for a **parent-curated** set of YouTube channels. Instead
+of the full YouTube interface — endless recommendations, comments, search, and
+ads for everything under the sun — a child sees a grid of big poster tiles
+holding recent uploads from the channels an adult approved, and nothing else.
 
 There is no search box, no menu, no text entry, and no way to navigate out of
 the app. Tapping a tile plays that video; when it ends the player closes and the
@@ -16,78 +16,63 @@ child is back at the grid.
 ## How it fits together
 
 ```
-catalog.json ──┐
-               ├──► Cloudflare Worker ──► Android app
-GitHub release ┘     (yt-kids.*.workers.dev)
-  android-latest
+approved channels          YouTube per-channel
+  (SQLite, on device) ────►  Atom feeds  ────► the grid
+
+GitHub release             Cloudflare Worker
+  android-latest    ────►   (yt-kids.*.workers.dev) ────► self-update
 ```
 
 | Piece | What it does |
 | --- | --- |
-| `catalog.json` | The approved-video list. **This file is the parental control.** |
-| `worker.js` | Serves the catalog and the app's own release assets, publicly. |
-| `android/` | The app: a grid, a locked-down player, and a self-updater. |
+| `ChannelStore` | The approved-channel list, on the device. **This is the parental control.** |
+| `worker.js` | Serves the app's own release assets, publicly. Nothing else. |
+| `android/` | The app: a grid, a locked-down player, parent mode, a self-updater. |
 | `.github/workflows/android.yml` | Builds, signs, and publishes every push to `main`. |
 
-The repository is private, so a device has no credential and GitHub answers 404
-to it for both the catalog and the release assets. The Worker exists to close
-that gap: it holds a read-only GitHub token and re-serves the few files an
-installed copy needs. Its routes are public but fixed — none of them takes a
-URL, repo, or path from the caller, so the credential never leaves the Worker.
+Curation never leaves the phone. There is no server-side list and nothing to
+deploy when you approve something — the app reads YouTube's per-channel feeds
+directly, which need no API key and no quota.
 
-## Approving a video
+The Worker exists for one reason: the repository is private, so a device with
+no credential gets a 404 from the release assets and could never find an
+update. It holds a read-only GitHub token and re-serves them. Its routes are
+public but fixed — none takes a URL, repo, or path from the caller, so the
+credential never leaves the Worker.
 
-1. Open the video on YouTube and copy the 11-character id from its URL:
-   `https://www.youtube.com/watch?v=`**`dQw4w9WgXcQ`**
-2. Add an entry to `catalog.json`:
-   ```json
-   { "videos": [ { "id": "dQw4w9WgXcQ", "title": "Counting Song" } ] }
-   ```
-3. Push to `main`. The git-connected Cloudflare build redeploys the Worker, and
-   every device picks the change up the next time the grid is opened.
+## Approving a channel
 
-**Check each id by opening it yourself first.** Nothing downstream verifies that
-an id points at what you meant — only that it is well-formed. A typo is a real
-way to put the wrong video in front of a child.
+Tap **Parent** in the grid's status bar. Answer the arithmetic. Browse to a
+channel in the WebView that opens and tap **Approve channel** — from the
+channel's own page, or from any of its videos, which approves the uploader.
 
-Entries with a malformed id, and duplicates, are dropped by the app rather than
-shown.
+**Approved** in the same bar lists what you've approved and removes any of it.
+Removing a channel drops its videos from the grid immediately.
 
-## Parent mode
+> **Approving a channel approves its future uploads.** The grid shows whatever
+> that channel posts next, and no adult will have seen it first. That is what
+> channel-level approval means rather than a gap in the implementation — so
+> choose channels you'd trust unattended, and check back on them.
 
-The grid's status bar has a **Parent** button. It asks a simultaneous equation
-— given `X + Y` and `X − Y`, what is `X`? — and only then opens real YouTube in
-a WebView, where an adult can browse and tap **Approve channel**. The same bar
-switches back to kids mode.
+Uploads come from the channel's Atom feed, which carries roughly the latest 15
+and nothing older.
 
-Approved channels are stored in SQLite **on the device**, separately from
-`catalog.json`. Nothing a parent approves here can be undone by a deploy, and
-nothing removed from the repo strips a channel they added themselves. Their
-recent uploads appear in the grid alongside the reviewed catalog.
-
-> **Approving a channel is weaker than approving a video.** Every entry in
-> `catalog.json` was looked at by an adult. A channel is a standing trust: its
-> *future* uploads will appear in the child's grid having been seen by nobody.
-> That is what channel-level approval means, not a gap in the implementation —
-> but choose channels accordingly, and use `catalog.json` where you want a
-> guarantee.
-
-Uploads come from YouTube's per-channel Atom feed, which needs no API key and
-no quota. It carries roughly the latest 15 uploads and nothing older.
-
-The gate is a speed bump, not a lock. It stops a young child tapping through;
-an older one who can do the algebra will get past it. If you need a real
-barrier it wants a PIN instead, which is a small change.
+The gate is a speed bump, not a lock. Given `X + Y` and `X − Y` it asks for
+both `X` and `Y`, and re-rolls the numbers on every wrong answer so guesses
+can't converge. It stops a young child tapping through; an older one who can do
+the algebra will get past it. If you need a real barrier it wants a PIN
+instead, which is a small change.
 
 ## How the safety boundary works
 
-Two files, both covered by plain JVM unit tests that run in CI before anything
-is published:
+Two files carry it, both covered by plain JVM unit tests that run in CI before
+anything is published:
 
-- **`Catalog.kt`** decides which ids exist at all. Ids must be exactly 11
+- **`VideoId.kt`** decides which ids are usable at all. Ids must be exactly 11
   URL-safe characters, anchored — so nothing carrying a `/`, `?`, `&`, or a
   quote can reach the player, where it would otherwise address a different
-  video or break out of the JS string it is interpolated into.
+  video or break out of the JS string it is interpolated into. Every id off a
+  channel feed goes through it.
 - **`Player.kt`** decides where the player's WebView may navigate. Matching is
   on the parsed host against an allowlist, which is what makes
   `youtube.com.attacker.example` and `https://www.youtube.com@attacker.example/`
@@ -150,7 +135,7 @@ otherwise is an update they can no longer find.
 ## Building locally
 
 ```bash
-gradle -p android testReleaseUnitTest   # the catalog and player tests
+gradle -p android testReleaseUnitTest   # id, player, gate, feed and schema tests
 gradle -p android assembleRelease       # → android/app/build/outputs/apk/release/
 ```
 

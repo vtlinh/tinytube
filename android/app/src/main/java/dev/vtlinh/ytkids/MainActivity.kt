@@ -52,7 +52,7 @@ class MainActivity : AppCompatActivity() {
 
         /* Show the last known list immediately — before any network — so the
            screen is never blank while a request is in flight. */
-        videos.addAll(Library.merge(CatalogStore.cached(this), ChannelFeeds.cached(this)))
+        videos.addAll(Library.collate(ChannelFeeds.cached(this)))
         adapter.notifyDataSetChanged()
         render()
     }
@@ -69,10 +69,7 @@ class MainActivity : AppCompatActivity() {
         /* Also runs on the way back from parent mode, which is what makes a
            newly approved channel's videos appear without a restart. */
         lifecycleScope.launch {
-            val catalog = CatalogStore.refresh(this@MainActivity)
-                ?: CatalogStore.cached(this@MainActivity)
-            val uploads = ChannelFeeds.refresh(this@MainActivity)
-            val fresh = Library.merge(catalog, uploads)
+            val fresh = Library.collate(ChannelFeeds.refresh(this@MainActivity))
             if (fresh == videos) return@launch
             videos.clear()
             videos.addAll(fresh)
