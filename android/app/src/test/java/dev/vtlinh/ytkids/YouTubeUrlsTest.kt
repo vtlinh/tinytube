@@ -70,6 +70,57 @@ class YouTubeUrlsTest {
         assertNull(YouTubeUrls.feedUrl("UC" + "a".repeat(21) + "&x=1"))
     }
 
+    @Test fun `recognises a channel page`() {
+        for (u in listOf(
+            "https://www.youtube.com/channel/$ok",
+            "https://m.youtube.com/channel/$ok/videos",
+            "https://www.youtube.com/channel/$ok?view=0",
+            "https://www.youtube.com/@SomeChannel",
+            "https://m.youtube.com/@SomeChannel/videos",
+            "https://www.youtube.com/@some.channel/featured#x",
+        )) {
+            assertTrue("should be a channel page: $u", YouTubeUrls.isChannelPage(u))
+        }
+    }
+
+    /* The whole point of the check: these all MENTION a channel without being
+       one, and approving from them would be guessing which channel was meant. */
+    @Test fun `refuses pages that are not a channel`() {
+        for (u in listOf(
+            "https://www.youtube.com/",
+            "https://m.youtube.com/feed/trending",
+            "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+            "https://www.youtube.com/results?search_query=@SomeChannel",
+            "https://www.youtube.com/playlist?list=PL123",
+            "https://www.youtube.com/shorts/aaaaaaaaaaa",
+        )) {
+            assertFalse("should not be a channel page: $u", YouTubeUrls.isChannelPage(u))
+        }
+    }
+
+    /* Anchored at the start of the path, so a channel path appearing later in
+       a URL doesn't qualify. */
+    @Test fun `channel path must start the path, not appear within it`() {
+        assertFalse(YouTubeUrls.isChannelPage("https://www.youtube.com/redirect?q=/channel/$ok"))
+        assertFalse(YouTubeUrls.isChannelPage("https://www.youtube.com/foo/channel/$ok"))
+        assertFalse(YouTubeUrls.isChannelPage("https://www.youtube.com/foo/@SomeChannel"))
+    }
+
+    @Test fun `refuses channel-shaped paths on the wrong host`() {
+        assertFalse(YouTubeUrls.isChannelPage("https://youtube.com.attacker.example/@x"))
+        assertFalse(YouTubeUrls.isChannelPage("https://i.ytimg.com/@SomeChannel"))
+        assertFalse(YouTubeUrls.isChannelPage("https://www.youtube.com@attacker.example/@x"))
+        assertFalse(YouTubeUrls.isChannelPage("javascript:/@x"))
+        assertFalse(YouTubeUrls.isChannelPage(""))
+    }
+
+    @Test fun `path extraction drops query and fragment`() {
+        assertEquals("/@x", YouTubeUrls.pathOf("https://www.youtube.com/@x?a=1#b"))
+        assertEquals("/", YouTubeUrls.pathOf("https://www.youtube.com"))
+        assertEquals("/", YouTubeUrls.pathOf("https://www.youtube.com/?a=1"))
+        assertNull(YouTubeUrls.pathOf("javascript:alert(1)"))
+    }
+
     /* Parent mode is wider than the player, but still bounded — a tap on an ad
        or an external link must not wander into the open web in our WebView. */
     @Test fun `parent browsing is limited to youtube`() {
