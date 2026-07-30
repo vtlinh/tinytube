@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kids Videos</string>
+
+    <!-- Written to be read out loud by a parent, not by the child: an empty
+         catalog is a setup step nobody has done yet, not a fault. -->
+    <string name="empty_catalog">No videos yet.\n\nA grown-up needs to add some.</string>
+
+    <string name="about_title">About</string>
+    <string name="version_fmt">Version %1$s (build %2$d)</string>
+    <plurals name="approved_videos">
+        <item quantity="one">%d approved video</item>
+        <item quantity="other">%d approved videos</item>
+    </plurals>
+
+    <string name="up_to_date">This is the latest version.</string>
+    <string name="checking">Checking…</string>
+    <string name="check_failed">Could not check for updates.</string>
+    <string name="check_for_updates">Check for updates</string>
+    <string name="downloading_fmt">Downloading v%1$s…</string>
+    <string name="download_failed">The download failed.</string>
+    <string name="update_ready_fmt">Version %1$s is downloaded and ready.</string>
+    <string name="install_update">Install update</string>
+    <string name="installing">Installing…</string>
+</resources>

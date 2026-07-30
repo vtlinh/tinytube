@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- The catalog cache is re-fetched on first launch and the update markers
+         describe an APK that lives in cacheDir, which is never backed up.
+         Restoring either onto a new device would only produce state that
+         disagrees with what is actually there. -->
+    <exclude domain="file" path="catalog.json" />
+    <exclude domain="sharedpref" path="app.xml" />
+</full-backup-content>

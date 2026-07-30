@@ -1,0 +1,21 @@
+# Cloudflare Worker config. A git-connected Workers Build deploys worker.js on
+# every push to main, which is also what publishes an edit to catalog.json —
+# the catalog is bundled into the Worker rather than fetched at request time.
+#
+# The `name` here decides the hostname, and the Android app has that hostname
+# compiled in (android/.../Endpoints.kt). Renaming the worker orphans every
+# installed copy: they keep asking the old hostname, and the only thing that
+# could tell them otherwise is an update they can no longer find. Don't.
+#
+# One-time setup, from this directory:
+#   npx wrangler deploy                 # if the git-connected build isn't on
+#   npx wrangler secret put GH_TOKEN    # fine-grained token, Contents:read, this repo
+#
+# Never put the token in this file — it is committed. `secret put` stores it on
+# the worker, where the code reads it as env.GH_TOKEN.
+name = "yt-kids"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+
+[observability]
+enabled = true

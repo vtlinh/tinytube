@@ -1,0 +1,113 @@
+name: android
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  # Pull requests build and test but never publish (the release steps are gated
+  # on main below). Without this a PR carries no signal at all, and the tests
+  # that guard which video ids can reach the player would first run only after
+  # the merge that shipped them.
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# main: only one publish at a time. Two overlapping runs both clobber the fixed
+# android-latest release, so a slower older run can land its APK on top of a
+# newer one's version.json — leaving the manifest advertising a build the APK
+# next to it isn't. Those runs QUEUE rather than cancel, because every merge is
+# meant to ship and cancelling one drops its build on the floor.
+#
+# Pull requests get a group of their own, per PR. Sharing main's group would put
+# branch builds in front of a publish that is waiting to ship, which is how
+# novels ended up dropping branch builds entirely. Superseding a PR run IS
+# right — nobody wants the results for the commit before the one they just
+# pushed — so those cancel.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('android-pr-{0}', github.event.number) || 'android-latest' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      # Version name = "<year>.<week>.<patch>":
+      #   year  — years since 2025, 1-indexed (2026 -> 1)
+      #   week  — ISO week of the year, 1-indexed (matched to the ISO year)
+      #   patch — running build within that week; restarts at 1 the first build
+      #           of a new week, otherwise the previous published patch + 1
+      #           (read back from the android-latest version.json)
+      # The versionCode (GITHUB_RUN_NUMBER, applied in build.gradle.kts) is what
+      # the in-app updater compares, so this string is display-only and may
+      # reset freely.
+      - name: Compute version name
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          YEAR=$(( $(date -u +%G) - 2025 ))
+          WEEK=$(( 10#$(date -u +%V) ))
+          PATCH=1
+          if gh release download android-latest --repo "$GITHUB_REPOSITORY" \
+               --pattern version.json --output prev.json --clobber 2>/dev/null; then
+            PREV=$(sed -n 's/.*"versionName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' prev.json)
+            PY=${PREV%%.*}; REST=${PREV#*.}; PW=${REST%%.*}; PP=${REST##*.}
+            if [ "$PY" = "$YEAR" ] && [ "$PW" = "$WEEK" ] && [ -n "$PP" ]; then
+              PATCH=$(( PP + 1 ))
+            fi
+            rm -f prev.json
+          fi
+          echo "APP_VERSION_NAME=${YEAR}.${WEEK}.${PATCH}" >> "$GITHUB_ENV"
+          echo "Computed version name: ${YEAR}.${WEEK}.${PATCH}"
+
+      # Runs before the build so a broken invariant fails the run rather than
+      # publishing an APK. Plain JVM tests over the catalog parser and the
+      # player's host allowlist — the two places where a mistake shows a child
+      # the wrong thing. Seconds, no emulator.
+      - name: Unit tests
+        run: gradle -p android testReleaseUnitTest
+
+      - name: Build release APK
+        run: gradle -p android assembleRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yt-kids-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+      # main builds publish to a fixed release so the Worker always has a stable
+      # asset to re-serve to installed apps.
+      - name: Publish APK to the android-latest release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"${APP_VERSION_NAME}\"}" > version.json
+          gh release view android-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create android-latest --repo "$GITHUB_REPOSITORY" \
+              --title "Android app (latest)" --notes "APK auto-built from main." --latest=false
+          # version.json is what tells the app a new build exists, so it must
+          # land LAST and in its own call. Uploaded together, gh sends the
+          # assets concurrently and the 60-byte manifest goes live long before
+          # the APK finishes going up — a window on every release where every
+          # app that checks is told about a version it then fails to download.
+          gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber \
+            android/app/build/outputs/apk/release/app-release.apk
+          gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber version.json
