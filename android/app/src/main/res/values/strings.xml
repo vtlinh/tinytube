@@ -10,8 +10,9 @@
     <string name="parent_mode">Parent</string>
     <string name="kids_mode">← Kids mode</string>
     <string name="challenge_title">Grown-ups only</string>
-    <string name="challenge_question">If X + Y = %1$d and X − Y = %2$d,\nwhat is X?</string>
-    <string name="challenge_hint">X</string>
+    <string name="challenge_question">If X + Y = %1$d and X − Y = %2$d,\nwhat are X and Y?</string>
+    <string name="challenge_hint_x">X</string>
+    <string name="challenge_hint_y">Y</string>
     <string name="challenge_submit">Continue</string>
     <string name="challenge_wrong">Not quite — here are two new numbers.</string>
 

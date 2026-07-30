@@ -28,11 +28,26 @@
             android:textColor="@color/text" />
 
         <EditText
-            android:id="@+id/answer"
+            android:id="@+id/answer_x"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
-            android:hint="@string/challenge_hint"
+            android:hint="@string/challenge_hint_x"
+            android:inputType="number"
+            android:imeOptions="actionNext"
+            android:maxLength="6"
+            android:textSize="20sp"
+            android:textColor="@color/text"
+            android:textColorHint="@color/text_muted"
+            android:importantForAutofill="no"
+            android:autofillHints="" />
+
+        <EditText
+            android:id="@+id/answer_y"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="@string/challenge_hint_y"
             android:inputType="number"
             android:imeOptions="actionDone"
             android:maxLength="6"
