@@ -48,6 +48,21 @@
             android:exported="false"
             android:label="@string/about_title" />
 
+        <!-- Both are parent-facing and neither is exported: nothing outside
+             the app may open parent mode, and in particular nothing may skip
+             the challenge by starting ParentActivity directly. -->
+        <activity
+            android:name=".ChallengeActivity"
+            android:exported="false"
+            android:label="@string/challenge_title"
+            android:windowSoftInputMode="stateVisible|adjustResize" />
+
+        <activity
+            android:name=".ParentActivity"
+            android:exported="false"
+            android:label="@string/parent_mode"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
+
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false">

@@ -53,6 +53,32 @@ way to put the wrong video in front of a child.
 Entries with a malformed id, and duplicates, are dropped by the app rather than
 shown.
 
+## Parent mode
+
+The grid's status bar has a **Parent** button. It asks a simultaneous equation
+— given `X + Y` and `X − Y`, what is `X`? — and only then opens real YouTube in
+a WebView, where an adult can browse and tap **Approve channel**. The same bar
+switches back to kids mode.
+
+Approved channels are stored in SQLite **on the device**, separately from
+`catalog.json`. Nothing a parent approves here can be undone by a deploy, and
+nothing removed from the repo strips a channel they added themselves. Their
+recent uploads appear in the grid alongside the reviewed catalog.
+
+> **Approving a channel is weaker than approving a video.** Every entry in
+> `catalog.json` was looked at by an adult. A channel is a standing trust: its
+> *future* uploads will appear in the child's grid having been seen by nobody.
+> That is what channel-level approval means, not a gap in the implementation —
+> but choose channels accordingly, and use `catalog.json` where you want a
+> guarantee.
+
+Uploads come from YouTube's per-channel Atom feed, which needs no API key and
+no quota. It carries roughly the latest 15 uploads and nothing older.
+
+The gate is a speed bump, not a lock. It stops a young child tapping through;
+an older one who can do the algebra will get past it. If you need a real
+barrier it wants a PIN instead, which is a small change.
+
 ## How the safety boundary works
 
 Two files, both covered by plain JVM unit tests that run in CI before anything

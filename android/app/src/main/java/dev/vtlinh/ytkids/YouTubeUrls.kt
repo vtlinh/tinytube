@@ -1,0 +1,94 @@
+package dev.vtlinh.ytkids
+
+/* Reading YouTube URLs: what a channel id looks like, how to find one in a
+   page the parent is standing on, and where parent mode is allowed to go.
+
+   Android-free and tested. The channel id ends up in a feed URL and in the
+   database as a primary key, and a wrong one either fetches nothing or — worse
+   — fetches somebody else's channel into a child's grid. */
+object YouTubeUrls {
+
+    /* Channel ids are "UC" followed by 22 url-safe base64 characters. Anchored,
+       for the same reason video ids are: an unanchored match happily finds a
+       valid-looking id inside a longer hostile string. */
+    private val CHANNEL_ID = Regex("^UC[A-Za-z0-9_-]{22}$")
+
+    fun isValidChannelId(id: String): Boolean = CHANNEL_ID.matches(id)
+
+    /* Hosts parent mode may browse. Wider than the player's allowlist on
+       purpose — this is a grown-up looking for channels — but still bounded,
+       so a stray tap on an ad or an external link doesn't wander off into the
+       open web inside our WebView. */
+    private val PARENT_HOSTS = setOf(
+        "www.youtube.com",
+        "m.youtube.com",
+        "youtube.com",
+        "www.youtube-nocookie.com",
+        "s.ytimg.com",
+        "i.ytimg.com",
+        "yt3.ggpht.com",
+        "yt3.googleusercontent.com",
+        "fonts.gstatic.com",
+    )
+
+    fun isParentBrowsable(url: String): Boolean {
+        val host = Player.hostOf(url) ?: return false
+        if (host in PARENT_HOSTS) return true
+        return host.endsWith(".googlevideo.com")
+    }
+
+    /* The channel id sitting in the URL itself, for /channel/UC… pages. */
+    fun channelIdFromUrl(url: String): String? {
+        if (Player.hostOf(url) == null) return null
+        val m = Regex("/channel/(UC[A-Za-z0-9_-]{22})(?:[/?#]|$)").find(url) ?: return null
+        return m.groupValues[1].takeIf { isValidChannelId(it) }
+    }
+
+    /* The @handle, for the many YouTube URLs that carry one instead. A handle
+       is not a channel id and cannot be turned into one locally — it has to be
+       resolved against the page, see channelIdFromHtml. */
+    fun handleFromUrl(url: String): String? {
+        if (Player.hostOf(url) == null) return null
+        val m = Regex("/@([A-Za-z0-9._\\-]{3,30})(?:[/?#]|$)").find(url) ?: return null
+        return m.groupValues[1]
+    }
+
+    /* Pull the channel id out of a fetched YouTube page.
+     *
+     * Every channel page carries its own id in several places; these are the
+     * two that have been stable and that are unambiguous. The canonical link
+     * is preferred because it is a declared identity rather than an incidental
+     * mention — "channelId" also appears in a watch page's payload referring
+     * to the uploader, which is in fact what we want there too. */
+    fun channelIdFromHtml(html: String): String? {
+        Regex("<link[^>]+rel=\"canonical\"[^>]+href=\"https://www\\.youtube\\.com/channel/(UC[A-Za-z0-9_-]{22})\"")
+            .find(html)?.groupValues?.get(1)?.let { if (isValidChannelId(it)) return it }
+        Regex("\"channelId\"\\s*:\\s*\"(UC[A-Za-z0-9_-]{22})\"")
+            .find(html)?.groupValues?.get(1)?.let { if (isValidChannelId(it)) return it }
+        return null
+    }
+
+    /* A human name for the channel, so the approved list reads as names rather
+       than 24-character ids. Only ever cosmetic — nothing depends on it — so
+       any failure here falls back to the id rather than blocking an approval. */
+    fun channelTitleFromHtml(html: String): String? {
+        Regex("<meta[^>]+property=\"og:title\"[^>]+content=\"([^\"]{1,120})\"")
+            .find(html)?.groupValues?.get(1)?.let { return it.trim().ifEmpty { null } }
+        Regex("<title>([^<]{1,120})</title>")
+            .find(html)?.groupValues?.get(1)?.let {
+                /* the page title is "Name - YouTube" */
+                return it.removeSuffix(" - YouTube").trim().ifEmpty { null }
+            }
+        return null
+    }
+
+    /* The channel's public feed of recent uploads. No API key and no quota —
+       which is the whole reason channel approval is workable here at all. It
+       returns roughly the latest 15 uploads and nothing older. */
+    fun feedUrl(channelId: String): String? {
+        if (!isValidChannelId(channelId)) return null
+        return "https://www.youtube.com/feeds/videos.xml?channel_id=$channelId"
+    }
+
+    const val PARENT_START = "https://m.youtube.com/"
+}

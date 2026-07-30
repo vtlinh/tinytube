@@ -83,4 +83,10 @@ dependencies {
        exercise nothing. Same reason the tests are worth having: this parser is
        what decides which ids reach the player. */
     testImplementation("org.json:json:20240303")
+
+    /* A real SQLite for the schema tests. Schema.kt has no Android in it, so
+       the exact statements the app executes on a device can be executed here
+       against a real engine — see SchemaTest. Migrations run once, on the only
+       copy of the approved-channel list a parent has. */
+    testImplementation("org.xerial:sqlite-jdbc:3.46.1.0")
 }

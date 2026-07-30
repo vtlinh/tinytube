@@ -17,11 +17,19 @@ worker.js / wrangler.toml        Cloudflare Worker: catalog + release assets
 android/                         the app
   signing.p12                    committed keystore; see README for why
   app/src/main/java/dev/vtlinh/ytkids/
-    Catalog.kt      pure: which ids are valid       (unit-tested)
+    Catalog.kt      pure: which ids are valid         (unit-tested)
     Player.kt       pure: page + navigation allowlist (unit-tested)
+    Challenge.kt    pure: the parent-mode gate        (unit-tested)
+    YouTubeUrls.kt  pure: channel ids, parent allowlist (unit-tested)
+    Feed.kt         pure: channel upload feed         (unit-tested)
+    Schema.kt       pure: the SQL                     (unit-tested)
+    Library.kt      pure: catalog + uploads merge     (unit-tested)
     CatalogStore.kt fetch + on-disk cache
+    ChannelStore.kt approved channels, SQLite on the device
+    ChannelFeeds.kt per-channel uploads + cache
     MainActivity.kt the grid
     PlayerActivity.kt the locked-down WebView
+    ParentActivity.kt YouTube in a WebView, behind ChallengeActivity
     Updater.kt      self-update against android-latest
   app/src/test/                  plain JVM tests, no emulator
 ```
@@ -71,8 +79,15 @@ publishes a build to every installed device.
   parsed host, never a substring of the URL. If you add a host, add the
   lookalike test cases for it too.
 - **Never widen the child-facing surface.** No search, no free text entry, no
-  link that leaves the app. Parent-only functionality goes behind the
-  long-press on the grid header, in `AboutActivity`.
+  link that leaves the app. The grid's status bar holds exactly one control,
+  the Parent button, and everything behind it is gated by `ChallengeActivity`.
+  `AboutActivity` stays on the long-press: it is parent-facing but harmless.
+- **`ParentActivity` must never be reachable without the gate.** It is real
+  YouTube. It is not exported, and the only thing that starts it is a
+  `RESULT_OK` from `ChallengeActivity`. Don't add another caller.
+- **Channel approval is weaker than video approval**, because future uploads
+  arrive unreviewed. Anything that widens it further — auto-approving related
+  channels, following playlists — is a bigger change than it looks.
 - **`version.json` is published last, in its own upload.** It is what tells an
   app a new build exists; landing it before the APK advertises a version that
   can't be downloaded.
