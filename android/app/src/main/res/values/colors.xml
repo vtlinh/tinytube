@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Warm and high-contrast: the tiles carry the colour, so the surfaces
+         behind them stay calm. -->
+    <color name="bg">#FFF7ED</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="accent">#E8590C</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="text">#1F2933</color>
+    <color name="text_muted">#5C6B7A</color>
+    <color name="black">#000000</color>
+</resources>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tag slot for the URL a tile's poster request is for, so a result that
+         arrives after the view was recycled can be recognised as stale and
+         dropped. Using setTag(Object) instead would collide with anything else
+         that tags these views. -->
+    <item name="thumb_url" type="id" />
+</resources>
