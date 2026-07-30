@@ -13,6 +13,11 @@
         <item quantity="other">%d approved videos</item>
     </plurals>
 
+    <string name="notif_off_explain">Notifications are off, so nothing will tell you when an update is ready. Updates still download, and you can install them from this screen.</string>
+    <string name="notif_blocked_explain">Notifications are turned off for this app in Android settings, so nothing will tell you when an update is ready. Updates still download, and you can install them from this screen.</string>
+    <string name="notif_turn_on">Turn on notifications</string>
+    <string name="notif_open_settings">Open notification settings</string>
+
     <string name="up_to_date">This is the latest version.</string>
     <string name="checking">Checking…</string>
     <string name="check_failed">Could not check for updates.</string>
