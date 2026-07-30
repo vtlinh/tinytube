@@ -10,10 +10,14 @@ on:
   # on main below). Without this a PR carries no signal at all, and the tests
   # that guard which video ids can reach the player would first run only after
   # the merge that shipped them.
+  #
+  # Deliberately NOT path-filtered, unlike the push trigger above. A filtered
+  # job that doesn't match simply never reports, and auto-merge.yml waits for
+  # this run — so a catalog-only or docs-only PR would sit unmerged forever
+  # with nothing to click. (The same silence blocks a required status check,
+  # if branch protection is ever turned on.) Building those PRs costs a few
+  # wasted minutes; not building them costs a PR that can never land.
   pull_request:
-    paths:
-      - "android/**"
-      - ".github/workflows/android.yml"
   workflow_dispatch:
 
 permissions:
