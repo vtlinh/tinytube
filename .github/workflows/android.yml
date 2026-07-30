@@ -6,19 +6,33 @@ on:
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
+  # Pull requests build and test but never publish (the release steps are gated
+  # on main below). Without this a PR carries no signal at all, and the tests
+  # that guard which video ids can reach the player would first run only after
+  # the merge that shipped them.
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
   workflow_dispatch:
 
 permissions:
   contents: write
 
-# Only one publish at a time. Two overlapping runs both clobber the fixed
+# main: only one publish at a time. Two overlapping runs both clobber the fixed
 # android-latest release, so a slower older run can land its APK on top of a
 # newer one's version.json — leaving the manifest advertising a build the APK
-# next to it isn't. Runs QUEUE rather than cancel: every merge here is meant to
-# ship, and cancelling one drops its build on the floor.
+# next to it isn't. Those runs QUEUE rather than cancel, because every merge is
+# meant to ship and cancelling one drops its build on the floor.
+#
+# Pull requests get a group of their own, per PR. Sharing main's group would put
+# branch builds in front of a publish that is waiting to ship, which is how
+# novels ended up dropping branch builds entirely. Superseding a PR run IS
+# right — nobody wants the results for the commit before the one they just
+# pushed — so those cancel.
 concurrency:
-  group: android-latest
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('android-pr-{0}', github.event.number) || 'android-latest' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
