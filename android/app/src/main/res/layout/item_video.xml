@@ -18,7 +18,7 @@
         android:id="@+id/thumb"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#E5E7EB"
+        android:background="@color/thumb_placeholder"
         android:contentDescription="@null"
         android:scaleType="centerCrop" />
 

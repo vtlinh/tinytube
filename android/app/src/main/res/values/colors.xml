@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Light palette. The app runs dark (see App.kt), so these are what you get
+     by switching the one line there back to following the system — they are
+     kept in step with values-night/colors.xml deliberately, not left to rot. -->
 <resources>
     <!-- Warm and high-contrast: the tiles carry the colour, so the surfaces
          behind them stay calm. -->
@@ -9,4 +12,8 @@
     <color name="text">#1F2933</color>
     <color name="text_muted">#5C6B7A</color>
     <color name="black">#000000</color>
+
+    <!-- Sits behind a poster until it loads. Has to read as "empty tile"
+         rather than as a broken image, in either palette. -->
+    <color name="thumb_placeholder">#E5E7EB</color>
 </resources>
