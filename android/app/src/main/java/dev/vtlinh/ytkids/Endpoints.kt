@@ -1,18 +1,17 @@
 package dev.vtlinh.ytkids
 
-/* Everything the app talks to, in one place.
+/* Everything the app talks to that isn't YouTube.
 
-   All of it is the Worker. The repository is private, so neither the release
-   assets nor the catalog can be fetched from GitHub by a device with no
-   credential — the Worker holds a read-only token and re-serves exactly the
-   handful of files that installed copies need. */
+   Just the Worker, and only for the app's own updates: the repository is
+   private, so a device with no credential gets a 404 from the release assets,
+   and the Worker holds a read-only token and re-serves them.
+
+   Curation does not come through here. Approved channels live on the device
+   and their uploads come straight from YouTube's per-channel feeds. */
 object Endpoints {
     /* Set by wrangler.toml's `name` plus the account's workers.dev subdomain.
        Changing the worker name means changing this, and old installs keep
        asking the old hostname until they update — which they can only do if
        the old hostname still answers. Rename with that in mind. */
     const val WORKER = "https://yt-kids.vtlinh87.workers.dev"
-
-    /* The approved-video list. */
-    const val CATALOG = "$WORKER/catalog.json"
 }

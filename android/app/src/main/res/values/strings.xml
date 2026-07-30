@@ -3,14 +3,44 @@
     <string name="app_name">Kids Videos</string>
 
     <!-- Written to be read out loud by a parent, not by the child: an empty
-         catalog is a setup step nobody has done yet, not a fault. -->
-    <string name="empty_catalog">No videos yet.\n\nA grown-up needs to add some.</string>
+         grid is a setup step nobody has done yet, not a fault. It names the
+         button that fixes it, because the parent reading it is standing in
+         front of that button. -->
+    <string name="empty_catalog">No videos yet.\n\nA grown-up can add channels with the Parent button.</string>
+
+    <!-- parent mode and its gate -->
+    <string name="parent_mode">Parent</string>
+    <string name="kids_mode">← Kids mode</string>
+    <string name="challenge_title">Grown-ups only</string>
+    <string name="challenge_question">If X + Y = %1$d and X − Y = %2$d,\nwhat are X and Y?</string>
+    <string name="challenge_hint_x">X</string>
+    <string name="challenge_hint_y">Y</string>
+    <string name="challenge_submit">Continue</string>
+    <string name="challenge_wrong">Not quite — here are two new numbers.</string>
+
+    <string name="parent_add_channel">Approve channel</string>
+    <string name="parent_approved_button">Approved</string>
+    <string name="parent_approved_title">Approved channels</string>
+    <string name="parent_none_approved">No channels approved yet. Find one and tap “Approve channel”.</string>
+    <string name="parent_remove">Remove</string>
+    <string name="parent_remove_confirm">Remove “%1$s”? Its videos will stop appearing.</string>
+    <string name="parent_browse_hint">Find a channel, then tap “Approve channel”.</string>
+    <string name="parent_on_channel">On a channel page (%1$s)</string>
+    <string name="parent_on_handle">On @%1$s</string>
+    <string name="parent_on_video">On a video — approving adds the channel that posted it.</string>
+    <string name="parent_resolving">Working out which channel this is…</string>
+    <string name="parent_no_channel_here">Couldn\'t identify a channel on this page.</string>
+    <string name="parent_approved">Approved “%1$s”</string>
+    <string name="parent_already_approved">“%1$s” was already approved</string>
 
     <string name="about_title">About</string>
-    <string name="version_fmt">Version %1$s (build %2$d)</string>
-    <plurals name="approved_videos">
-        <item quantity="one">%d approved video</item>
-        <item quantity="other">%d approved videos</item>
+    <!-- The versionCode is what the updater actually compares, but it means
+         nothing to a parent — the version name is the human-facing one. -->
+    <string name="version_fmt">Version %1$s</string>
+    <string name="author">By Linh Vu</string>
+    <plurals name="approved_channels">
+        <item quantity="one">%d approved channel</item>
+        <item quantity="other">%d approved channels</item>
     </plurals>
 
     <string name="notif_off_explain">Notifications are off, so nothing will tell you when an update is ready. Updates still download, and you can install them from this screen.</string>

@@ -3,8 +3,8 @@ package dev.vtlinh.ytkids
 /* The page the player WebView runs, and the rule for what that WebView is
    allowed to navigate to.
 
-   Both are pure string logic with no Android in them so CatalogTest's sibling,
-   PlayerTest, can hold them to their promises under a plain JVM. The navigation
+   Both are pure string logic with no Android in them so PlayerTest can hold
+   them to their promises under a plain JVM. The navigation
    allowlist in particular is the last thing standing between a tap on a related
    video and the open internet, and it is far too easy to get subtly wrong to
    leave untested. */
@@ -61,10 +61,10 @@ object Player {
 
        The id is re-validated here rather than trusted from the caller. It is
        interpolated into a JS string literal, so this is the point where a bad
-       value would become script; Catalog already refuses those, and this is the
+       value would become script; VideoId already refuses those, and this is the
        second lock on the same door. Returns null instead of building a page. */
     fun pageFor(videoId: String): String? {
-        if (!Catalog.isValidId(videoId)) return null
+        if (!VideoId.isValid(videoId)) return null
         return """
 <!doctype html>
 <html>

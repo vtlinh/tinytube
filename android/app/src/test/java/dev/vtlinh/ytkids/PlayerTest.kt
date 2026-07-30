@@ -79,7 +79,7 @@ class PlayerTest {
         assertTrue(page.contains("iframe_api"))
     }
 
-    /* Catalog already refuses these; the player refuses them again rather than
+    /* VideoId already refuses these; the player refuses them again rather than
        trusting its caller, because this is where a bad id becomes script. */
     @Test fun `refuses to build a page for an invalid id`() {
         for (id in listOf("", "short", "';alert(1)//", "aaaaaaaaaa/", "aaaaaaaaaaaa")) {

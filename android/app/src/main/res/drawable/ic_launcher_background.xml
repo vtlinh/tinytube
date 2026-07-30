@@ -4,7 +4,10 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Deeper than the app's accent so the white screen reads clearly on top;
+         the accent itself is tuned for text on a dark background, not as a
+         field colour. -->
     <path
         android:pathData="M0,0 L108,0 L108,108 L0,108 Z"
-        android:fillColor="#E8590C" />
+        android:fillColor="#2E86C8" />
 </vector>

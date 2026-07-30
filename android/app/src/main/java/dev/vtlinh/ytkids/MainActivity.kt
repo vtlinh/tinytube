@@ -1,5 +1,6 @@
 package dev.vtlinh.ytkids
 
+import android.app.Activity
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
@@ -8,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
@@ -35,9 +37,14 @@ class MainActivity : AppCompatActivity() {
         grid.layoutManager = GridLayoutManager(this, spanCount())
         grid.adapter = adapter
 
-        /* the way in to the parent-facing screen: a long press on the header,
-           which a child will not discover by tapping around, and which costs
-           nothing to reach deliberately */
+        /* Parent mode, behind the arithmetic gate. */
+        findViewById<View>(R.id.parent_mode).setOnClickListener {
+            parentGate.launch(Intent(this, ChallengeActivity::class.java))
+        }
+
+        /* About stays on the long press. It is parent-facing but harmless —
+           a version number and an update button — so it does not need the
+           gate, and keeping it off the bar keeps the bar to one choice. */
         findViewById<View>(R.id.header).setOnLongClickListener {
             startActivity(Intent(this, AboutActivity::class.java))
             true
@@ -45,15 +52,42 @@ class MainActivity : AppCompatActivity() {
 
         /* Show the last known list immediately — before any network — so the
            screen is never blank while a request is in flight. */
-        videos.addAll(CatalogStore.cached(this))
+        videos.addAll(Library.collate(ChannelFeeds.cached(this)))
         adapter.notifyDataSetChanged()
         render()
+
+        askForNotificationsIfNeeded()
+    }
+
+    private val parentGate =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                startActivity(Intent(this, ParentActivity::class.java))
+            }
+        }
+
+    private val askNotifications =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    /* Asked on first launch rather than waiting for someone to open About.
+       The notification is the only thing that says an update is ready, and a
+       parent who never visits About would never be asked at all.
+
+       The cost is that the dialog can appear to whoever opens the app first,
+       and two dismissals deny it permanently with no way back except Settings.
+       About still explains the state and links there when that happens. */
+    private fun askForNotificationsIfNeeded() {
+        if (NotificationPrompt.state(this) != Notifications.State.ASKABLE) return
+        NotificationPrompt.markAsked(this)
+        askNotifications.launch(NotificationPrompt.PERMISSION)
     }
 
     override fun onResume() {
         super.onResume()
+        /* Also runs on the way back from parent mode, which is what makes a
+           newly approved channel's videos appear without a restart. */
         lifecycleScope.launch {
-            val fresh = CatalogStore.refresh(this@MainActivity) ?: return@launch
+            val fresh = Library.collate(ChannelFeeds.refresh(this@MainActivity))
             if (fresh == videos) return@launch
             videos.clear()
             videos.addAll(fresh)
