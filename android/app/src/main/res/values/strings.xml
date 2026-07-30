@@ -37,6 +37,7 @@
     <!-- The versionCode is what the updater actually compares, but it means
          nothing to a parent — the version name is the human-facing one. -->
     <string name="version_fmt">Version %1$s</string>
+    <string name="author">By Linh Vu</string>
     <plurals name="approved_channels">
         <item quantity="one">%d approved channel</item>
         <item quantity="other">%d approved channels</item>
