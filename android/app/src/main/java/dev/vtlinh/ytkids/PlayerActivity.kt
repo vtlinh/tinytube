@@ -178,24 +178,21 @@ class PlayerActivity : AppCompatActivity() {
 
            This works whether or not the tint is showing. Requiring the tap
            first would make the corner a two-step control and, worse, make it
-           unreachable if the tap that summons it ever failed to register. */
+           unreachable if the tap that summons it ever failed to register.
+
+           The ring is shown either way, and deliberately without dragging the
+           tint up with it: a press gets feedback because it was a press, not
+           because a hint happened to be visible. */
         corner?.setOnTouchListener { v, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     reveal.postDelayed(holdRunnable, HOLD_MILLIS)
-                    /* Show it and hold it there — the ring lives inside the
-                       tinted view, so fading out mid-hold would take the
-                       countdown with it. */
-                    setTintShown(true)
-                    reveal.removeCallbacks(fadeTintRunnable)
                     startHoldProgress()
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     reveal.removeCallbacks(holdRunnable)
                     stopHoldProgress()
-                    /* Finger off: the tint goes back to fading on its own. */
-                    reveal.postDelayed(fadeTintRunnable, TINT_MILLIS)
                     v.performClick()
                     true
                 }
@@ -224,7 +221,10 @@ class PlayerActivity : AppCompatActivity() {
      *
      * Animated rather than stepped, and over exactly HOLD_MILLIS, so what it
      * shows is the truth about when the finger can come off. Two seconds of
-     * a screen doing nothing is indistinguishable from a dead spot. */
+     * a screen doing nothing is indistinguishable from a dead spot.
+     *
+     * Its visibility is its own, independent of the tint's alpha — see the
+     * layout for why it had to stop being a child of the tinted view. */
     private fun startHoldProgress() {
         val bar = holdProgress ?: return
         holdAnimator?.cancel()

@@ -49,42 +49,53 @@
              YouTube's real controls.
 
              The tint is normally invisible and appears on a tap anywhere on
-             the overlay, then fades again a few seconds later — so the picture
-             is unobstructed while a video is actually being watched, and a
-             parent who needs the corner can summon it by tapping the screen
-             like anyone would. The corner itself is live the whole time,
-             tinted or not: the tint is a label, not a switch.
+             the overlay, then fades again a second later — so the picture is
+             unobstructed while a video is actually being watched, and a parent
+             who needs the corner can summon it by tapping the screen like
+             anyone would. The corner is live the whole time, tinted or not:
+             the tint is a label, not a switch.
 
              136dp square, twice the area it started at, because the target is
              invisible most of the time and a thumb aiming at nothing needs the
              room.
 
-             Two seconds, not Android's half-second long-press — that is
-             short enough for a resting thumb to trigger. The ring inside fills
-             over those two seconds so the hold is visibly a hold rather than
-             a tap that did nothing.
-
              alpha starts at 0; PlayerActivity owns it from there. -->
-        <FrameLayout
+        <View
             android:id="@+id/reveal_corner"
             android:layout_width="136dp"
             android:layout_height="136dp"
             android:layout_gravity="top|end"
             android:alpha="0"
-            android:background="@drawable/bg_reveal_corner">
+            android:background="@drawable/bg_reveal_corner" />
 
-            <ProgressBar
-                android:id="@+id/reveal_progress"
-                style="?android:attr/progressBarStyleHorizontal"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_gravity="center"
-                android:progressDrawable="@drawable/reveal_progress"
-                android:max="1000"
-                android:progress="0"
-                android:visibility="invisible" />
+        <!-- The countdown, filling over the two seconds of the hold so that a
+             hold looks like a hold rather than a tap that did nothing.
 
-        </FrameLayout>
+             A sibling of the tint rather than a child of it, and that is the
+             point: alpha applies to a whole subtree, so a ring inside the tint
+             was invisible exactly when the tint was — which is most of the
+             time, and includes every hold that starts without a tap first.
+             Feedback for a press must not depend on whether a hint happens to
+             be showing.
+
+             Positioned by margin to land in the middle of the 136dp corner:
+             (136 - 44) / 2. Not clickable, so touches fall straight through to
+             the corner underneath it.
+
+             Two seconds, not Android's half-second long-press — that is short
+             enough for a resting thumb to trigger. -->
+        <ProgressBar
+            android:id="@+id/reveal_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="46dp"
+            android:layout_marginEnd="46dp"
+            android:progressDrawable="@drawable/reveal_progress"
+            android:max="1000"
+            android:progress="0"
+            android:visibility="invisible" />
 
     </FrameLayout>
 
