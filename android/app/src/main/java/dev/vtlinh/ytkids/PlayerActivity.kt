@@ -52,6 +52,11 @@ class PlayerActivity : AppCompatActivity() {
        lifted early can cancel it mid-sweep. */
     private var holdAnimator: ObjectAnimator? = null
 
+    /* The corner's tint, which is shown on demand rather than permanently.
+       The view underneath stays touchable throughout — only the tint fades. */
+    private var corner: View? = null
+    private val fadeTintRunnable = Runnable { setTintShown(false) }
+
     companion object {
         /* YT.PlayerState */
         private const val STATE_PLAYING = 1
@@ -61,6 +66,11 @@ class PlayerActivity : AppCompatActivity() {
         private const val HOLD_MILLIS = 3000L
         /* And the overlay returns on its own if nothing is touched. */
         private const val IDLE_MILLIS = 7000L
+        /* How long the corner's tint stays up after a tap. Short: it is a
+           reminder of where to press, not something to watch a video through. */
+        private const val TINT_MILLIS = 3000L
+        private const val TINT_IN_MILLIS = 120L
+        private const val TINT_OUT_MILLIS = 400L
 
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
@@ -133,7 +143,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     /* The overlay: a transparent native layer above the WebView that takes
-       every touch, plus this app's own play/pause drawn on it.
+       every touch.
 
        Native rather than part of the page, because a view in this hierarchy is
        unambiguously on top and nothing the page does can reach past it. That
@@ -150,26 +160,58 @@ class PlayerActivity : AppCompatActivity() {
         overlay = findViewById(R.id.overlay)
         pausedScrim = findViewById(R.id.paused_scrim)
         holdProgress = findViewById(R.id.reveal_progress)
+        corner = findViewById(R.id.reveal_corner)
+
+        /* A tap anywhere shows the corner. Nothing else: the overlay has no
+           controls to toggle, so this is the whole of what tapping does. */
+        overlay?.setOnClickListener { setTintShown(true) }
 
         /* Hold the corner for three seconds. Deliberately not Android's own
            long-press, which fires in half a second — that is short enough for
-           a child to hit by resting a thumb. */
-        findViewById<View>(R.id.reveal_corner).setOnTouchListener { v, event ->
+           a child to hit by resting a thumb.
+
+           This works whether or not the tint is showing. Requiring the tap
+           first would make the corner a two-step control and, worse, make it
+           unreachable if the tap that summons it ever failed to register. */
+        corner?.setOnTouchListener { v, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     reveal.postDelayed(holdRunnable, HOLD_MILLIS)
+                    /* Show it and hold it there — the ring lives inside the
+                       tinted view, so fading out mid-hold would take the
+                       countdown with it. */
+                    setTintShown(true)
+                    reveal.removeCallbacks(fadeTintRunnable)
                     startHoldProgress()
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     reveal.removeCallbacks(holdRunnable)
                     stopHoldProgress()
+                    /* Finger off: the tint goes back to fading on its own. */
+                    reveal.postDelayed(fadeTintRunnable, TINT_MILLIS)
                     v.performClick()
                     true
                 }
                 else -> true
             }
         }
+    }
+
+    /* The corner's tint, faded in on a tap and back out a few seconds later.
+     *
+     * Only the tint moves. The view keeps its size and keeps taking touches at
+     * alpha 0, so the hold is available at every moment — someone who knows
+     * where the corner is never has to tap first. */
+    private fun setTintShown(shown: Boolean) {
+        val c = corner ?: return
+        reveal.removeCallbacks(fadeTintRunnable)
+        c.animate().cancel()
+        c.animate()
+            .alpha(if (shown) 1f else 0f)
+            .setDuration(if (shown) TINT_IN_MILLIS else TINT_OUT_MILLIS)
+            .start()
+        if (shown) reveal.postDelayed(fadeTintRunnable, TINT_MILLIS)
     }
 
     /* The ring, counting out the hold.
@@ -211,6 +253,12 @@ class PlayerActivity : AppCompatActivity() {
         /* The ring has done its job either way: the hold completed, or the
            overlay came back and there is no hold in progress to show. */
         stopHoldProgress()
+        /* And the overlay returns tintless, whichever way it went. Fading a
+           hint back in over a video nobody has touched would undo the point
+           of hiding it. */
+        reveal.removeCallbacks(fadeTintRunnable)
+        corner?.animate()?.cancel()
+        corner?.alpha = 0f
         reveal.removeCallbacks(idleRunnable)
         if (value) {
             reveal.postDelayed(idleRunnable, IDLE_MILLIS)
@@ -334,6 +382,9 @@ class PlayerActivity : AppCompatActivity() {
            unprotected player. */
         reveal.removeCallbacks(holdRunnable)
         stopHoldProgress()
+        reveal.removeCallbacks(fadeTintRunnable)
+        corner?.animate()?.cancel()
+        corner?.alpha = 0f
         if (revealed) setRevealed(false)
     }
 
@@ -346,8 +397,10 @@ class PlayerActivity : AppCompatActivity() {
     override fun onDestroy() {
         reveal.removeCallbacks(holdRunnable)
         reveal.removeCallbacks(idleRunnable)
+        reveal.removeCallbacks(fadeTintRunnable)
         holdAnimator?.cancel()
         holdAnimator = null
+        corner?.animate()?.cancel()
         /* Detach before destroying: a WebView torn down while still attached
            leaks its window, and this activity is created and destroyed once per
            video watched. */

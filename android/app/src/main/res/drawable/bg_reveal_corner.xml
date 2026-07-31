@@ -3,10 +3,10 @@
 
      A quarter-disc: the view sits flush in the top-right, so rounding only the
      inner corner makes it read as a deliberate region rather than a stray
-     rectangle. Barely-there alpha — it has to be findable by a parent without
-     sitting visibly on top of the video. -->
+     rectangle. Faint even when shown — it is a hint about where to press, and
+     it appears over a video someone is trying to watch. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <solid android:color="@color/reveal_tint" />
-    <corners android:bottomLeftRadius="96dp" />
+    <corners android:bottomLeftRadius="136dp" />
 </shape>
