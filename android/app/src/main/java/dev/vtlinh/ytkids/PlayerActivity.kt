@@ -28,6 +28,7 @@ class PlayerActivity : AppCompatActivity() {
     private var web: WebView? = null
     private var overlay: android.widget.FrameLayout? = null
     private var playPause: ImageButton? = null
+    private var pausedScrim: View? = null
 
     /* Mirrors the player's state so the button shows what tapping it will do
        rather than what just happened. */
@@ -122,6 +123,7 @@ class PlayerActivity : AppCompatActivity() {
         val o = findViewById<android.widget.FrameLayout>(R.id.overlay)
         overlay = o
         playPause = findViewById(R.id.play_pause)
+        pausedScrim = findViewById(R.id.paused_scrim)
 
         o.setOnClickListener {
             if (playPause?.visibility == View.VISIBLE) setControlsVisible(false)
@@ -149,6 +151,10 @@ class PlayerActivity : AppCompatActivity() {
         playPause?.setImageResource(if (value) R.drawable.ic_pause else R.drawable.ic_play)
         playPause?.contentDescription =
             getString(if (value) R.string.player_pause else R.string.player_play)
+        /* Paused is when YouTube draws its title and "Watch on YouTube" chrome
+           over the frame, and no player parameter turns that off any more.
+           Cover it — but only while paused, and never during an ad. */
+        pausedScrim?.visibility = if (!value && !showingAd) View.VISIBLE else View.GONE
     }
 
     private fun setControlsVisible(visible: Boolean) {
@@ -169,6 +175,7 @@ class PlayerActivity : AppCompatActivity() {
         if (ad) {
             hideControls.removeCallbacks(hideControlsRunnable)
             playPause?.visibility = View.GONE
+            pausedScrim?.visibility = View.GONE
         } else {
             setControlsVisible(true)
         }

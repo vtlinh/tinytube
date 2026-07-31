@@ -24,6 +24,23 @@
         android:clickable="true"
         android:focusable="true">
 
+        <!-- Covers the player while it is PAUSED, and only then.
+
+             controls: 0 removes YouTube's control bar but not the title and
+             "Watch on YouTube" chrome, which appears whenever the player is
+             paused. showinfo=0 used to hide it and was removed in 2018;
+             modestbranding=1 became a no-op in 2023. There is no parameter
+             left that turns it off, so the paused frame is covered instead.
+
+             Deliberately only while paused: nothing is hidden during playback,
+             and the overlay stands down entirely during ads. -->
+        <View
+            android:id="@+id/paused_scrim"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#E6000000"
+            android:visibility="gone" />
+
         <ImageButton
             android:id="@+id/play_pause"
             android:layout_width="88dp"
