@@ -32,4 +32,11 @@
         <item name="android:windowLightStatusBar" tools:targetApi="23">false</item>
     </style>
 
+    <!-- The toolbar sits on @color/surface, so its title and up arrow need to
+         be tinted for that rather than inheriting the window's. -->
+    <style name="ThemeOverlay.YtKids.Toolbar" parent="ThemeOverlay.MaterialComponents.Toolbar.Surface">
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="colorControlNormal">@color/text</item>
+    </style>
+
 </resources>

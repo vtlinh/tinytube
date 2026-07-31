@@ -10,7 +10,7 @@ package dev.vtlinh.ytkids
 object Schema {
 
     const val DATABASE = "ytkids.db"
-    const val VERSION = 2
+    const val VERSION = 3
 
     const val CHANNELS = "channels"
 
@@ -40,12 +40,21 @@ object Schema {
         "ALTER TABLE channels ADD COLUMN handle TEXT",
     )
 
+    /* The channel's avatar, so the approved list shows faces rather than a
+       column of text. Nullable: it is cosmetic, it isn't always found, and
+       rows approved before this column existed have none until the list
+       backfills them. */
+    private val V3 = listOf(
+        "ALTER TABLE channels ADD COLUMN avatar_url TEXT",
+    )
+
     /* Every statement needed to move a database from `from` to `to`.
        from == 0 means a fresh install, which is just every version in order. */
     fun statementsFor(from: Int, to: Int): List<String> {
         val out = mutableListOf<String>()
         if (from < 1 && to >= 1) out += V1
         if (from < 2 && to >= 2) out += V2
+        if (from < 3 && to >= 3) out += V3
         /* Later versions append their own block here. Nothing is ever edited
            in place: a device that already ran V1 will never run it again, so
            changing it only affects fresh installs and silently splits the

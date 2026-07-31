@@ -61,6 +61,27 @@ class YouTubeUrlsTest {
         assertNull(YouTubeUrls.channelIdFromHtml(""))
     }
 
+    /* Cosmetic, but it is stored and then fetched and drawn — so an og:image
+       pointing anywhere other than YouTube's avatar hosts is refused rather
+       than kept. */
+    @Test fun `reads the channel avatar, and only from youtube image hosts`() {
+        val ok = """<meta property="og:image" content="https://yt3.googleusercontent.com/a/x=s900">"""
+        assertEquals("https://yt3.googleusercontent.com/a/x=s900", YouTubeUrls.channelAvatarFromHtml(ok))
+
+        val ggpht = """<meta property="og:image" content="https://yt3.ggpht.com/a/y">"""
+        assertEquals("https://yt3.ggpht.com/a/y", YouTubeUrls.channelAvatarFromHtml(ggpht))
+
+        for (bad in listOf(
+            """<meta property="og:image" content="https://attacker.example/a.png">""",
+            """<meta property="og:image" content="https://yt3.ggpht.com.attacker.example/a">""",
+            """<meta property="og:image" content="javascript:alert(1)">""",
+            """<meta property="og:title" content="not an image">""",
+            "",
+        )) {
+            assertNull("should have refused: $bad", YouTubeUrls.channelAvatarFromHtml(bad))
+        }
+    }
+
     @Test fun `builds a feed url only for a valid id`() {
         assertEquals(
             "https://www.youtube.com/feeds/videos.xml?channel_id=$ok",

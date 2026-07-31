@@ -33,21 +33,37 @@ class ChannelStore private constructor(context: Context) :
        `handle` is whatever @name the parent approved from, when there was one.
        It is remembered so the approve button can tell, with no network call,
        whether the /@handle page it is looking at is already on the list. */
-    fun add(channelId: String, title: String, handle: String?, nowMillis: Long): Boolean {
+    fun add(
+        channelId: String,
+        title: String,
+        handle: String?,
+        avatarUrl: String?,
+        nowMillis: Long,
+    ): Boolean {
         if (!YouTubeUrls.isValidChannelId(channelId)) return false
+        val previous = findByChannelId(channelId)
         val values = ContentValues().apply {
             put("channel_id", channelId)
             put("title", title.trim().ifEmpty { channelId })
             put("added_at", nowMillis)
-            /* Don't overwrite a known handle with nothing: approving the same
-               channel again from its /channel/UC… page would otherwise erase
-               the handle recorded the first time. */
-            val existing = handle ?: findByChannelId(channelId)?.handle
-            if (existing != null) put("handle", existing)
+            /* Don't overwrite what we already know with nothing: approving the
+               same channel again from its /channel/UC… page carries no handle,
+               and would otherwise erase the one recorded the first time. */
+            (handle ?: previous?.handle)?.let { put("handle", it) }
+            (avatarUrl ?: previous?.avatarUrl)?.let { put("avatar_url", it) }
         }
         return writableDatabase.insertWithOnConflict(
             Schema.CHANNELS, null, values, SQLiteDatabase.CONFLICT_REPLACE,
         ) != -1L
+    }
+
+    /* Fill in an avatar for a row approved before we recorded them. Only ever
+       adds: it never clears one, so a failed lookup leaves what was there. */
+    fun setAvatar(channelId: String, avatarUrl: String) {
+        val values = ContentValues().apply { put("avatar_url", avatarUrl) }
+        writableDatabase.update(
+            Schema.CHANNELS, values, "channel_id = ?", arrayOf(channelId),
+        )
     }
 
     fun remove(channelId: String) {
@@ -87,10 +103,11 @@ class ChannelStore private constructor(context: Context) :
         title = getString(1),
         addedAt = getLong(2),
         handle = if (isNull(3)) null else getString(3),
+        avatarUrl = if (isNull(4)) null else getString(4),
     )
 
     companion object {
-        private val COLUMNS = arrayOf("channel_id", "title", "added_at", "handle")
+        private val COLUMNS = arrayOf("channel_id", "title", "added_at", "handle", "avatar_url")
 
         @Volatile private var instance: ChannelStore? = null
 
@@ -110,6 +127,8 @@ data class Channel(
     val addedAt: Long,
     /* the @name it was approved from, when there was one */
     val handle: String? = null,
+    /* the channel's picture, when we managed to find it */
+    val avatarUrl: String? = null,
 ) {
     /* Where to send the parent's WebView to look at this channel again. The
        id is canonical and always works; a handle can be changed by its owner. */

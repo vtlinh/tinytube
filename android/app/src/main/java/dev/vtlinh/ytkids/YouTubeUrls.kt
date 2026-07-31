@@ -136,6 +136,23 @@ object YouTubeUrls {
         return null
     }
 
+    /* Hosts YouTube serves channel avatars from. Checked before an avatar URL
+       is stored, because whatever is stored is later fetched and drawn: an
+       og:image tag is page-controlled, and "some URL a page told us about" is
+       not something to keep in the database and load on sight. */
+    private val AVATAR_HOSTS = setOf("yt3.ggpht.com", "yt3.googleusercontent.com")
+
+    /* The channel's avatar, from its page. Cosmetic — a null just means the
+       list shows a blank circle — so anything unexpected returns null rather
+       than guessing. */
+    fun channelAvatarFromHtml(html: String): String? {
+        val url = Regex("<meta[^>]+property=\"og:image\"[^>]+content=\"([^\"]{1,500})\"")
+            .find(html)?.groupValues?.get(1)
+            ?: return null
+        val host = Player.hostOf(url) ?: return null
+        return if (host in AVATAR_HOSTS || host.endsWith(".googleusercontent.com")) url else null
+    }
+
     /* The channel's public feed of recent uploads. No API key and no quota —
        which is the whole reason channel approval is workable here at all. It
        returns roughly the latest 15 uploads and nothing older. */

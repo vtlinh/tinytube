@@ -66,10 +66,12 @@ class SchemaTest {
         val upgraded = onDb { c ->
             apply(c, 0, 1)
             apply(c, 1, 2)
+            apply(c, 2, 3)
             columnsOf(c)
         }
         assertEquals(fresh, upgraded)
         assertTrue("handle should exist in both, got $fresh", "handle" in fresh)
+        assertTrue("avatar_url should exist in both, got $fresh", "avatar_url" in fresh)
     }
 
     private fun columnsOf(c: java.sql.Connection): List<String> {
