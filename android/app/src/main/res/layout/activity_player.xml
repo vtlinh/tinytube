@@ -45,7 +45,7 @@
             android:background="#E6000000"
             android:visibility="gone" />
 
-        <!-- Hold this for three seconds to lift the overlay and reach
+        <!-- Hold this for two seconds to lift the overlay and reach
              YouTube's real controls.
 
              The tint is normally invisible and appears on a tap anywhere on
@@ -59,9 +59,9 @@
              invisible most of the time and a thumb aiming at nothing needs the
              room.
 
-             Three seconds, not Android's half-second long-press — that is
+             Two seconds, not Android's half-second long-press — that is
              short enough for a resting thumb to trigger. The ring inside fills
-             over those three seconds so the hold is visibly a hold rather than
+             over those two seconds so the hold is visibly a hold rather than
              a tap that did nothing.
 
              alpha starts at 0; PlayerActivity owns it from there. -->
@@ -87,5 +87,19 @@
         </FrameLayout>
 
     </FrameLayout>
+
+    <!-- Blocked always, including while the overlay is lifted — which is why
+         it is a sibling of the overlay rather than a child of it. Lifting the
+         overlay hands YouTube's controls to an adult; it does not hand over
+         the band underneath them.
+
+         See dimens for what the height is and why it has to be a constant. -->
+    <View
+        android:id="@+id/bottom_blocker"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/player_bottom_block"
+        android:layout_gravity="bottom"
+        android:clickable="true"
+        android:focusable="false" />
 
 </FrameLayout>

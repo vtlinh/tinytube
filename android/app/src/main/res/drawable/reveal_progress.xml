@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A circular determinate progress bar: the ring sweeps round as the hold is
-     counted out, so three seconds of nothing happening looks like three
+     counted out, so two seconds of nothing happening looks like two
      seconds of something happening.
 
      Android has no built-in circular *determinate* style — progressBarStyle is
