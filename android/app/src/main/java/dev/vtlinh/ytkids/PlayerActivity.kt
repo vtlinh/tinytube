@@ -43,6 +43,13 @@ class PlayerActivity : AppCompatActivity() {
     private val hideControlsRunnable = Runnable { setControlsVisible(false) }
 
     companion object {
+        /* Chosen to be a plain desktop Chrome, because what it selects is
+           YouTube's desktop embed player — the one that takes controls: 0 at
+           its word. See where it is applied. */
+        private const val DESKTOP_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
         /* YT.PlayerState */
         private const val STATE_PLAYING = 1
         private const val STATE_PAUSED = 2
@@ -92,6 +99,21 @@ class PlayerActivity : AppCompatActivity() {
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
+
+            /* Ask for the desktop embed rather than the mobile one.
+             *
+             * On a default Android WebView user agent, YouTube serves its
+             * MOBILE embed player, and that player honours controls: 0 only
+             * partly — it drops the bottom bar but keeps its own large centre
+             * play/pause and the title across the top. No parameter turns
+             * those off, which is why they survived controls: 0, survived the
+             * overlay (it blocks taps, and these appear without one), and
+             * survived the synthetic tap.
+             *
+             * The desktop embed honours controls: 0 properly: no bar, no
+             * centre button, and the title only on hover — which a touchscreen
+             * never produces. */
+            userAgentString = DESKTOP_UA
         }
 
         /* The long-press menu offers "Open in new tab" and "Copy link address"
