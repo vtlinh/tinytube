@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -41,6 +43,10 @@ class PlayerActivity : AppCompatActivity() {
 
     private val hideControls = Handler(Looper.getMainLooper())
     private val hideControlsRunnable = Runnable { setControlsVisible(false) }
+
+    /* Once per video: the tap that dismisses YouTube's opening chrome. */
+    private val chrome = Handler(Looper.getMainLooper())
+    private var dismissedChrome = false
 
     companion object {
         private const val EXTRA_ID = "id"
@@ -165,6 +171,48 @@ class PlayerActivity : AppCompatActivity() {
         if (visible && playing) hideControls.postDelayed(hideControlsRunnable, 2500)
     }
 
+    /* YouTube shows its title, Share, "More videos" and logo for the first
+       seconds of a video. It draws that itself — no tap is needed to summon
+       it, so blocking taps never removed it, and no player parameter turns it
+       off any more.
+     *
+     * A tap on the video toggles it, and the page never gets one because the
+     * overlay eats them all. So send it one directly: dispatchTouchEvent goes
+     * to the WebView underneath, past the overlay.
+     *
+     * With controls: 0 a tap may toggle play/pause rather than the chrome, and
+     * which one it does is not something to rely on — so the state is checked
+     * shortly after and playback resumed if the tap paused it. That makes the
+     * bad outcome a brief stutter rather than a video that silently stopped.
+     *
+     * The point is chosen off-centre and well inside the frame: the edges are
+     * where the chrome's own buttons live, and hitting one of those would be
+     * the one thing this must not do. */
+    private fun dismissYouTubeChrome() {
+        val w = web ?: return
+        if (w.width <= 0 || w.height <= 0) return
+        val x = w.width * 0.25f
+        val y = w.height * 0.5f
+        val t = SystemClock.uptimeMillis()
+        try {
+            MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0).let {
+                w.dispatchTouchEvent(it); it.recycle()
+            }
+            MotionEvent.obtain(t, t + 50, MotionEvent.ACTION_UP, x, y, 0).let {
+                w.dispatchTouchEvent(it); it.recycle()
+            }
+        } catch (e: Exception) {
+            return
+        }
+        /* Undo the side effect if there was one. */
+        chrome.postDelayed({
+            if (!playing && !showingAd) {
+                evalJs("window.ytk && window.ytk.play()")
+                setPlaying(true)
+            }
+        }, 400)
+    }
+
     /* While an ad is playing the overlay stops intercepting, so the ad stays
        interactive. Our own control goes with it — there is nothing useful for
        it to do to an ad, and leaving it would suggest otherwise. */
@@ -219,6 +267,10 @@ class PlayerActivity : AppCompatActivity() {
         fun onState(state: Int) = runOnUiThread {
             setPlaying(state == 1)
             if (state != 1) setControlsVisible(true)
+            if (state == 1 && !dismissedChrome) {
+                dismissedChrome = true
+                chrome.postDelayed(::dismissYouTubeChrome, 1200)
+            }
         }
 
         @JavascriptInterface
@@ -263,6 +315,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         hideControls.removeCallbacks(hideControlsRunnable)
+        chrome.removeCallbacksAndMessages(null)
         /* Detach before destroying: a WebView torn down while still attached
            leaks its window, and this activity is created and destroyed once per
            video watched. */
