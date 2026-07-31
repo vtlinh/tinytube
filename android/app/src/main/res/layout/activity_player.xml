@@ -26,11 +26,11 @@
 
         <!-- Covers the player while it is PAUSED, and only then.
 
-             controls: 0 removes YouTube's control bar but not the title and
-             "Watch on YouTube" chrome, which appears whenever the player is
-             paused. showinfo=0 used to hide it and was removed in 2018;
-             modestbranding=1 became a no-op in 2023. There is no parameter
-             left that turns it off, so the paused frame is covered instead.
+             A paused embed draws its title, the channel and "Watch on YouTube"
+             across the frame, and no player parameter turns that off —
+             showinfo=0 was removed in 2018 and modestbranding=1 became a no-op
+             in 2023. The overlay already makes it untappable; this makes the
+             paused frame ours rather than an advertisement for elsewhere.
 
              Deliberately only while paused: nothing is hidden during playback,
              and the overlay stands down entirely during ads. -->
@@ -40,6 +40,19 @@
             android:layout_height="match_parent"
             android:background="#E6000000"
             android:visibility="gone" />
+
+        <!-- Hold this for three seconds to lift the overlay and reach
+             YouTube's real controls.
+
+             Top-right, invisible, and three seconds on purpose. A child
+             exploring with their thumb finds things by tapping; a deliberate
+             sustained hold in one corner is not something that happens by
+             accident, and there is nothing drawn here to invite it. -->
+        <View
+            android:id="@+id/reveal_corner"
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_gravity="top|end" />
 
         <ImageButton
             android:id="@+id/play_pause"

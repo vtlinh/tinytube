@@ -34,6 +34,7 @@
     <string name="parent_approved">Approved “%1$s”</string>
     <string name="parent_removed">Removed “%1$s”</string>
 
+    <string name="player_revealed">YouTube controls unlocked</string>
     <string name="player_play">Play</string>
     <string name="player_pause">Pause</string>
 
