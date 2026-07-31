@@ -48,21 +48,29 @@
         <!-- Hold this for three seconds to lift the overlay and reach
              YouTube's real controls.
 
-             Tinted rather than invisible: with no controls of our own on the
-             overlay, this is the only way back to a pause button, and a parent
-             who cannot find it has a video that cannot be stopped. The tint is
-             faint enough not to sit on the picture and green so it reads as a
-             thing to press.
+             The tint is normally invisible and appears on a tap anywhere on
+             the overlay, then fades again a few seconds later — so the picture
+             is unobstructed while a video is actually being watched, and a
+             parent who needs the corner can summon it by tapping the screen
+             like anyone would. The corner itself is live the whole time,
+             tinted or not: the tint is a label, not a switch.
+
+             136dp square, twice the area it started at, because the target is
+             invisible most of the time and a thumb aiming at nothing needs the
+             room.
 
              Three seconds, not Android's half-second long-press — that is
              short enough for a resting thumb to trigger. The ring inside fills
              over those three seconds so the hold is visibly a hold rather than
-             a tap that did nothing. -->
+             a tap that did nothing.
+
+             alpha starts at 0; PlayerActivity owns it from there. -->
         <FrameLayout
             android:id="@+id/reveal_corner"
-            android:layout_width="96dp"
-            android:layout_height="96dp"
+            android:layout_width="136dp"
+            android:layout_height="136dp"
             android:layout_gravity="top|end"
+            android:alpha="0"
             android:background="@drawable/bg_reveal_corner">
 
             <ProgressBar
