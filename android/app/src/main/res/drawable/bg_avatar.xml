@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Doubles as the placeholder while an avatar loads and as the outline the
+     ImageView clips itself to. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/thumb_placeholder" />
+</shape>

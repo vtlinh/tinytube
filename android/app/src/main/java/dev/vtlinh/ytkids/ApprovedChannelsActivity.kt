@@ -7,11 +7,15 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.Toolbar
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.launch
 
 /* The approved channels, as a screen rather than a dialog.
 
@@ -33,7 +37,12 @@ class ApprovedChannelsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_approved_channels)
-        title = getString(R.string.parent_approved_title)
+
+        setSupportActionBar(findViewById<Toolbar>(R.id.toolbar))
+        supportActionBar?.apply {
+            title = getString(R.string.parent_approved_title)
+            setDisplayHomeAsUpEnabled(true)
+        }
 
         list = findViewById(R.id.list)
         empty = findViewById(R.id.empty)
@@ -41,6 +50,14 @@ class ApprovedChannelsActivity : AppCompatActivity() {
         list.adapter = adapter
 
         reload()
+        backfillAvatars()
+    }
+
+    /* The up arrow means "back to what I was doing", not "up to a parent
+       screen that doesn't exist" — finish rather than synthesise a stack. */
+    override fun onSupportNavigateUp(): Boolean {
+        finish()
+        return true
     }
 
     private fun reload() {
@@ -50,6 +67,25 @@ class ApprovedChannelsActivity : AppCompatActivity() {
         val none = channels.isEmpty()
         empty.visibility = if (none) View.VISIBLE else View.GONE
         list.visibility = if (none) View.GONE else View.VISIBLE
+    }
+
+    /* Channels approved before avatars were recorded have none, and would sit
+       as blank circles for good otherwise. Fetch them once, quietly, and
+       remember — a row that fails simply stays blank and is tried again next
+       time this screen opens. */
+    private fun backfillAvatars() {
+        val missing = channels.filter { it.avatarUrl == null }
+        if (missing.isEmpty()) return
+        lifecycleScope.launch {
+            var found = false
+            for (channel in missing) {
+                val resolved = ChannelResolver.resolve(channel.url) ?: continue
+                val avatar = resolved.avatarUrl ?: continue
+                ChannelStore.get(this@ApprovedChannelsActivity).setAvatar(channel.id, avatar)
+                found = true
+            }
+            if (found) reload()
+        }
     }
 
     private fun open(channel: Channel) {
@@ -95,10 +131,23 @@ class ApprovedChannelsActivity : AppCompatActivity() {
             holder.remove.contentDescription =
                 getString(R.string.parent_remove_named, channel.title)
             holder.remove.setOnClickListener { confirmRemove(channel) }
+
+            /* Clear first: a recycled row would otherwise wear the previous
+               channel's face until this one's arrives. */
+            val url = channel.avatarUrl
+            holder.avatar.setImageDrawable(null)
+            Thumbnails.tagFor(holder.avatar, url.orEmpty())
+            if (url == null) return
+            Thumbnails.cached(url)?.let { holder.avatar.setImageBitmap(it); return }
+            lifecycleScope.launch {
+                val bmp = Thumbnails.load(url) ?: return@launch
+                if (Thumbnails.stillWanted(holder.avatar, url)) holder.avatar.setImageBitmap(bmp)
+            }
         }
     }
 
     private class Holder(view: View) : RecyclerView.ViewHolder(view) {
+        val avatar: ImageView = view.findViewById(R.id.avatar)
         val title: TextView = view.findViewById(R.id.title)
         val subtitle: TextView = view.findViewById(R.id.subtitle)
         val remove: ImageButton = view.findViewById(R.id.remove)

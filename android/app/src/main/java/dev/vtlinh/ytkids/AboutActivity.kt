@@ -11,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /* The parent-facing screen, reached by long-pressing the grid header.
 
@@ -24,6 +26,10 @@ class AboutActivity : AppCompatActivity() {
     private lateinit var action: Button
     private lateinit var notifStatus: TextView
     private lateinit var notifAction: Button
+
+    /* One at a time, so an impatient double-tap on Install queues instead of
+       racing two PackageInstaller commits. */
+    private val installs: ExecutorService = Executors.newSingleThreadExecutor()
 
     private val askNotifications =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -154,6 +160,21 @@ class AboutActivity : AppCompatActivity() {
         }
     }
 
+    /* Tapping Install again retries, rather than being ignored.
+     *
+     * An install commits a PackageInstaller session and then hears nothing
+     * back until the system decides — which sometimes it never does: a
+     * confirmation dialog dismissed by a stray tap, a session that stalls.
+     * Disabling the button on the first tap left the screen reading
+     * "Installing…" for good, with the one control that could fix it greyed
+     * out. Whoever hit that would reasonably conclude updating is broken.
+     *
+     * Retrying is meaningful because installPending abandons any leftover
+     * sessions before committing a fresh one, so a second tap genuinely
+     * clears a stuck attempt instead of piling another on top.
+     *
+     * Taps run on a single-threaded executor, so an impatient double-tap
+     * queues rather than racing two commits against each other. */
     private fun install() {
         if (!Updater.canInstall(this)) {
             /* no grant, no commit — send them to the toggle rather than
@@ -161,20 +182,27 @@ class AboutActivity : AppCompatActivity() {
             Updater.openInstallPermission(this)
             return
         }
-        action.isEnabled = false
         status.text = getString(R.string.installing)
-        /* streaming the APK into the session blocks; keep it off the main
-           thread even though the commit itself returns quickly */
-        Thread {
+        /* Deliberately left enabled, and labelled so a second tap looks like
+           the offer it is. Streaming the APK into the session blocks, so it
+           stays off the main thread even though the commit returns quickly. */
+        action.text = getString(R.string.install_retry)
+        installs.execute {
             val why = Updater.installPending(applicationContext)
             runOnUiThread {
                 if (why != null) {
                     status.text = why
-                    action.isEnabled = true
+                    /* back to the plain offer: this attempt is over */
+                    action.text = getString(R.string.install_update)
                 }
                 /* on success the system kills us as the update applies, so
                    there is deliberately nothing to do in that branch */
             }
-        }.start()
+        }
+    }
+
+    override fun onDestroy() {
+        installs.shutdown()
+        super.onDestroy()
     }
 }

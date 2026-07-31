@@ -188,6 +188,7 @@ class ParentActivity : AppCompatActivity() {
                 /* remember which @name it was approved from, so the button can
                    recognise this page again without a network call */
                 handle = YouTubeUrls.handleFromUrl(url),
+                avatarUrl = resolved.avatarUrl,
                 nowMillis = System.currentTimeMillis(),
             )
             say(getString(R.string.parent_approved, resolved.title))

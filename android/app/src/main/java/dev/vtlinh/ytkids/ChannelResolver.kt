@@ -27,7 +27,7 @@ object ChannelResolver {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
-    data class Resolved(val id: String, val title: String)
+    data class Resolved(val id: String, val title: String, val avatarUrl: String?)
 
     /* Null when this page isn't a channel we can identify — a search results
        page, the home feed, a settings screen. The caller says so rather than
@@ -39,7 +39,7 @@ object ChannelResolver {
             /* The fetch failed, but if the id was in the URL all along we can
                still approve it — just without a nice name. */
             val direct = YouTubeUrls.channelIdFromUrl(url)
-            return@withContext direct?.let { Resolved(it, it) }
+            return@withContext direct?.let { Resolved(it, it, null) }
         }
 
         val id = YouTubeUrls.channelIdFromUrl(url)
@@ -47,7 +47,7 @@ object ChannelResolver {
             ?: return@withContext null
 
         val title = YouTubeUrls.channelTitleFromHtml(html) ?: id
-        Resolved(id, title)
+        Resolved(id, title, YouTubeUrls.channelAvatarFromHtml(html))
     }
 
     private fun fetch(url: String): String? = try {
