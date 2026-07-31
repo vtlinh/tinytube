@@ -4,9 +4,11 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import android.os.Message
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -71,8 +73,13 @@ class ParentActivity : AppCompatActivity() {
             mediaPlaybackRequiresUserGesture = true
             allowFileAccess = false
             allowContentAccess = false
-            javaScriptCanOpenWindowsAutomatically = false
-            setSupportMultipleWindows(false)
+            /* Sign-in's last step opens a window. With windows unsupported,
+               window.open() returns null and the flow simply stops there —
+               which is what "hangs at the last step" looks like from the
+               outside. onCreateWindow below loads that target in this same
+               WebView instead of opening anything. */
+            javaScriptCanOpenWindowsAutomatically = true
+            setSupportMultipleWindows(true)
             useWideViewPort = true
             loadWithOverviewMode = true
 
@@ -99,11 +106,11 @@ class ParentActivity : AppCompatActivity() {
         }
         w.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                !YouTubeUrls.isParentBrowsable(request.url?.toString().orEmpty())
+                refuseUnlessBrowsable(request.url?.toString().orEmpty())
 
             @Suppress("OverridingDeprecatedMember", "DEPRECATION")
             override fun shouldOverrideUrlLoading(view: WebView, url: String?): Boolean =
-                !YouTubeUrls.isParentBrowsable(url.orEmpty())
+                refuseUnlessBrowsable(url.orEmpty())
 
             override fun onPageFinished(view: WebView, url: String?) {
                 current.visibility = View.GONE
@@ -121,7 +128,74 @@ class ParentActivity : AppCompatActivity() {
                 updateApproveButton(url)
             }
         }
+        /* Without a WebChromeClient a WebView silently drops window.open and
+           window.close, which are exactly what the tail of a sign-in flow
+           uses. */
+        w.webChromeClient = object : WebChromeClient() {
+            override fun onCreateWindow(
+                view: WebView,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message,
+            ): Boolean {
+                val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                /* A throwaway WebView purely to learn where the popup wanted
+                   to go; the destination is then loaded in the real one, so
+                   the flow continues in place instead of in a window we do not
+                   show. */
+                val probe = WebView(this@ParentActivity)
+                probe.webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(
+                        v: WebView,
+                        request: WebResourceRequest,
+                    ): Boolean {
+                        openInPlace(request.url?.toString().orEmpty())
+                        probe.destroy()
+                        return true
+                    }
+
+                    @Suppress("OverridingDeprecatedMember", "DEPRECATION")
+                    override fun shouldOverrideUrlLoading(v: WebView, url: String?): Boolean {
+                        openInPlace(url.orEmpty())
+                        probe.destroy()
+                        return true
+                    }
+                }
+                transport.webView = probe
+                resultMsg.sendToTarget()
+                return true
+            }
+
+            /* The page asked to close itself, which the sign-in tail does once
+               it is finished. There is no window to close, so take it as "we
+               are done here" and go back to YouTube. */
+            override fun onCloseWindow(window: WebView) {
+                web?.loadUrl(YouTubeUrls.PARENT_START)
+            }
+        }
+
         w.loadUrl(YouTubeUrls.PARENT_START)
+    }
+
+    private fun openInPlace(url: String) {
+        if (url.isEmpty()) return
+        if (YouTubeUrls.isParentBrowsable(url)) web?.loadUrl(url) else sayRefused(url)
+    }
+
+    /* True means "I handled it", which for a refusal means nothing happens at
+       all — and nothing happening is indistinguishable from the app hanging.
+       Say which host was refused instead: it is the only way to tell a blocked
+       redirect apart from a slow one, and a sign-in chain that stops on an
+       unlisted Google host was exactly that failure. */
+    private fun refuseUnlessBrowsable(url: String): Boolean {
+        if (YouTubeUrls.isParentBrowsable(url)) return false
+        sayRefused(url)
+        return true
+    }
+
+    private fun sayRefused(url: String) {
+        val host = Player.hostOf(url) ?: url.take(40)
+        say(getString(R.string.parent_blocked_fmt, host))
     }
 
     /* The channel this page is, if it is one AND we already have it approved.
