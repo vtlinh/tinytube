@@ -79,9 +79,15 @@ object Player {
 <div id="p"></div>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-  // controls: 0 means YouTube draws no chrome at all — no progress bar, no
-  // title, no channel avatar. There is then nothing of YouTube's to tap, and
-  // the app draws its own play/pause on a native layer above this page.
+  // controls: 0 removes YouTube's control bar, and the app draws its own
+  // play/pause on a native layer above this page.
+  //
+  // It does NOT remove the title and "Watch on YouTube" chrome, which appears
+  // whenever the player is paused. The two parameters that used to deal with
+  // that are both gone: showinfo=0 was removed in 2018, and modestbranding=1
+  // became a no-op in August 2023 — it is not passed here because passing a
+  // parameter that does nothing only suggests it does something. The native
+  // overlay covers the paused frame instead; see PlayerActivity.
   //
   // The end screen is a separate thing and cannot be turned off by any player
   // parameter. Two things are done about it instead: playback is ended a
@@ -100,8 +106,7 @@ object Player {
         autoplay: 1,
         playsinline: 1,
         rel: 0,
-        modestbranding: 1,
-        controls: 0,        // no YouTube chrome; the app draws its own
+        controls: 0,        // removes the control bar — but see below
         disablekb: 1,       // no keyboard shortcuts into other videos
         fs: 0,              // already fullscreen; the button only confuses
         iv_load_policy: 3   // no annotation cards linking out
