@@ -19,7 +19,7 @@ android/                         the app
   app/src/main/java/dev/vtlinh/ytkids/
     VideoId.kt      pure: which video ids are valid   (unit-tested)
     Player.kt       pure: page + navigation allowlist (unit-tested)
-    Challenge.kt    pure: the parent-mode gate        (unit-tested)
+    Challenge.kt    pure: the arithmetic fallback gate (unit-tested)
     YouTubeUrls.kt  pure: channel ids, parent allowlist (unit-tested)
     Feed.kt         pure: channel upload feed         (unit-tested)
     Schema.kt       pure: the SQL                     (unit-tested)
@@ -29,6 +29,7 @@ android/                         the app
     MainActivity.kt the grid
     PlayerActivity.kt the locked-down WebView
     ParentActivity.kt YouTube in a WebView, behind ChallengeActivity
+    ApprovedChannelsActivity.kt the approved list, with open and remove
     Updater.kt      self-update against android-latest
   app/src/test/                  plain JVM tests, no emulator
 ```
@@ -89,6 +90,13 @@ publishes a build to every installed device.
 - **`ParentActivity` must never be reachable without the gate.** It is real
   YouTube. It is not exported, and the only thing that starts it is a
   `RESULT_OK` from `ChallengeActivity`. Don't add another caller.
+- **The gate is the device lock**, with the arithmetic only as a fallback for
+  a device that has none. Don't reverse that: the arithmetic is beatable by any
+  child who can do algebra, and it exists so parent mode still has a door on a
+  phone with no screen lock.
+- **Sign-in hosts are parent-mode only.** `Player`'s allowlist is separate and
+  narrower on purpose; a signed-in Google page must never be reachable from the
+  child's screen.
 - **Approving a channel approves its future uploads**, which no adult has seen.
   That is the deal the app now makes, and it is the weakest point in it.
   Anything that widens it further — auto-approving related channels, following

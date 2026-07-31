@@ -56,8 +56,10 @@
 
     </LinearLayout>
 
-    <!-- Says what approving right now would actually add. A watch page
-         approves the uploader, which is not obvious from the page. -->
+    <!-- Reports something that just happened — approved, removed, couldn't
+         work out the channel — and disappears on the next navigation. Hidden
+         otherwise: a browser doesn't need a caption, and a permanent hint
+         would just be a strip of text above every page. -->
     <TextView
         android:id="@+id/current"
         android:layout_width="match_parent"
@@ -69,7 +71,8 @@
         android:textSize="13sp"
         android:maxLines="2"
         android:ellipsize="end"
-        android:textColor="@color/text_muted" />
+        android:textColor="@color/text_muted"
+        android:visibility="gone" />
 
     <WebView
         android:id="@+id/web"

@@ -1,8 +1,11 @@
 package dev.vtlinh.ytkids
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -10,6 +13,7 @@ import android.widget.Button
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -30,6 +34,17 @@ class ParentActivity : AppCompatActivity() {
     private lateinit var current: TextView
     private lateinit var addButton: ImageButton
 
+    /* The approved-channels screen hands back a channel to go and look at. */
+    private val approvedList =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                result.data?.getStringExtra(ApprovedChannelsActivity.EXTRA_OPEN_URL)
+                    ?.let { web?.loadUrl(it) }
+            }
+            /* Channels may have been removed while it was open. */
+            updateApproveButton(web?.url)
+        }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,9 +54,11 @@ class ParentActivity : AppCompatActivity() {
         addButton = findViewById(R.id.add_channel)
 
         findViewById<Button>(R.id.kids_mode).setOnClickListener { finish() }
-        findViewById<ImageButton>(R.id.approved).setOnClickListener { showApproved() }
-        addButton.setOnClickListener { addCurrentChannel() }
-        /* Nothing is loaded yet, so there is certainly no channel to approve. */
+        findViewById<ImageButton>(R.id.approved).setOnClickListener {
+            approvedList.launch(Intent(this, ApprovedChannelsActivity::class.java))
+        }
+        /* Nothing is loaded yet, so there is certainly no channel to approve.
+           This also installs the button's click listener. */
         updateApproveButton(null)
 
         val w = findViewById<WebView>(R.id.web)
@@ -58,6 +75,27 @@ class ParentActivity : AppCompatActivity() {
             setSupportMultipleWindows(false)
             useWideViewPort = true
             loadWithOverviewMode = true
+
+            /* Google refuses to sign in when it can tell it is inside a
+               WebView, answering with "This browser or app may not be secure"
+               rather than a login form. It recognises one by the "; wv" token
+               Android puts in the default user agent, so drop just that token
+               and leave the rest of the string honest.
+
+               This is a workaround for a deliberate restriction, not a
+               supported path: Google may tighten it at any time, and if this
+               stops working the answer is a Custom Tab rather than a cleverer
+               disguise. */
+            userAgentString = userAgentString.replace("; wv", "")
+        }
+
+        /* Sign-in is cookies. Third-party ones especially: the flow bounces
+           between youtube.com and accounts.google.com and each has to be able
+           to set state for the other, and without this it loops back to the
+           login page forever. */
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(w, true)
         }
         w.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
@@ -68,6 +106,7 @@ class ParentActivity : AppCompatActivity() {
                 !YouTubeUrls.isParentBrowsable(url.orEmpty())
 
             override fun onPageFinished(view: WebView, url: String?) {
+                current.visibility = View.GONE
                 updateApproveButton(url)
             }
 
@@ -78,34 +117,51 @@ class ParentActivity : AppCompatActivity() {
                history updates, which is what actually keeps it honest. */
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
                 super.doUpdateVisitedHistory(view, url, isReload)
+                current.visibility = View.GONE
                 updateApproveButton(url)
             }
         }
         w.loadUrl(YouTubeUrls.PARENT_START)
     }
 
-    /* The approve button is live only on a channel page, and the line under
-       the bar says which channel that is — or, when it's off, what to do to
-       turn it on. A disabled button with no explanation is the kind of thing
-       people tap three times and then give up on. */
+    /* The channel this page is, if it is one AND we already have it approved.
+       Matched locally: a /channel/UC… URL carries the id, and a /@handle URL
+       is matched against the handle recorded when it was approved. Going to
+       the network to resolve a handle here would make the button flicker
+       between states on every navigation. */
+    private fun approvedChannelOnPage(url: String?): Channel? {
+        if (url == null || !YouTubeUrls.isChannelPage(url)) return null
+        val store = ChannelStore.get(this)
+        YouTubeUrls.channelIdFromUrl(url)?.let { return store.findByChannelId(it) }
+        YouTubeUrls.handleFromUrl(url)?.let { return store.findByHandle(it) }
+        return null
+    }
+
+    /* One button, two states. On a channel that isn't approved it is a plus
+       that approves; on one that is, it is a minus that removes. Off a channel
+       page it is disabled.
+
+       A single toggling control rather than two buttons, because the answer to
+       "is this channel in the list?" is the thing a parent standing on the
+       page actually wants to know, and a button that already tells them costs
+       nothing extra to read. */
     private fun updateApproveButton(url: String?) {
         val on = url != null && YouTubeUrls.isChannelPage(url)
+        val approved = approvedChannelOnPage(url)
+
         addButton.isEnabled = on
         /* alpha as well as isEnabled: an ImageButton's drawable does not dim on
            its own, so without this the button looks tappable when it isn't */
         addButton.alpha = if (on) 1f else 0.35f
-
-        current.text = when {
-            !on -> getString(R.string.parent_browse_hint)
-            else -> {
-                val handle = YouTubeUrls.handleFromUrl(url!!)
-                val id = YouTubeUrls.channelIdFromUrl(url)
-                when {
-                    handle != null -> getString(R.string.parent_on_handle, handle)
-                    id != null -> getString(R.string.parent_on_channel, id)
-                    else -> getString(R.string.parent_on_channel_generic)
-                }
-            }
+        addButton.setImageResource(
+            if (approved != null) R.drawable.ic_remove_channel else R.drawable.ic_approve_channel,
+        )
+        addButton.contentDescription = getString(
+            if (approved != null) R.string.parent_remove_channel else R.string.parent_add_channel,
+        )
+        addButton.setOnClickListener {
+            val current = approvedChannelOnPage(web?.url)
+            if (current != null) confirmRemove(current) else addCurrentChannel()
         }
     }
 
@@ -113,7 +169,7 @@ class ParentActivity : AppCompatActivity() {
         val url = web?.url.orEmpty()
         if (url.isEmpty()) return
         addButton.isEnabled = false
-        current.setText(R.string.parent_resolving)
+        say(getString(R.string.parent_resolving))
         lifecycleScope.launch {
             val resolved = ChannelResolver.resolve(url)
             /* Re-derive rather than just re-enabling: resolving hits the
@@ -122,56 +178,48 @@ class ParentActivity : AppCompatActivity() {
                a live button on a page it can't act on. */
             updateApproveButton(web?.url)
             if (resolved == null) {
-                current.setText(R.string.parent_no_channel_here)
+                say(getString(R.string.parent_no_channel_here))
                 return@launch
             }
             val store = ChannelStore.get(this@ParentActivity)
-            val already = store.contains(resolved.id)
-            store.add(resolved.id, resolved.title, System.currentTimeMillis())
-            current.text = getString(
-                if (already) R.string.parent_already_approved else R.string.parent_approved,
-                resolved.title,
+            store.add(
+                channelId = resolved.id,
+                title = resolved.title,
+                /* remember which @name it was approved from, so the button can
+                   recognise this page again without a network call */
+                handle = YouTubeUrls.handleFromUrl(url),
+                nowMillis = System.currentTimeMillis(),
             )
-            Toast.makeText(
-                this@ParentActivity,
-                getString(R.string.parent_approved, resolved.title),
-                Toast.LENGTH_SHORT,
-            ).show()
+            say(getString(R.string.parent_approved, resolved.title))
+            updateApproveButton(web?.url)
         }
     }
 
-    /* The approved list, with removal. Without this a mistaken approval could
-       only be undone by clearing the app's data. */
-    private fun showApproved() {
-        val store = ChannelStore.get(this)
-        val channels = store.all()
-        if (channels.isEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle(R.string.parent_approved_title)
-                .setMessage(R.string.parent_none_approved)
-                .setPositiveButton(android.R.string.ok, null)
-                .show()
-            return
-        }
-        val names = channels.map { it.title }.toTypedArray()
+    /* Confirmed, because removing is destructive and the button it hangs off
+       sits exactly where the approve button was a moment ago. */
+    private fun confirmRemove(channel: Channel) {
         AlertDialog.Builder(this)
-            .setTitle(R.string.parent_approved_title)
-            .setItems(names) { _, which ->
-                val channel = channels[which]
-                AlertDialog.Builder(this)
-                    .setTitle(channel.title)
-                    .setMessage(getString(R.string.parent_remove_confirm, channel.title))
-                    .setPositiveButton(R.string.parent_remove) { _, _ ->
-                        store.remove(channel.id)
-                        /* drop the cached feed too, or its videos keep showing
-                           in the grid after the channel is gone */
-                        ChannelFeeds.forget(this, channel.id)
-                    }
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show()
+            .setTitle(channel.title)
+            .setMessage(getString(R.string.parent_remove_confirm, channel.title))
+            .setPositiveButton(R.string.parent_remove) { _, _ ->
+                ChannelStore.get(this).remove(channel.id)
+                /* drop the cached feed too, or its videos keep showing in the
+                   grid after the channel is gone */
+                ChannelFeeds.forget(this, channel.id)
+                say(getString(R.string.parent_removed, channel.title))
+                updateApproveButton(web?.url)
             }
-            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(android.R.string.cancel, null)
             .show()
+    }
+
+    /* The status line is normally invisible — a browser does not need a
+       caption. It appears only to report something that just happened, and
+       goes again on the next navigation. */
+    private fun say(message: String) {
+        current.text = message
+        current.visibility = View.VISIBLE
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     /* Back walks the browsing history — an adult in a browser expects that —
@@ -185,6 +233,9 @@ class ParentActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         web?.onPause()
+        /* Cookies are written lazily and a signed-in session that is never
+           flushed is one the parent has to establish again next time. */
+        try { CookieManager.getInstance().flush() } catch (e: Exception) {}
     }
 
     override fun onResume() {

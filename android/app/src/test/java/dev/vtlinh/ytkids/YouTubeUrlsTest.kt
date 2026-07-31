@@ -144,4 +144,47 @@ class YouTubeUrlsTest {
             assertFalse("should have refused $u", YouTubeUrls.isParentBrowsable(u))
         }
     }
+
+    /* Signing in spans several Google hosts and fails as a blank page rather
+       than a visible refusal if any of them is blocked. */
+    @Test fun `parent browsing allows the google sign-in hosts`() {
+        for (u in listOf(
+            "https://accounts.google.com/ServiceLogin?service=youtube",
+            "https://accounts.youtube.com/accounts/CheckConnection",
+            "https://consent.youtube.com/m?continue=https://www.youtube.com/",
+            "https://apis.google.com/js/api.js",
+            "https://ssl.gstatic.com/accounts/x.png",
+            "https://lh3.googleusercontent.com/a/avatar",
+        )) {
+            assertTrue("should have allowed $u", YouTubeUrls.isParentBrowsable(u))
+        }
+    }
+
+    /* Widening to Google's sign-in hosts must not widen to anything that
+       merely ends in a similar-looking string. */
+    @Test fun `sign-in lookalikes are still refused`() {
+        for (u in listOf(
+            "https://accounts.google.com.attacker.example/",
+            "https://notgstatic.com/",
+            "https://evilgoogleusercontent.com/",
+            "https://accounts.google.com@attacker.example/",
+            "https://google.com/",             // not on the list; www.google.com is
+            "https://mail.google.com/",        // signing in does not need the inbox
+        )) {
+            assertFalse("should have refused $u", YouTubeUrls.isParentBrowsable(u))
+        }
+    }
+
+    /* The player is a separate, narrower allowlist and gains none of this —
+       a signed-in Google page must never be reachable from the child's
+       screen. */
+    @Test fun `the player still refuses the sign-in hosts`() {
+        for (u in listOf(
+            "https://accounts.google.com/ServiceLogin",
+            "https://myaccount.google.com/",
+            "https://ssl.gstatic.com/accounts/x.png",
+        )) {
+            assertFalse("player should refuse $u", Player.isPlayerUrl(u))
+        }
+    }
 }
