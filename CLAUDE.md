@@ -14,6 +14,7 @@ A child sees a grid of approved videos and can reach nothing else. See
 worker.js / wrangler.toml        Cloudflare Worker: release assets only
 .github/workflows/android.yml    build, sign, publish to the android-latest release
 .github/workflows/auto-merge.yml merge a PR once android passes
+.github/workflows/claude-autofix.yml  fix a PR whose android run went red
 android/                         the app
   signing.p12                    committed keystore; see README for why
   app/src/main/java/dev/vtlinh/ytkids/
@@ -64,6 +65,15 @@ publishes a build to every installed device.
 - `android.yml`'s `pull_request` trigger is deliberately not path-filtered. A
   filtered run that doesn't match never reports at all, and auto-merge waits
   for it — a docs-only PR would never merge.
+
+`claude-autofix.yml` does the reverse: a red `android` run on a PR gets read,
+fixed and pushed, so the retry goes green and auto-merge takes it. It has the
+same runs-from-main property. It stops after three attempts on a branch, treats
+an empty diff as a valid outcome, and — the part that matters — pushes but
+labels `no-auto-merge` if the fix touched `android/app/src/test/**` or
+`.github/workflows/**`. **Never loosen that guard.** Making CI green by
+weakening a test is worse than leaving it red, because red merely stops; green
+publishes to every installed device. `no-autofix` on a PR opts out entirely.
 
 ## Conventions
 
