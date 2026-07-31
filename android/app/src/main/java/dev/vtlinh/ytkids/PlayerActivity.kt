@@ -62,13 +62,14 @@ class PlayerActivity : AppCompatActivity() {
         private const val STATE_PLAYING = 1
         private const val STATE_PAUSED = 2
 
-        /* Long enough that no thumb rests its way through by accident. */
-        private const val HOLD_MILLIS = 3000L
+        /* Long enough that no thumb rests its way through by accident — four
+           times Android's own long-press, which is the thing being avoided. */
+        private const val HOLD_MILLIS = 2000L
         /* And the overlay returns on its own if nothing is touched. */
         private const val IDLE_MILLIS = 7000L
         /* How long the corner's tint stays up after a tap. Short: it is a
            reminder of where to press, not something to watch a video through. */
-        private const val TINT_MILLIS = 3000L
+        private const val TINT_MILLIS = 1000L
         private const val TINT_IN_MILLIS = 120L
         private const val TINT_OUT_MILLIS = 400L
 
@@ -155,7 +156,12 @@ class PlayerActivity : AppCompatActivity() {
        taken back out: it sat on the picture, it duplicated a button YouTube
        already draws underneath, and a video that plays start to finish needs
        no button at all. The one thing on the overlay is the corner, and all
-       that does is hand the player back to an adult. */
+       that does is hand the player back to an adult.
+
+       Nothing here touches R.id.bottom_blocker, which needs no wiring: it is
+       a sibling of the overlay, not a child, so it keeps blocking the strip
+       under YouTube's seek bar even while the overlay is lifted. See the
+       layout and dimens. */
     private fun setUpOverlay() {
         overlay = findViewById(R.id.overlay)
         pausedScrim = findViewById(R.id.paused_scrim)
@@ -166,7 +172,7 @@ class PlayerActivity : AppCompatActivity() {
            controls to toggle, so this is the whole of what tapping does. */
         overlay?.setOnClickListener { setTintShown(true) }
 
-        /* Hold the corner for three seconds. Deliberately not Android's own
+        /* Hold the corner for two seconds. Deliberately not Android's own
            long-press, which fires in half a second — that is short enough for
            a child to hit by resting a thumb.
 
@@ -217,7 +223,7 @@ class PlayerActivity : AppCompatActivity() {
     /* The ring, counting out the hold.
      *
      * Animated rather than stepped, and over exactly HOLD_MILLIS, so what it
-     * shows is the truth about when the finger can come off. Three seconds of
+     * shows is the truth about when the finger can come off. Two seconds of
      * a screen doing nothing is indistinguishable from a dead spot. */
     private fun startHoldProgress() {
         val bar = holdProgress ?: return

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- The strip along the bottom of the player that never accepts a touch,
+         not even while the overlay has been lifted.
+
+         What it covers is everything below YouTube's seek bar. The embed draws
+         its control row inset from the bottom edge, so under the bar there is
+         a band that belongs to nothing useful — and a scrub that drifts
+         downward off the bar lands there, on whatever the player puts under
+         it, or on the system's back/home gesture.
+
+         This is a constant because it has to be. The player is a cross-origin
+         iframe: its DOM cannot be read, so there is no way to ask where the
+         bar actually is. The number is the inset YouTube's mobile embed
+         currently uses, and it is the one value in the player that depends on
+         somebody else's layout — if a future embed moves its controls, this is
+         what needs revisiting. Erring small on purpose: too tall and it eats
+         the seek bar, which is the one control the reveal exists to reach. -->
+    <dimen name="player_bottom_block">16dp</dimen>
+
+</resources>
