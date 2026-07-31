@@ -10,4 +10,30 @@
         android:layout_height="match_parent"
         android:background="@color/black" />
 
+    <!-- Above the WebView, and native rather than part of the page: a view in
+         this hierarchy is unambiguously on top and cannot be reached by
+         anything the page does. It takes every touch, so YouTube's own surface
+         — including end-screen cards over the last stretch of a video — cannot
+         be tapped. Transparent, so nothing is hidden.
+
+         It stops intercepting while an ad is playing; see PlayerActivity. -->
+    <FrameLayout
+        android:id="@+id/overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="true"
+        android:focusable="true">
+
+        <ImageButton
+            android:id="@+id/play_pause"
+            android:layout_width="88dp"
+            android:layout_height="88dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_pause"
+            android:background="@drawable/bg_player_button"
+            android:scaleType="centerInside"
+            android:contentDescription="@string/player_pause" />
+
+    </FrameLayout>
+
 </FrameLayout>
