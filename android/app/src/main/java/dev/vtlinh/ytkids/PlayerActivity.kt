@@ -1,5 +1,6 @@
 package dev.vtlinh.ytkids
 
+import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
@@ -9,12 +10,13 @@ import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.ImageButton
+import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
@@ -29,20 +31,13 @@ class PlayerActivity : AppCompatActivity() {
 
     private var web: WebView? = null
     private var overlay: android.widget.FrameLayout? = null
-    private var playPause: ImageButton? = null
     private var pausedScrim: View? = null
-
-    /* Mirrors the player's state so the button shows what tapping it will do
-       rather than what just happened. */
-    private var playing = true
+    private var holdProgress: ProgressBar? = null
 
     /* Best-effort, from the page. While it is true the overlay stops taking
        touches — an ad has to remain interactive, and being wrong here costs a
        tappable player rather than a blocked one. */
     private var showingAd = false
-
-    private val hideControls = Handler(Looper.getMainLooper())
-    private val hideControlsRunnable = Runnable { setControlsVisible(false) }
 
     /* True while the overlay has been deliberately lifted, so YouTube's own
        controls are reachable. It always comes back on its own: either the
@@ -52,6 +47,10 @@ class PlayerActivity : AppCompatActivity() {
     private val reveal = Handler(Looper.getMainLooper())
     private val holdRunnable = Runnable { setRevealed(true) }
     private val idleRunnable = Runnable { setRevealed(false) }
+
+    /* Fills the corner's ring over the length of the hold. Kept so a finger
+       lifted early can cancel it mid-sweep. */
+    private var holdAnimator: ObjectAnimator? = null
 
     companion object {
         /* YT.PlayerState */
@@ -142,27 +141,15 @@ class PlayerActivity : AppCompatActivity() {
        appear over the last stretch of a video and cannot be turned off by any
        player parameter — impossible to tap even while visible.
 
-       Tapping anywhere else shows the control and starts the timer that hides
-       it again, so a video is a video rather than a video with a button
-       permanently sitting on it. */
+       It carries no controls of its own. Our own play/pause was tried and
+       taken back out: it sat on the picture, it duplicated a button YouTube
+       already draws underneath, and a video that plays start to finish needs
+       no button at all. The one thing on the overlay is the corner, and all
+       that does is hand the player back to an adult. */
     private fun setUpOverlay() {
-        val o = findViewById<android.widget.FrameLayout>(R.id.overlay)
-        overlay = o
-        playPause = findViewById(R.id.play_pause)
+        overlay = findViewById(R.id.overlay)
         pausedScrim = findViewById(R.id.paused_scrim)
-
-        o.setOnClickListener {
-            if (playPause?.visibility == View.VISIBLE) setControlsVisible(false)
-            else setControlsVisible(true)
-        }
-        playPause?.setOnClickListener {
-            if (playing) evalJs("window.ytk && window.ytk.pause()")
-            else evalJs("window.ytk && window.ytk.play()")
-            /* Optimistic, then corrected by onState — waiting for the round
-               trip makes the button feel broken on a slow frame. */
-            setPlaying(!playing)
-            setControlsVisible(true)
-        }
+        holdProgress = findViewById(R.id.reveal_progress)
 
         /* Hold the corner for three seconds. Deliberately not Android's own
            long-press, which fires in half a second — that is short enough for
@@ -171,19 +158,44 @@ class PlayerActivity : AppCompatActivity() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     reveal.postDelayed(holdRunnable, HOLD_MILLIS)
+                    startHoldProgress()
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     reveal.removeCallbacks(holdRunnable)
+                    stopHoldProgress()
                     v.performClick()
                     true
                 }
                 else -> true
             }
         }
+    }
 
-        /* Visible at the start so it is discoverable, then out of the way. */
-        setControlsVisible(true)
+    /* The ring, counting out the hold.
+     *
+     * Animated rather than stepped, and over exactly HOLD_MILLIS, so what it
+     * shows is the truth about when the finger can come off. Three seconds of
+     * a screen doing nothing is indistinguishable from a dead spot. */
+    private fun startHoldProgress() {
+        val bar = holdProgress ?: return
+        holdAnimator?.cancel()
+        bar.progress = 0
+        bar.visibility = View.VISIBLE
+        holdAnimator = ObjectAnimator.ofInt(bar, "progress", 0, bar.max).apply {
+            duration = HOLD_MILLIS
+            interpolator = LinearInterpolator()
+            start()
+        }
+    }
+
+    private fun stopHoldProgress() {
+        holdAnimator?.cancel()
+        holdAnimator = null
+        holdProgress?.let {
+            it.visibility = View.INVISIBLE
+            it.progress = 0
+        }
     }
 
     /* Lift the overlay, or put it back.
@@ -196,12 +208,15 @@ class PlayerActivity : AppCompatActivity() {
     private fun setRevealed(value: Boolean) {
         revealed = value
         overlay?.visibility = if (value) View.GONE else View.VISIBLE
+        /* The ring has done its job either way: the hold completed, or the
+           overlay came back and there is no hold in progress to show. */
+        stopHoldProgress()
         reveal.removeCallbacks(idleRunnable)
         if (value) {
             reveal.postDelayed(idleRunnable, IDLE_MILLIS)
-            /* Say so. Three seconds of holding an invisible corner deserves an
-               acknowledgement, and without one it is not obvious the layer went
-               anywhere — it was transparent to begin with. */
+            /* Say so. The overlay was transparent, so lifting it changes very
+               little on screen — without a word it is not obvious the three
+               seconds did anything. */
             Toast.makeText(this, R.string.player_revealed, Toast.LENGTH_SHORT).show()
         }
     }
@@ -218,65 +233,31 @@ class PlayerActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(event)
     }
 
-    private fun evalJs(js: String) {
-        try { web?.evaluateJavascript(js, null) } catch (e: Exception) {}
-    }
-
-    private fun setPlaying(value: Boolean) {
-        playing = value
-        playPause?.setImageResource(if (value) R.drawable.ic_pause else R.drawable.ic_play)
-        playPause?.contentDescription =
-            getString(if (value) R.string.player_pause else R.string.player_play)
-    }
-
-    /* The player's state, handled as the several things it actually is.
+    /* The player's state.
      *
-     * Treating it as "playing, or not" was wrong in both directions.
-     * BUFFERING is not playing, so every stall — including the one at the
-     * start of every video — dropped the paused scrim over the picture. And
-     * the auto-hide timer was only re-armed on a NON-playing state, so the
-     * transition into PLAYING left our button on screen with no timer running
-     * at all: it stayed up for the whole video. */
+     * Only two things depend on it, and BUFFERING must be neither of them:
+     * it is not playing, but it is not paused either, and treating every
+     * stall — including the one at the start of every video — as a pause
+     * dropped the scrim over the picture each time. */
     private fun applyState(state: Int) {
         /* Playback starting is the signal that whoever lifted the overlay is
            done with it — they pressed play, so the video is for watching
            again. */
         if (state == STATE_PLAYING && revealed) setRevealed(false)
-        setPlaying(state == STATE_PLAYING)
-        /* Only a real pause draws YouTube's chrome over the frame. Buffering
-           does not, and covering it just makes a stall look like a fault. */
+        /* Only a real pause draws YouTube's chrome over the frame. */
         pausedScrim?.visibility =
             if (state == STATE_PAUSED && !showingAd) View.VISIBLE else View.GONE
-        /* Unconditional, and after setPlaying: this is what arms the timer,
-           and it can only do that once it knows whether we are playing. */
-        setControlsVisible(true)
-    }
-
-    private fun setControlsVisible(visible: Boolean) {
-        playPause?.visibility = if (visible) View.VISIBLE else View.GONE
-        hideControls.removeCallbacks(hideControlsRunnable)
-        /* Nothing here touches the reveal timers. They belong to a different
-           thing — whether the overlay exists at all — and a state change
-           arriving mid-hold must not cancel the hold. */
-        /* Paused stays on screen: a control that vanishes while nothing is
-           happening leaves a child with a frozen picture and nothing to do. */
-        if (visible && playing) hideControls.postDelayed(hideControlsRunnable, 2500)
     }
 
     /* While an ad is playing the overlay stops intercepting, so the ad stays
-       interactive. Our own control goes with it — there is nothing useful for
-       it to do to an ad, and leaving it would suggest otherwise. */
+       interactive. The reveal corner keeps working through it: it is the way
+       out of a stuck player, and an ad is exactly when a parent might want
+       one. */
     private fun setShowingAd(ad: Boolean) {
         showingAd = ad
         overlay?.isClickable = !ad
         overlay?.isFocusable = !ad
-        if (ad) {
-            hideControls.removeCallbacks(hideControlsRunnable)
-            playPause?.visibility = View.GONE
-            pausedScrim?.visibility = View.GONE
-        } else {
-            setControlsVisible(true)
-        }
+        if (ad) pausedScrim?.visibility = View.GONE
     }
 
     /* Every navigation the page attempts, including the ones a tap on an
@@ -352,6 +333,7 @@ class PlayerActivity : AppCompatActivity() {
            the activity is stopped, so without this the child comes back to an
            unprotected player. */
         reveal.removeCallbacks(holdRunnable)
+        stopHoldProgress()
         if (revealed) setRevealed(false)
     }
 
@@ -362,9 +344,10 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        hideControls.removeCallbacks(hideControlsRunnable)
         reveal.removeCallbacks(holdRunnable)
         reveal.removeCallbacks(idleRunnable)
+        holdAnimator?.cancel()
+        holdAnimator = null
         /* Detach before destroying: a WebView torn down while still attached
            leaks its window, and this activity is created and destroyed once per
            video watched. */
