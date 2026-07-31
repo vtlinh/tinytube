@@ -194,6 +194,46 @@ Merging is automated: `auto-merge.yml` merges a pull request once `android`
 passes and nothing else on the commit has failed. Label a PR `no-auto-merge` to
 hold it open.
 
+## Pull requests that fix themselves
+
+`claude-autofix.yml` closes the other half of the loop. When `android` fails on
+a pull request it reads the failing job's log, runs Claude Code over the
+checkout, verifies the fix with the same Gradle commands CI uses, and pushes.
+The new run then goes green and `auto-merge.yml` merges it — so a red PR
+resolves itself without anyone watching for it.
+
+Two secrets:
+
+| secret | what happens without it |
+| --- | --- |
+| `ANTHROPIC_API_KEY` **or** `CLAUDE_CODE_OAUTH_TOKEN` | the workflow warns and skips; nothing is fixed |
+| `AUTOFIX_TOKEN` — a PAT with `repo` scope | the fix is still pushed, but see below |
+
+`AUTOFIX_TOKEN` matters more than it looks. A push made with the default
+`GITHUB_TOKEN` deliberately does not trigger further workflow runs, so a fix
+pushed with it lands on the branch and `android` never re-runs: the PR keeps
+the red check it already had, and `auto-merge.yml`, which waits for a passing
+run, waits forever. With a personal access token the push looks like a
+person's and CI starts again on its own. Without one, the fix is written and
+somebody has to push an empty commit to set it going.
+
+Three things stop it running away:
+
+- **Three attempts per branch.** Counted from the `Auto-fix CI` commits on the
+  branch itself, so it survives across runs. After that it comments and stops.
+- **An empty diff is a valid outcome.** Told to change nothing when the cause
+  isn't clear or the failure looks infrastructural, it says so on the PR rather
+  than inventing a change.
+- **A fix that touches `android/app/src/test/**` or `.github/workflows/**` is
+  pushed but labelled `no-auto-merge`.** Those are the two places where making
+  CI green can mean removing the thing that was checking — the unit tests are
+  what stand between a bad video id and the player, and this repository
+  publishes itself to a child's phone. Such a change is held for a person.
+  `no-autofix` on a PR opts out of the whole thing.
+
+That last one is the point to keep in view: everything else here is convenience,
+and that is the guard rail.
+
 ---
 
 By Linh Vu.
