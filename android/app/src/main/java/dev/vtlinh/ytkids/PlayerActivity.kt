@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -14,6 +15,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ImageButton
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 /* Plays one approved video, fullscreen, and finishes when it ends.
@@ -42,17 +44,24 @@ class PlayerActivity : AppCompatActivity() {
     private val hideControls = Handler(Looper.getMainLooper())
     private val hideControlsRunnable = Runnable { setControlsVisible(false) }
 
-    companion object {
-        /* Chosen to be a plain desktop Chrome, because what it selects is
-           YouTube's desktop embed player — the one that takes controls: 0 at
-           its word. See where it is applied. */
-        private const val DESKTOP_UA =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    /* True while the overlay has been deliberately lifted, so YouTube's own
+       controls are reachable. It always comes back on its own: either the
+       video starts playing again, or nothing is touched for a few seconds. */
+    private var revealed = false
 
+    private val reveal = Handler(Looper.getMainLooper())
+    private val holdRunnable = Runnable { setRevealed(true) }
+    private val idleRunnable = Runnable { setRevealed(false) }
+
+    companion object {
         /* YT.PlayerState */
         private const val STATE_PLAYING = 1
         private const val STATE_PAUSED = 2
+
+        /* Long enough that no thumb rests its way through by accident. */
+        private const val HOLD_MILLIS = 3000L
+        /* And the overlay returns on its own if nothing is touched. */
+        private const val IDLE_MILLIS = 7000L
 
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
@@ -100,20 +109,11 @@ class PlayerActivity : AppCompatActivity() {
             builtInZoomControls = false
             displayZoomControls = false
 
-            /* Ask for the desktop embed rather than the mobile one.
-             *
-             * On a default Android WebView user agent, YouTube serves its
-             * MOBILE embed player, and that player honours controls: 0 only
-             * partly — it drops the bottom bar but keeps its own large centre
-             * play/pause and the title across the top. No parameter turns
-             * those off, which is why they survived controls: 0, survived the
-             * overlay (it blocks taps, and these appear without one), and
-             * survived the synthetic tap.
-             *
-             * The desktop embed honours controls: 0 properly: no bar, no
-             * centre button, and the title only on hover — which a touchscreen
-             * never produces. */
-            userAgentString = DESKTOP_UA
+            /* The user agent is left alone. A desktop one was tried, on the
+               theory that the desktop embed would honour controls: 0 where the
+               mobile embed does not; it made no difference to the chrome and
+               only got a layout meant for a mouse. The chrome is dealt with by
+               the overlay instead — see setUpOverlay. */
         }
 
         /* The long-press menu offers "Open in new tab" and "Copy link address"
@@ -164,8 +164,58 @@ class PlayerActivity : AppCompatActivity() {
             setControlsVisible(true)
         }
 
+        /* Hold the corner for three seconds. Deliberately not Android's own
+           long-press, which fires in half a second — that is short enough for
+           a child to hit by resting a thumb. */
+        findViewById<View>(R.id.reveal_corner).setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    reveal.postDelayed(holdRunnable, HOLD_MILLIS)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    reveal.removeCallbacks(holdRunnable)
+                    v.performClick()
+                    true
+                }
+                else -> true
+            }
+        }
+
         /* Visible at the start so it is discoverable, then out of the way. */
         setControlsVisible(true)
+    }
+
+    /* Lift the overlay, or put it back.
+
+       While it is lifted the whole of YouTube's player is reachable, which is
+       the point — an adult wanting to scrub, or to see what a video actually
+       is, has no other way to do it. It is not a mode anyone can be left in by
+       accident: it ends when playback resumes, and it ends on its own after a
+       few seconds of nobody touching anything. */
+    private fun setRevealed(value: Boolean) {
+        revealed = value
+        overlay?.visibility = if (value) View.GONE else View.VISIBLE
+        reveal.removeCallbacks(idleRunnable)
+        if (value) {
+            reveal.postDelayed(idleRunnable, IDLE_MILLIS)
+            /* Say so. Three seconds of holding an invisible corner deserves an
+               acknowledgement, and without one it is not obvious the layer went
+               anywhere — it was transparent to begin with. */
+            Toast.makeText(this, R.string.player_revealed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /* Every touch in the activity passes through here before it reaches
+       whatever will handle it — which is the only way to notice the ones that
+       go to the WebView while the overlay is lifted. Without it the idle timer
+       would expire mid-scrub. */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (revealed && event.actionMasked == MotionEvent.ACTION_DOWN) {
+            reveal.removeCallbacks(idleRunnable)
+            reveal.postDelayed(idleRunnable, IDLE_MILLIS)
+        }
+        return super.dispatchTouchEvent(event)
     }
 
     private fun evalJs(js: String) {
@@ -188,6 +238,10 @@ class PlayerActivity : AppCompatActivity() {
      * transition into PLAYING left our button on screen with no timer running
      * at all: it stayed up for the whole video. */
     private fun applyState(state: Int) {
+        /* Playback starting is the signal that whoever lifted the overlay is
+           done with it — they pressed play, so the video is for watching
+           again. */
+        if (state == STATE_PLAYING && revealed) setRevealed(false)
         setPlaying(state == STATE_PLAYING)
         /* Only a real pause draws YouTube's chrome over the frame. Buffering
            does not, and covering it just makes a stall look like a fault. */
@@ -201,6 +255,9 @@ class PlayerActivity : AppCompatActivity() {
     private fun setControlsVisible(visible: Boolean) {
         playPause?.visibility = if (visible) View.VISIBLE else View.GONE
         hideControls.removeCallbacks(hideControlsRunnable)
+        /* Nothing here touches the reveal timers. They belong to a different
+           thing — whether the overlay exists at all — and a state change
+           arriving mid-hold must not cancel the hold. */
         /* Paused stays on screen: a control that vanishes while nothing is
            happening leaves a child with a frozen picture and nothing to do. */
         if (visible && playing) hideControls.postDelayed(hideControlsRunnable, 2500)
@@ -290,6 +347,12 @@ class PlayerActivity : AppCompatActivity() {
         /* Pause the media rather than letting it play on under the lock screen
            or behind another app. */
         web?.onPause()
+        /* And put the overlay back. Leaving the screen ends the reveal: the
+           adult who lifted it has gone, and the idle timer does not run while
+           the activity is stopped, so without this the child comes back to an
+           unprotected player. */
+        reveal.removeCallbacks(holdRunnable)
+        if (revealed) setRevealed(false)
     }
 
     override fun onResume() {
@@ -300,6 +363,8 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         hideControls.removeCallbacks(hideControlsRunnable)
+        reveal.removeCallbacks(holdRunnable)
+        reveal.removeCallbacks(idleRunnable)
         /* Detach before destroying: a WebView torn down while still attached
            leaks its window, and this activity is created and destroyed once per
            video watched. */

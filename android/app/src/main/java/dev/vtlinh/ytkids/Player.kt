@@ -79,15 +79,20 @@ object Player {
 <div id="p"></div>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-  // controls: 0 removes YouTube's control bar, and the app draws its own
-  // play/pause on a native layer above this page.
+  // YouTube's controls are left ON, deliberately.
   //
-  // It does NOT remove the title and "Watch on YouTube" chrome, which appears
-  // whenever the player is paused. The two parameters that used to deal with
-  // that are both gone: showinfo=0 was removed in 2018, and modestbranding=1
-  // became a no-op in August 2023 — it is not passed here because passing a
-  // parameter that does nothing only suggests it does something. The native
-  // overlay covers the paused frame instead; see PlayerActivity.
+  // controls: 0 was tried and does not do what it sounds like: it removes the
+  // control bar, but the mobile embed keeps its own large centre play/pause
+  // and title bar regardless, and those appear on their own rather than in
+  // response to a tap. Nothing left in the API turns them off — showinfo=0
+  // was removed in 2018 and modestbranding=1 became a no-op in 2023 — and
+  // asking for the desktop embed by user agent did not change it either.
+  //
+  // So the approach is the other way round: let YouTube draw whatever it
+  // wants, and put a native layer over the whole thing so none of it can be
+  // reached. What a child sees is our own control; what they cannot do is
+  // touch YouTube's. Holding the top-right corner lifts the layer for an
+  // adult who needs the real controls — see PlayerActivity.
   //
   // The end screen is a separate thing and cannot be turned off by any player
   // parameter. Two things are done about it instead: playback is ended a
@@ -106,7 +111,7 @@ object Player {
         autoplay: 1,
         playsinline: 1,
         rel: 0,
-        controls: 0,        // removes the control bar — but see below
+        controls: 1,        // left on deliberately; see the note above
         disablekb: 1,       // no keyboard shortcuts into other videos
         fs: 0,              // already fullscreen; the button only confuses
         iv_load_policy: 3   // no annotation cards linking out

@@ -79,15 +79,17 @@ class PlayerTest {
         assertTrue(page.contains("iframe_api"))
     }
 
-    /* The app draws its own play/pause on a native layer, so YouTube must draw
-       none of its own — with controls: 1 there is a whole row of its chrome
-       sitting under our overlay, reachable the moment the overlay stops
-       intercepting for an ad. */
-    @Test fun `the page asks for no youtube chrome`() {
+    /* The parameters that actually do something are pinned here.
+       controls is deliberately NOT among them: controls: 0 was tried and the
+       mobile embed keeps its centre play/pause and title anyway, so the chrome
+       is covered by a native overlay instead of asked away. The two below are
+       the ones that remove routes out of the video — annotation cards link to
+       other videos, and the keyboard shortcuts include next/previous. */
+    @Test fun `the page turns off the parameters that lead elsewhere`() {
         val page = Player.pageFor("aaaaaaaaaaa")!!
-        assertTrue("controls must be off", page.contains("controls: 0"))
         assertTrue("annotations must be off", page.contains("iv_load_policy: 3"))
         assertTrue("keyboard shortcuts must be off", page.contains("disablekb: 1"))
+        assertTrue("related videos must be off", page.contains("rel: 0"))
     }
 
     /* The overlay's buttons call these; a rename here breaks play/pause
