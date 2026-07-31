@@ -7,8 +7,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
-import android.view.MotionEvent
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -44,11 +42,11 @@ class PlayerActivity : AppCompatActivity() {
     private val hideControls = Handler(Looper.getMainLooper())
     private val hideControlsRunnable = Runnable { setControlsVisible(false) }
 
-    /* Once per video: the tap that dismisses YouTube's opening chrome. */
-    private val chrome = Handler(Looper.getMainLooper())
-    private var dismissedChrome = false
-
     companion object {
+        /* YT.PlayerState */
+        private const val STATE_PLAYING = 1
+        private const val STATE_PAUSED = 2
+
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
 
@@ -157,10 +155,25 @@ class PlayerActivity : AppCompatActivity() {
         playPause?.setImageResource(if (value) R.drawable.ic_pause else R.drawable.ic_play)
         playPause?.contentDescription =
             getString(if (value) R.string.player_pause else R.string.player_play)
-        /* Paused is when YouTube draws its title and "Watch on YouTube" chrome
-           over the frame, and no player parameter turns that off any more.
-           Cover it — but only while paused, and never during an ad. */
-        pausedScrim?.visibility = if (!value && !showingAd) View.VISIBLE else View.GONE
+    }
+
+    /* The player's state, handled as the several things it actually is.
+     *
+     * Treating it as "playing, or not" was wrong in both directions.
+     * BUFFERING is not playing, so every stall — including the one at the
+     * start of every video — dropped the paused scrim over the picture. And
+     * the auto-hide timer was only re-armed on a NON-playing state, so the
+     * transition into PLAYING left our button on screen with no timer running
+     * at all: it stayed up for the whole video. */
+    private fun applyState(state: Int) {
+        setPlaying(state == STATE_PLAYING)
+        /* Only a real pause draws YouTube's chrome over the frame. Buffering
+           does not, and covering it just makes a stall look like a fault. */
+        pausedScrim?.visibility =
+            if (state == STATE_PAUSED && !showingAd) View.VISIBLE else View.GONE
+        /* Unconditional, and after setPlaying: this is what arms the timer,
+           and it can only do that once it knows whether we are playing. */
+        setControlsVisible(true)
     }
 
     private fun setControlsVisible(visible: Boolean) {
@@ -169,48 +182,6 @@ class PlayerActivity : AppCompatActivity() {
         /* Paused stays on screen: a control that vanishes while nothing is
            happening leaves a child with a frozen picture and nothing to do. */
         if (visible && playing) hideControls.postDelayed(hideControlsRunnable, 2500)
-    }
-
-    /* YouTube shows its title, Share, "More videos" and logo for the first
-       seconds of a video. It draws that itself — no tap is needed to summon
-       it, so blocking taps never removed it, and no player parameter turns it
-       off any more.
-     *
-     * A tap on the video toggles it, and the page never gets one because the
-     * overlay eats them all. So send it one directly: dispatchTouchEvent goes
-     * to the WebView underneath, past the overlay.
-     *
-     * With controls: 0 a tap may toggle play/pause rather than the chrome, and
-     * which one it does is not something to rely on — so the state is checked
-     * shortly after and playback resumed if the tap paused it. That makes the
-     * bad outcome a brief stutter rather than a video that silently stopped.
-     *
-     * The point is chosen off-centre and well inside the frame: the edges are
-     * where the chrome's own buttons live, and hitting one of those would be
-     * the one thing this must not do. */
-    private fun dismissYouTubeChrome() {
-        val w = web ?: return
-        if (w.width <= 0 || w.height <= 0) return
-        val x = w.width * 0.25f
-        val y = w.height * 0.5f
-        val t = SystemClock.uptimeMillis()
-        try {
-            MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0).let {
-                w.dispatchTouchEvent(it); it.recycle()
-            }
-            MotionEvent.obtain(t, t + 50, MotionEvent.ACTION_UP, x, y, 0).let {
-                w.dispatchTouchEvent(it); it.recycle()
-            }
-        } catch (e: Exception) {
-            return
-        }
-        /* Undo the side effect if there was one. */
-        chrome.postDelayed({
-            if (!playing && !showingAd) {
-                evalJs("window.ytk && window.ytk.play()")
-                setPlaying(true)
-            }
-        }, 400)
     }
 
     /* While an ad is playing the overlay stops intercepting, so the ad stays
@@ -262,16 +233,8 @@ class PlayerActivity : AppCompatActivity() {
         @JavascriptInterface
         fun onError(code: String) = runOnUiThread { finish() }
 
-        /* YT.PlayerState: 1 is playing, everything else is not. */
         @JavascriptInterface
-        fun onState(state: Int) = runOnUiThread {
-            setPlaying(state == 1)
-            if (state != 1) setControlsVisible(true)
-            if (state == 1 && !dismissedChrome) {
-                dismissedChrome = true
-                chrome.postDelayed(::dismissYouTubeChrome, 1200)
-            }
-        }
+        fun onState(state: Int) = runOnUiThread { applyState(state) }
 
         @JavascriptInterface
         fun onAd(isAd: Boolean) = runOnUiThread { setShowingAd(isAd) }
@@ -315,7 +278,6 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         hideControls.removeCallbacks(hideControlsRunnable)
-        chrome.removeCallbacksAndMessages(null)
         /* Detach before destroying: a WebView torn down while still attached
            leaks its window, and this activity is created and destroyed once per
            video watched. */
