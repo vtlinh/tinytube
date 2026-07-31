@@ -75,8 +75,28 @@ class PlayerTest {
 
     @Test fun `builds a page for a valid id`() {
         val page = Player.pageFor("aaaaaaaaaaa")!!
-        assertTrue(page.contains("videoId: 'aaaaaaaaaaa'"))
+        assertTrue(page.contains("ourId = 'aaaaaaaaaaa'"))
         assertTrue(page.contains("iframe_api"))
+    }
+
+    /* The app draws its own play/pause on a native layer, so YouTube must draw
+       none of its own — with controls: 1 there is a whole row of its chrome
+       sitting under our overlay, reachable the moment the overlay stops
+       intercepting for an ad. */
+    @Test fun `the page asks for no youtube chrome`() {
+        val page = Player.pageFor("aaaaaaaaaaa")!!
+        assertTrue("controls must be off", page.contains("controls: 0"))
+        assertTrue("annotations must be off", page.contains("iv_load_policy: 3"))
+        assertTrue("keyboard shortcuts must be off", page.contains("disablekb: 1"))
+    }
+
+    /* The overlay's buttons call these; a rename here breaks play/pause
+       silently, because evaluateJavascript reports nothing back. */
+    @Test fun `the page exposes the controls the overlay calls`() {
+        val page = Player.pageFor("aaaaaaaaaaa")!!
+        assertTrue(page.contains("window.ytk"))
+        assertTrue(page.contains("play:"))
+        assertTrue(page.contains("pause:"))
     }
 
     /* VideoId already refuses these; the player refuses them again rather than

@@ -79,33 +79,80 @@ object Player {
 <div id="p"></div>
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-  // rel=0 no longer suppresses the end-screen grid outright; it limits it to
-  // the same channel. So the grid is not relied on being absent — ENDED closes
-  // the whole activity before it can be tapped, and any navigation it might
-  // still provoke is refused by the host allowlist on the Kotlin side.
+  // controls: 0 means YouTube draws no chrome at all — no progress bar, no
+  // title, no channel avatar. There is then nothing of YouTube's to tap, and
+  // the app draws its own play/pause on a native layer above this page.
+  //
+  // The end screen is a separate thing and cannot be turned off by any player
+  // parameter. Two things are done about it instead: playback is ended a
+  // fraction before the video runs out, so the terminal end screen never gets
+  // to render, and the native overlay swallows taps so the creator's
+  // end-screen cards — which can appear over the last ~20 seconds — cannot be
+  // clicked even while visible.
   var player;
+  var ourId = '$videoId';
+  var wasAd = null;
+
   function onYouTubeIframeAPIReady() {
     player = new YT.Player('p', {
-      videoId: '$videoId',
+      videoId: ourId,
       playerVars: {
         autoplay: 1,
         playsinline: 1,
         rel: 0,
         modestbranding: 1,
-        controls: 1,
+        controls: 0,        // no YouTube chrome; the app draws its own
         disablekb: 1,       // no keyboard shortcuts into other videos
         fs: 0,              // already fullscreen; the button only confuses
         iv_load_policy: 3   // no annotation cards linking out
       },
       events: {
-        onReady: function(e){ e.target.playVideo(); },
+        onReady: function(e){ e.target.playVideo(); tick(); },
         onStateChange: function(e){
+          Bridge.onState(e.data);
           if (e.data === YT.PlayerState.ENDED) Bridge.onEnded();
         },
         onError: function(e){ Bridge.onError(String(e.data)); }
       }
     });
   }
+
+  // Best-effort ad detection. The IFrame API has no ad event, and the player
+  // is cross-origin so its DOM cannot be inspected — but during an ad
+  // getVideoData() reports the ad's video id rather than ours. That is
+  // undocumented and may stop being true; the overlay treats "probably an ad"
+  // as a reason to stop intercepting touches, so being wrong costs a tappable
+  // player rather than a blocked one.
+  function looksLikeAd() {
+    try {
+      var d = player && player.getVideoData && player.getVideoData();
+      if (!d || !d.video_id) return false;
+      return d.video_id !== ourId;
+    } catch (e) { return false; }
+  }
+
+  function tick() {
+    try {
+      var ad = looksLikeAd();
+      if (ad !== wasAd) { wasAd = ad; Bridge.onAd(ad); }
+
+      // End a moment early so the end screen never renders. Not during an ad,
+      // and not for a live stream, where getDuration() is 0 and this would
+      // fire immediately.
+      if (!ad) {
+        var d = player.getDuration ? player.getDuration() : 0;
+        var t = player.getCurrentTime ? player.getCurrentTime() : 0;
+        if (d > 1 && d - t <= 0.4) { player.pauseVideo(); Bridge.onEnded(); return; }
+      }
+    } catch (e) {}
+    setTimeout(tick, 500);
+  }
+
+  // What the native overlay's buttons call.
+  window.ytk = {
+    play:  function(){ try { player.playVideo(); }  catch (e) {} },
+    pause: function(){ try { player.pauseVideo(); } catch (e) {} }
+  };
 </script>
 </body>
 </html>

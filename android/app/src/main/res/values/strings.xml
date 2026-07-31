@@ -33,6 +33,9 @@
     <string name="parent_approved">Approved “%1$s”</string>
     <string name="parent_removed">Removed “%1$s”</string>
 
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
+
     <string name="about_title">About</string>
     <!-- The versionCode is what the updater actually compares, but it means
          nothing to a parent — the version name is the human-facing one. -->

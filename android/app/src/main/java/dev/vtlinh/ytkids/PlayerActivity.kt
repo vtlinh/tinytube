@@ -5,12 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.ImageButton
 import androidx.appcompat.app.AppCompatActivity
 
 /* Plays one approved video, fullscreen, and finishes when it ends.
@@ -23,6 +26,20 @@ import androidx.appcompat.app.AppCompatActivity
 class PlayerActivity : AppCompatActivity() {
 
     private var web: WebView? = null
+    private var overlay: android.widget.FrameLayout? = null
+    private var playPause: ImageButton? = null
+
+    /* Mirrors the player's state so the button shows what tapping it will do
+       rather than what just happened. */
+    private var playing = true
+
+    /* Best-effort, from the page. While it is true the overlay stops taking
+       touches — an ad has to remain interactive, and being wrong here costs a
+       tappable player rather than a blocked one. */
+    private var showingAd = false
+
+    private val hideControls = Handler(Looper.getMainLooper())
+    private val hideControlsRunnable = Runnable { setControlsVisible(false) }
 
     companion object {
         private const val EXTRA_ID = "id"
@@ -85,6 +102,76 @@ class PlayerActivity : AppCompatActivity() {
            real origin rather than "null" and postMessage between the page and
            the player frame works. */
         w.loadDataWithBaseURL(Player.ORIGIN, page, "text/html", "utf-8", null)
+
+        setUpOverlay()
+    }
+
+    /* The overlay: a transparent native layer above the WebView that takes
+       every touch, plus this app's own play/pause drawn on it.
+
+       Native rather than part of the page, because a view in this hierarchy is
+       unambiguously on top and nothing the page does can reach past it. That
+       is what makes YouTube's surface — end-screen cards especially, which
+       appear over the last stretch of a video and cannot be turned off by any
+       player parameter — impossible to tap even while visible.
+
+       Tapping anywhere else shows the control and starts the timer that hides
+       it again, so a video is a video rather than a video with a button
+       permanently sitting on it. */
+    private fun setUpOverlay() {
+        val o = findViewById<android.widget.FrameLayout>(R.id.overlay)
+        overlay = o
+        playPause = findViewById(R.id.play_pause)
+
+        o.setOnClickListener {
+            if (playPause?.visibility == View.VISIBLE) setControlsVisible(false)
+            else setControlsVisible(true)
+        }
+        playPause?.setOnClickListener {
+            if (playing) evalJs("window.ytk && window.ytk.pause()")
+            else evalJs("window.ytk && window.ytk.play()")
+            /* Optimistic, then corrected by onState — waiting for the round
+               trip makes the button feel broken on a slow frame. */
+            setPlaying(!playing)
+            setControlsVisible(true)
+        }
+
+        /* Visible at the start so it is discoverable, then out of the way. */
+        setControlsVisible(true)
+    }
+
+    private fun evalJs(js: String) {
+        try { web?.evaluateJavascript(js, null) } catch (e: Exception) {}
+    }
+
+    private fun setPlaying(value: Boolean) {
+        playing = value
+        playPause?.setImageResource(if (value) R.drawable.ic_pause else R.drawable.ic_play)
+        playPause?.contentDescription =
+            getString(if (value) R.string.player_pause else R.string.player_play)
+    }
+
+    private fun setControlsVisible(visible: Boolean) {
+        playPause?.visibility = if (visible) View.VISIBLE else View.GONE
+        hideControls.removeCallbacks(hideControlsRunnable)
+        /* Paused stays on screen: a control that vanishes while nothing is
+           happening leaves a child with a frozen picture and nothing to do. */
+        if (visible && playing) hideControls.postDelayed(hideControlsRunnable, 2500)
+    }
+
+    /* While an ad is playing the overlay stops intercepting, so the ad stays
+       interactive. Our own control goes with it — there is nothing useful for
+       it to do to an ad, and leaving it would suggest otherwise. */
+    private fun setShowingAd(ad: Boolean) {
+        showingAd = ad
+        overlay?.isClickable = !ad
+        overlay?.isFocusable = !ad
+        if (ad) {
+            hideControls.removeCallbacks(hideControlsRunnable)
+            playPause?.visibility = View.GONE
+        } else {
+            setControlsVisible(true)
+        }
     }
 
     /* Every navigation the page attempts, including the ones a tap on an
@@ -119,6 +206,16 @@ class PlayerActivity : AppCompatActivity() {
            rectangle. */
         @JavascriptInterface
         fun onError(code: String) = runOnUiThread { finish() }
+
+        /* YT.PlayerState: 1 is playing, everything else is not. */
+        @JavascriptInterface
+        fun onState(state: Int) = runOnUiThread {
+            setPlaying(state == 1)
+            if (state != 1) setControlsVisible(true)
+        }
+
+        @JavascriptInterface
+        fun onAd(isAd: Boolean) = runOnUiThread { setShowingAd(isAd) }
     }
 
     private fun goFullscreen() {
@@ -158,6 +255,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        hideControls.removeCallbacks(hideControlsRunnable)
         /* Detach before destroying: a WebView torn down while still attached
            leaks its window, and this activity is created and destroyed once per
            video watched. */
