@@ -71,6 +71,10 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.webkit:webkit:1.11.0")
 
+    /* The parent-mode gate. Uses whatever the device already has — fingerprint,
+       face, PIN, pattern — rather than a secret this app invents and stores. */
+    implementation("androidx.biometric:biometric:1.1.0")
+
     /* Plain JVM unit tests over the pure decision logic — no emulator, no
        Robolectric. Catalog parsing and the id/URL allowlisting are the parts
        where a mistake puts a child in front of the wrong video, so they are

@@ -42,11 +42,15 @@ credential never leaves the Worker.
 
 ## Approving a channel
 
-Tap **Parent** in the grid's status bar. Answer the arithmetic. Browse to a
-channel in the WebView that opens and tap **Approve channel** — from the
-channel's own page, or from any of its videos, which approves the uploader.
+Tap **Parent** in the grid's status bar and unlock with your fingerprint, face
+or PIN. Browse to a channel and tap **+**. You can sign in to Google inside
+that browser, so your own subscriptions are a place to approve from.
 
-**Approved** in the same bar lists what you've approved and removes any of it.
+The **+** is live only on an actual channel page — a URL starting `/@handle`
+or `/channel/`. On a channel you have already approved it becomes **−**, which
+removes it. The list button opens every approved channel: tap one to go and
+look at it again, or **✕** to remove it.
+
 Removing a channel drops its videos from the grid immediately.
 
 > **Approving a channel approves its future uploads.** The grid shows whatever
@@ -57,11 +61,13 @@ Removing a channel drops its videos from the grid immediately.
 Uploads come from the channel's Atom feed, which carries roughly the latest 15
 and nothing older.
 
-The gate is a speed bump, not a lock. Given `X + Y` and `X − Y` it asks for
-both `X` and `Y`, and re-rolls the numbers on every wrong answer so guesses
-can't converge. It stops a young child tapping through; an older one who can do
-the algebra will get past it. If you need a real barrier it wants a PIN
-instead, which is a small change.
+The gate is the device's own lock, so this app never invents or stores a secret
+of its own — it only learns whether the platform's check passed. On a device
+with **no** lock set up there is nothing to authenticate against, and it falls
+back to arithmetic: given `X + Y` and `X − Y`, name both `X` and `Y`, with the
+numbers re-rolled on every wrong answer so guesses can't converge. That
+fallback is a speed bump rather than a lock — if it is what your device gets,
+setting a screen lock is the fix.
 
 ## How the safety boundary works
 
@@ -75,7 +81,7 @@ before anything is published:
 | `Player.kt` | where the player's WebView may navigate |
 | `YouTubeUrls.kt` | channel ids, and where parent mode may browse |
 | `Feed.kt` | what comes out of a channel's upload feed |
-| `Challenge.kt` | the parent-mode gate |
+| `Challenge.kt` | the arithmetic fallback gate |
 | `Schema.kt` | the SQL behind the approved list |
 | `Library.kt` | how feeds become the grid |
 

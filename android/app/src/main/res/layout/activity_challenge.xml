@@ -4,11 +4,18 @@
     android:layout_height="match_parent"
     android:background="@color/bg">
 
+    <!-- Hidden while the device's own lock is doing the work: the system
+         prompt is the whole interface in that case, and an arithmetic
+         question sitting behind it would look like a second challenge. It
+         appears only on a device with no lock set up, or if the prompt
+         itself fails. See ChallengeActivity. -->
     <LinearLayout
+        android:id="@+id/fallback"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="24dp"
+        android:visibility="gone">
 
         <TextView
             android:layout_width="wrap_content"

@@ -31,10 +31,34 @@ object YouTubeUrls {
         "fonts.gstatic.com",
     )
 
+    /* Signing in, so a parent can reach their own subscriptions rather than
+       hunting channels from a logged-out home page. Google's sign-in spans
+       several hosts and refuses to complete if any of them is blocked, which
+       looks from the inside like a blank page rather than a refusal.
+
+       These are reachable in PARENT mode only. The player's allowlist is a
+       separate, narrower list and does not gain any of them. */
+    private val SIGN_IN_HOSTS = setOf(
+        "accounts.google.com",
+        "accounts.youtube.com",
+        "myaccount.google.com",
+        "apis.google.com",
+        "consent.youtube.com",
+        "consent.google.com",
+        "ssl.gstatic.com",
+        "www.gstatic.com",
+        "www.google.com",
+    )
+
     fun isParentBrowsable(url: String): Boolean {
         val host = Player.hostOf(url) ?: return false
-        if (host in PARENT_HOSTS) return true
-        return host.endsWith(".googlevideo.com")
+        if (host in PARENT_HOSTS || host in SIGN_IN_HOSTS) return true
+        /* Matched on a leading dot so "evilgooglevideo.com" and
+           "notgstatic.com" do not qualify. googleusercontent carries account
+           avatars; gstatic carries sign-in's css and images. */
+        return host.endsWith(".googlevideo.com") ||
+            host.endsWith(".googleusercontent.com") ||
+            host.endsWith(".gstatic.com")
     }
 
     /* The channel id sitting in the URL itself, for /channel/UC… pages. */

@@ -63,6 +63,12 @@
             android:label="@string/parent_mode"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
 
+        <!-- Reached only from parent mode, which is itself behind the gate. -->
+        <activity
+            android:name=".ApprovedChannelsActivity"
+            android:exported="false"
+            android:label="@string/parent_approved_title" />
+
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false">

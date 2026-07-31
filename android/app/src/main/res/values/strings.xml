@@ -11,6 +11,8 @@
     <!-- parent mode and its gate -->
     <string name="parent_mode">Parent</string>
     <string name="kids_mode">← Kids mode</string>
+    <string name="gate_title">Grown-ups only</string>
+    <string name="gate_subtitle">Unlock to open parent mode</string>
     <string name="challenge_title">Grown-ups only</string>
     <string name="challenge_question">If X + Y = %1$d and X − Y = %2$d,\nwhat are X and Y?</string>
     <string name="challenge_hint_x">X</string>
@@ -18,20 +20,18 @@
     <string name="challenge_submit">Continue</string>
     <string name="challenge_wrong">Not quite — here are two new numbers.</string>
 
-    <string name="parent_add_channel">Approve channel</string>
-    <string name="parent_approved_button">Approved</string>
+    <string name="parent_add_channel">Approve this channel</string>
+    <string name="parent_remove_channel">Remove this channel</string>
+    <string name="parent_approved_button">Approved channels</string>
     <string name="parent_approved_title">Approved channels</string>
-    <string name="parent_none_approved">No channels approved yet. Find one and tap “Approve channel”.</string>
+    <string name="parent_none_approved">No channels approved yet.\n\nFind a channel and tap the + button.</string>
     <string name="parent_remove">Remove</string>
+    <string name="parent_remove_named">Remove “%1$s”</string>
     <string name="parent_remove_confirm">Remove “%1$s”? Its videos will stop appearing.</string>
-    <string name="parent_browse_hint">Open a channel to approve it.</string>
-    <string name="parent_on_channel">Approve this channel (%1$s)</string>
-    <string name="parent_on_handle">Approve @%1$s</string>
-    <string name="parent_on_channel_generic">Approve this channel</string>
     <string name="parent_resolving">Working out which channel this is…</string>
     <string name="parent_no_channel_here">Couldn\'t identify a channel on this page.</string>
     <string name="parent_approved">Approved “%1$s”</string>
-    <string name="parent_already_approved">“%1$s” was already approved</string>
+    <string name="parent_removed">Removed “%1$s”</string>
 
     <string name="about_title">About</string>
     <!-- The versionCode is what the updater actually compares, but it means

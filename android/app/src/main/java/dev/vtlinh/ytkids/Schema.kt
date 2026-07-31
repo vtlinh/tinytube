@@ -10,7 +10,7 @@ package dev.vtlinh.ytkids
 object Schema {
 
     const val DATABASE = "ytkids.db"
-    const val VERSION = 1
+    const val VERSION = 2
 
     const val CHANNELS = "channels"
 
@@ -26,11 +26,26 @@ object Schema {
         "CREATE INDEX IF NOT EXISTS idx_channels_added_at ON channels (added_at DESC)",
     )
 
+    /* The @handle a channel was approved from, when it was.
+
+       Needed to answer "is the channel on this page already approved?" without
+       a network round trip. A /@handle URL carries no channel id, and going to
+       the network to find out would mean the approve button flickered between
+       states on every navigation — so the handle is remembered at approval
+       time and matched directly.
+
+       Nullable: channels approved from a /channel/UC… page have no handle, and
+       so do rows written before this column existed. */
+    private val V2 = listOf(
+        "ALTER TABLE channels ADD COLUMN handle TEXT",
+    )
+
     /* Every statement needed to move a database from `from` to `to`.
        from == 0 means a fresh install, which is just every version in order. */
     fun statementsFor(from: Int, to: Int): List<String> {
         val out = mutableListOf<String>()
         if (from < 1 && to >= 1) out += V1
+        if (from < 2 && to >= 2) out += V2
         /* Later versions append their own block here. Nothing is ever edited
            in place: a device that already ran V1 will never run it again, so
            changing it only affects fresh installs and silently splits the
