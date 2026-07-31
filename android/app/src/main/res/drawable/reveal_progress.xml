@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A circular determinate progress bar: the ring sweeps round as the hold is
+     counted out, so three seconds of nothing happening looks like three
+     seconds of something happening.
+
+     Android has no built-in circular *determinate* style — progressBarStyle is
+     indeterminate-only, and an indeterminate spinner would say "wait" rather
+     than "you are two-thirds of the way there". So the drawable is built here:
+     a ring at android:id/progress, wrapped in a rotate so it starts at twelve
+     o'clock, with useLevel="true" to make the shape follow the bar's level.
+
+     Applied to a ProgressBar with the *horizontal* style, which is what makes
+     it determinate; the style contributes no visuals of its own once
+     progressDrawable is replaced. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The unfilled track. useLevel="false" so it draws the whole circle. -->
+    <item>
+        <shape
+            android:shape="ring"
+            android:innerRadiusRatio="2.6"
+            android:thicknessRatio="9"
+            android:useLevel="false">
+            <solid android:color="@color/reveal_track" />
+        </shape>
+    </item>
+
+    <item android:id="@android:id/progress">
+        <!-- from == to: this rotate never animates. It exists to move the
+             ring's zero point from three o'clock to twelve. -->
+        <rotate
+            android:fromDegrees="270"
+            android:toDegrees="270"
+            android:pivotX="50%"
+            android:pivotY="50%">
+            <shape
+                android:shape="ring"
+                android:innerRadiusRatio="2.6"
+                android:thicknessRatio="9"
+                android:useLevel="true">
+                <solid android:color="@color/reveal_green" />
+            </shape>
+        </rotate>
+    </item>
+
+</layer-list>

@@ -90,9 +90,9 @@ object Player {
   //
   // So the approach is the other way round: let YouTube draw whatever it
   // wants, and put a native layer over the whole thing so none of it can be
-  // reached. What a child sees is our own control; what they cannot do is
-  // touch YouTube's. Holding the top-right corner lifts the layer for an
-  // adult who needs the real controls — see PlayerActivity.
+  // reached. The layer carries nothing of its own — the video plays start to
+  // finish and that is the whole interaction. Holding the top-right corner
+  // lifts it for an adult who needs the real controls; see PlayerActivity.
   //
   // The end screen is a separate thing and cannot be turned off by any player
   // parameter. Two things are done about it instead: playback is ended a
@@ -157,12 +157,6 @@ object Player {
     } catch (e) {}
     setTimeout(tick, 500);
   }
-
-  // What the native overlay's buttons call.
-  window.ytk = {
-    play:  function(){ try { player.playVideo(); }  catch (e) {} },
-    pause: function(){ try { player.pauseVideo(); } catch (e) {} }
-  };
 </script>
 </body>
 </html>

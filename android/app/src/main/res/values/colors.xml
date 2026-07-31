@@ -15,6 +15,14 @@
     <color name="text_muted">#52657A</color>
     <color name="black">#000000</color>
 
+    <!-- The player's hold-to-reveal corner. Green rather than the app's blue
+         accent: it is the one thing drawn over a video, and it should not look
+         like part of the app's furniture. Not duplicated in values-night —
+         the player is always on black, in either palette. -->
+    <color name="reveal_green">#00E06A</color>
+    <color name="reveal_track">#3300E06A</color>
+    <color name="reveal_tint">#2200E06A</color>
+
     <!-- Sits behind a poster until it loads. Has to read as "empty tile"
          rather than as a broken image, in either palette. -->
     <color name="thumb_placeholder">#DCE6EF</color>

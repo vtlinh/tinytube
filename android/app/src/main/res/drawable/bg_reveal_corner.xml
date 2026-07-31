@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The hold-to-reveal corner.
+
+     A quarter-disc: the view sits flush in the top-right, so rounding only the
+     inner corner makes it read as a deliberate region rather than a stray
+     rectangle. Barely-there alpha — it has to be findable by a parent without
+     sitting visibly on top of the video. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/reveal_tint" />
+    <corners android:bottomLeftRadius="96dp" />
+</shape>

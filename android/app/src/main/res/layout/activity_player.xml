@@ -16,6 +16,10 @@
          — including end-screen cards over the last stretch of a video — cannot
          be tapped. Transparent, so nothing is hidden.
 
+         It carries no controls of its own. A video plays; that is the whole
+         interaction. The only thing on it is the corner below, and the only
+         thing that does is hand the player back to an adult.
+
          It stops intercepting while an ad is playing; see PlayerActivity. -->
     <FrameLayout
         android:id="@+id/overlay"
@@ -44,25 +48,35 @@
         <!-- Hold this for three seconds to lift the overlay and reach
              YouTube's real controls.
 
-             Top-right, invisible, and three seconds on purpose. A child
-             exploring with their thumb finds things by tapping; a deliberate
-             sustained hold in one corner is not something that happens by
-             accident, and there is nothing drawn here to invite it. -->
-        <View
+             Tinted rather than invisible: with no controls of our own on the
+             overlay, this is the only way back to a pause button, and a parent
+             who cannot find it has a video that cannot be stopped. The tint is
+             faint enough not to sit on the picture and green so it reads as a
+             thing to press.
+
+             Three seconds, not Android's half-second long-press — that is
+             short enough for a resting thumb to trigger. The ring inside fills
+             over those three seconds so the hold is visibly a hold rather than
+             a tap that did nothing. -->
+        <FrameLayout
             android:id="@+id/reveal_corner"
             android:layout_width="96dp"
             android:layout_height="96dp"
-            android:layout_gravity="top|end" />
+            android:layout_gravity="top|end"
+            android:background="@drawable/bg_reveal_corner">
 
-        <ImageButton
-            android:id="@+id/play_pause"
-            android:layout_width="88dp"
-            android:layout_height="88dp"
-            android:layout_gravity="center"
-            android:src="@drawable/ic_pause"
-            android:background="@drawable/bg_player_button"
-            android:scaleType="centerInside"
-            android:contentDescription="@string/player_pause" />
+            <ProgressBar
+                android:id="@+id/reveal_progress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_gravity="center"
+                android:progressDrawable="@drawable/reveal_progress"
+                android:max="1000"
+                android:progress="0"
+                android:visibility="invisible" />
+
+        </FrameLayout>
 
     </FrameLayout>
 

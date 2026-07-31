@@ -92,13 +92,17 @@ class PlayerTest {
         assertTrue("related videos must be off", page.contains("rel: 0"))
     }
 
-    /* The overlay's buttons call these; a rename here breaks play/pause
-       silently, because evaluateJavascript reports nothing back. */
-    @Test fun `the page exposes the controls the overlay calls`() {
+    /* The page's only job beyond playing is telling the Activity what is
+       happening, and it is a one-way street: the overlay has no controls of
+       its own, so nothing here is ever called back into. A rename on either
+       side of these fails silently — addJavascriptInterface reports nothing
+       when a method is missing. */
+    @Test fun `the page reports state back to the activity`() {
         val page = Player.pageFor("aaaaaaaaaaa")!!
-        assertTrue(page.contains("window.ytk"))
-        assertTrue(page.contains("play:"))
-        assertTrue(page.contains("pause:"))
+        assertTrue(page.contains("Bridge.onState"))
+        assertTrue(page.contains("Bridge.onEnded"))
+        assertTrue(page.contains("Bridge.onError"))
+        assertTrue(page.contains("Bridge.onAd"))
     }
 
     /* VideoId already refuses these; the player refuses them again rather than
