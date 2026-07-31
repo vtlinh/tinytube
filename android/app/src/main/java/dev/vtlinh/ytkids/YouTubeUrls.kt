@@ -32,31 +32,32 @@ object YouTubeUrls {
     )
 
     /* Signing in, so a parent can reach their own subscriptions rather than
-       hunting channels from a logged-out home page. Google's sign-in spans
-       several hosts and refuses to complete if any of them is blocked, which
-       looks from the inside like a blank page rather than a refusal.
+       hunting channels from a logged-out home page.
 
-       These are reachable in PARENT mode only. The player's allowlist is a
-       separate, narrower list and does not gain any of them. */
+       Google's sign-in is a chain of redirects across several of its hosts,
+       and it does not degrade when one is blocked — it simply stops on
+       whichever step was refused, which from the inside looks like the app
+       hanging rather than like a refusal. Enumerating the chain host by host
+       turned out to be a losing game, so the whole of google.com is allowed
+       here instead.
+
+       This is PARENT mode only, behind the gate, and it is a browser for an
+       adult. The player's allowlist is a separate, much narrower list and
+       gains none of it — a signed-in Google page must never be reachable from
+       the child's screen, and there is a test to that effect. */
     private val SIGN_IN_HOSTS = setOf(
-        "accounts.google.com",
+        "google.com",
         "accounts.youtube.com",
-        "myaccount.google.com",
-        "apis.google.com",
         "consent.youtube.com",
-        "consent.google.com",
-        "ssl.gstatic.com",
-        "www.gstatic.com",
-        "www.google.com",
     )
 
     fun isParentBrowsable(url: String): Boolean {
         val host = Player.hostOf(url) ?: return false
         if (host in PARENT_HOSTS || host in SIGN_IN_HOSTS) return true
-        /* Matched on a leading dot so "evilgooglevideo.com" and
-           "notgstatic.com" do not qualify. googleusercontent carries account
-           avatars; gstatic carries sign-in's css and images. */
-        return host.endsWith(".googlevideo.com") ||
+        /* All matched on a leading dot, so "evilgooglevideo.com",
+           "notgstatic.com" and "google.com.attacker.example" do not qualify. */
+        return host.endsWith(".google.com") ||
+            host.endsWith(".googlevideo.com") ||
             host.endsWith(".googleusercontent.com") ||
             host.endsWith(".gstatic.com")
     }

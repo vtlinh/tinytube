@@ -168,6 +168,10 @@ class YouTubeUrlsTest {
 
     /* Signing in spans several Google hosts and fails as a blank page rather
        than a visible refusal if any of them is blocked. */
+    /* Sign-in is a redirect chain across several Google hosts and it stops
+       dead on the first one that is blocked — which looks like a hang, not a
+       refusal. Enumerating them host by host kept missing one, so google.com
+       is allowed wholesale in parent mode. */
     @Test fun `parent browsing allows the google sign-in hosts`() {
         for (u in listOf(
             "https://accounts.google.com/ServiceLogin?service=youtube",
@@ -176,6 +180,10 @@ class YouTubeUrlsTest {
             "https://apis.google.com/js/api.js",
             "https://ssl.gstatic.com/accounts/x.png",
             "https://lh3.googleusercontent.com/a/avatar",
+            "https://google.com/",
+            "https://ogs.google.com/widget/app/so",
+            "https://play.google.com/log",
+            "https://signaler-pa.clients6.google.com/punctual/v1/chooseServer",
         )) {
             assertTrue("should have allowed $u", YouTubeUrls.isParentBrowsable(u))
         }
@@ -189,8 +197,6 @@ class YouTubeUrlsTest {
             "https://notgstatic.com/",
             "https://evilgoogleusercontent.com/",
             "https://accounts.google.com@attacker.example/",
-            "https://google.com/",             // not on the list; www.google.com is
-            "https://mail.google.com/",        // signing in does not need the inbox
         )) {
             assertFalse("should have refused $u", YouTubeUrls.isParentBrowsable(u))
         }

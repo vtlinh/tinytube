@@ -28,6 +28,7 @@
     <string name="parent_remove">Remove</string>
     <string name="parent_remove_named">Remove “%1$s”</string>
     <string name="parent_remove_confirm">Remove “%1$s”? Its videos will stop appearing.</string>
+    <string name="parent_blocked_fmt">Blocked: %1$s is outside parent mode.</string>
     <string name="parent_resolving">Working out which channel this is…</string>
     <string name="parent_no_channel_here">Couldn\'t identify a channel on this page.</string>
     <string name="parent_approved">Approved “%1$s”</string>
