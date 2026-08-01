@@ -104,7 +104,8 @@
          overlay hands YouTube's controls to an adult; it does not hand over
          the band underneath them.
 
-         See dimens for what the height is and why it has to be a constant. -->
+         The height here is only where it starts: PlayerActivity measures the
+         real inset off the first paused frame and replaces it. See dimens. -->
     <View
         android:id="@+id/bottom_blocker"
         android:layout_width="match_parent"
