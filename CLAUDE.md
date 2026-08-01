@@ -145,6 +145,14 @@ stops, green publishes.
   exclusions and the FileProvider that made it safe. Don't widen the source
   rectangle, don't keep the bitmap, and don't add a caller that wants the
   image rather than the number.
+- **Bump `BlockHeightStore.VERSION` whenever the measurement changes.** A
+  preference file survives an app update, so a wrong answer written by one
+  build is read back by every build after it — which is how fixing the latching
+  bug below changed nothing on any device that had already run the broken one.
+  The version key is what makes a fix actually reach a device, and it has been
+  bumped once per wrong answer that got persisted: 2 when a failed capture
+  could be stored as a result, 3 when the measurement moved from the red to the
+  track and every number it had ever written became wrong.
 - **A failed measurement must never be stored.** `Chrome.blockHeightOrNull`
   returns null for "could not tell" precisely so the Activity can distinguish
   it from a real answer that happens to equal the fallback. Latching on the

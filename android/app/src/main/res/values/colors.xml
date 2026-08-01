@@ -26,11 +26,6 @@
     <color name="reveal_track">#3300E06A</color>
     <color name="reveal_tint">#2200E06A</color>
 
-    <!-- The player's blocked bottom strip, shown only while the overlay is
-         lifted. Faint, and warm rather than the reveal's green: green there
-         means "you may press this", and this is the opposite. -->
-    <color name="blocked_strip">#33FF5252</color>
-
     <!-- Sits behind a poster until it loads. Has to read as "empty tile"
          rather than as a broken image, in either palette. -->
     <color name="thumb_placeholder">#DCE6EF</color>
