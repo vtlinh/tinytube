@@ -65,6 +65,17 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.vtlinh.tinytube
+        # The launcher icon. Without this the build succeeds and the app ships
+        # with the grey placeholder — there is no warning and nothing fails, so
+        # the only way to notice is to look at a home screen. iOS has no
+        # fallback the way Android's manifest icon does.
+        #
+        # Assets.xcassets is under TinyTube/, which is already a source path, so
+        # the catalogue itself needs no separate entry. The PNG in it is
+        # GENERATED — see ios/AppIcon/make-icon.py, which draws it from the same
+        # geometry as Android's ic_launcher vectors so the two platforms wear
+        # the same face.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "1.0"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1,2"

@@ -81,6 +81,8 @@ worker.js / wrangler.toml        Cloudflare Worker: release assets, /uploads
 worker.test.mjs                  its parsers, under `node --test` (CI runs it)
 ios/project.yml                  the Xcode project, as a readable file; the
                                  .xcodeproj is GENERATED, never committed
+ios/AppIcon/make-icon.py         draws the icon PNG from Android's vector
+                                 geometry; re-run it if that icon changes
 ios/TinyTube/                    the app target
   Database.swift        the one SQLite file; RUNS Schema's ladder
   ChannelStore.swift    approved channels — the parental control
@@ -102,6 +104,7 @@ ios/TinyTube/                    the app target
   BlockHeightStore.swift  it, remembered — per display, per version
   ScreenMeasurement.swift ReplayKit capture; feeds Chrome, once ever
   BrowserUserAgent.swift  the Safari suffix that lets Google sign in
+  Assets.xcassets/      the launcher icon; the PNG is generated, see above
 ios/TinyTubeTests/               app-target tests; run on a simulator in CI
 ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
                                  Kotlin files; `swift test` runs it on Linux
