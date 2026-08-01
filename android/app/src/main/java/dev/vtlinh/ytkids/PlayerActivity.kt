@@ -65,15 +65,6 @@ class PlayerActivity : AppCompatActivity() {
     private val measureRunnable = Runnable { measureBlockHeight() }
     private var measureAttempts = 0
 
-    /* What the last capture did, reported on the reveal toast and on About.
-     *
-     * Every outcome, successes included. Reporting only failures cost two
-     * rounds: a silent success and a confident wrong answer look identical
-     * from outside, so "no message" turned out to mean "the app is certain,
-     * and it is wrong". A readout that appears only when something is known to
-     * be broken cannot report the case where nothing knows it is broken. */
-    private var measureNote: String = "not tried"
-
     /* The measured blocker height in pixels, or -1 for "not measured yet".
      *
      * Per video, not per process. It was a companion field, measured once and
@@ -353,18 +344,7 @@ class PlayerActivity : AppCompatActivity() {
              * certain, and it is wrong". A readout that only appears when
              * something is known to be broken cannot report the case where
              * nothing knows it is broken. */
-            /* All three now describe THIS video, which they did not while the
-               height was process-wide: "strip 35 px · 0 tries · not tried"
-               was literally true and completely misleading. */
-            Toast.makeText(
-                this,
-                getString(
-                    R.string.player_revealed_detail,
-                    bottomBlocker?.height ?: 0,
-                    getString(R.string.player_measured_now, measureAttempts, measureNote),
-                ),
-                Toast.LENGTH_LONG,
-            ).show()
+            Toast.makeText(this, R.string.player_revealed, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -468,12 +448,7 @@ class PlayerActivity : AppCompatActivity() {
            measure in the one state that is ideal for it — paused, overlay
            lifted, controls up and still — which is where this sat doing
            nothing on a real phone. */
-        if (pausedScrim?.isShown == true) {
-            measureNote = "skipped, paused scrim up"
-            noteOutcome()
-            wantMeasurement(MEASURE_RETRY_MILLIS)
-            return
-        }
+        if (pausedScrim?.isShown == true) { wantMeasurement(MEASURE_RETRY_MILLIS); return }
 
         val stripH = (vh * MEASURE_STRIP_FRACTION).toInt()
         if (stripH <= 0) return
@@ -491,15 +466,8 @@ class PlayerActivity : AppCompatActivity() {
         try {
             PixelCopy.request(window, src, bmp, { result ->
                 val found = if (result == PixelCopy.SUCCESS) {
-                    /* Keep the frame, so a reading that looks wrong can be
-                       looked at rather than reasoned about. Same rectangle as
-                       was analysed, app-internal, one file, overwritten each
-                       time — see CaptureStore. */
-                    CaptureStore.save(this, bmp)
                     readBlockHeight(bmp, vw, stripH)
-                        .also { if (it == null) measureNote = "copied, no bar" }
                 } else {
-                    measureNote = "copy failed $result"
                     /* PixelCopy can refuse a window it considers protected, or
                        one whose surface is not ready yet. Try the older way
                        before giving this frame up: it comes back blank on a
@@ -508,15 +476,12 @@ class PlayerActivity : AppCompatActivity() {
                     drawFallback(w, vw, vh, stripH)
                 }
                 bmp.recycle()
-                noteOutcome()
                 if (found != null) latchBlockHeight(found) else wantMeasurement(MEASURE_RETRY_MILLIS)
             }, reveal)
         } catch (e: Throwable) {
             /* Some devices refuse a copy of a secure or not-yet-ready surface
                loudly rather than by result code. */
-            measureNote = "copy threw"
             bmp.recycle()
-            noteOutcome()
             wantMeasurement(MEASURE_RETRY_MILLIS)
         }
     }
@@ -530,9 +495,7 @@ class PlayerActivity : AppCompatActivity() {
             val canvas = Canvas(bmp)
             canvas.translate(0f, -(vh - stripH).toFloat())
             w.draw(canvas)
-            readBlockHeight(bmp, vw, stripH).also {
-                if (it != null) measureNote = "$measureNote (drawn)"
-            }
+            readBlockHeight(bmp, vw, stripH)
         } finally {
             bmp.recycle()
         }
@@ -547,21 +510,9 @@ class PlayerActivity : AppCompatActivity() {
     private fun readBlockHeight(bmp: Bitmap, width: Int, height: Int): Int? = try {
         val pixels = IntArray(width * height)
         bmp.getPixels(pixels, 0, width, 0, 0, width, height)
-        val m = Chrome.measure(pixels, width, height)
-        /* The working, not just the conclusion: a wrong number is far easier
-           to place when the thickness and the gap it came from sit next to
-           it — which is how the scrubber knob was caught being measured as
-           the bar. */
-        if (m != null) measureNote = m.toString()
-        m?.blockPx
+        Chrome.blockHeightOrNull(pixels, width, height)
     } catch (e: Throwable) {
         null
-    }
-
-    /* Written on every attempt, so About can show what happened without
-       anyone having to reproduce it while watching. */
-    private fun noteOutcome() {
-        BlockHeightStore.putNote(this, "$measureNote · try $measureAttempts")
     }
 
     private fun latchBlockHeight(px: Int) {

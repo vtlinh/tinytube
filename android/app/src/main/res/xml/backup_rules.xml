@@ -6,8 +6,4 @@
          disagrees with what is actually there. -->
     <exclude domain="file" path="catalog.json" />
     <exclude domain="sharedpref" path="app.xml" />
-    <!-- The player's last measured strip. A diagnostic image of part of a
-         video someone was watching has no business travelling to a cloud
-         backup or onto another device. -->
-    <exclude domain="file" path="capture" />
 </full-backup-content>

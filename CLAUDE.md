@@ -135,31 +135,16 @@ stops, green publishes.
   That is the deal the app now makes, and it is the weakest point in it.
   Anything that widens it further — auto-approving related channels, following
   playlists, surfacing recommendations — is a bigger change than it looks.
-- **The player's frame capture is diagnostic, and its limits are deliberate.**
+- **The player's frame capture stays a measurement, never a picture.**
   `PlayerActivity.measureBlockHeight` PixelCopies the bottom strip of the
-  window to find the seek bar, and `CaptureStore` keeps the last one as a PNG
-  so a wrong reading can be looked at rather than argued about — six rounds
-  went by without anyone being able to see what the analysis saw. What holds:
-  only that strip is ever copied, never the part with the picture in it; it
-  goes to internal storage, which the backup and device-transfer rules
-  exclude; there is one file and each capture overwrites it; About can delete
-  it; and it leaves the device only through an explicit tap on the share
-  sheet, via a FileProvider that exposes that one directory. Don't widen the
-  source rectangle, don't keep more than the latest, and don't add a caller
-  that sends it anywhere on its own.
-- **The player does not read `BlockHeightStore` back at the moment**, on
-  purpose. It is still written so About can show what was last measured, but
-  nothing acts on it and the strip is measured afresh each run. Persisted
-  state is what made this hard to reason about — a stale entry, a poisoned one
-  and a correct one all produced the same screen, and every fix had to get
-  past whatever was already on disk before it could be seen. Restoring the
-  read is a deliberate decision to make once the measurement is trusted, not a
-  tidy-up.
-- **Bump `BlockHeightStore.VERSION` whenever the measurement changes.** A
-  preference file survives an app update, so a wrong answer written by one
-  build is read back by every build after it — which is how fixing the latching
-  bug below changed nothing on any device that had already run the broken one.
-  The version key is what makes a fix actually reach a device.
+  window to find the seek bar. Only that strip is ever copied, the bitmap is
+  recycled in the callback that received it, and nothing is written, passed on
+  or sent. A build that saved it to a PNG and offered it on the share sheet
+  existed for one round of debugging and was removed once the measurement
+  worked; if it is ever needed again it is in the history, with the backup
+  exclusions and the FileProvider that made it safe. Don't widen the source
+  rectangle, don't keep the bitmap, and don't add a caller that wants the
+  image rather than the number.
 - **A failed measurement must never be stored.** `Chrome.blockHeightOrNull`
   returns null for "could not tell" precisely so the Activity can distinguish
   it from a real answer that happens to equal the fallback. Latching on the

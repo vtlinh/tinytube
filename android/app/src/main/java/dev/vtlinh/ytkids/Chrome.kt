@@ -32,13 +32,17 @@ object Chrome {
     /* How much of the space under the bar stays reachable, in bar-thicknesses.
      *
      * On the frame this was calibrated against the line is 9px including the
-     * rows its edges are antialiased into, the gap to the row of chrome below
-     * is 58px, and the whole inset is 217px. Five thicknesses is 45px there:
-     * comfortably inside the gap, and comfortably more than a fingertip's
-     * error against a line that thin. Because the bar and the gap are both
-     * drawn in dp, that ratio holds on every device without anyone converting
-     * anything. */
-    private const val MARGIN_IN_BARS = 5
+     * rows its edges are antialiased into, and the gap to the row of chrome
+     * below it is 58px. Two thicknesses is 18px there — the blocked strip
+     * starts just under the bar rather than most of the way down to the
+     * chrome, which is where five put it and which read as a gap.
+     *
+     * Two rather than none because the line is thin and a thumb aiming at it
+     * lands around it; everything ABOVE the bar is reachable anyway, so this
+     * only has to cover fingers that land low. Because the bar and the gap are
+     * both drawn in dp, the ratio holds on every device without anyone
+     * converting anything. */
+    private const val MARGIN_IN_BARS = 2
 
     /* A sanity limit on how far above the bottom the bar may be, again in
        bar-thicknesses. The real figure is 24; anything past 60 is not an inset

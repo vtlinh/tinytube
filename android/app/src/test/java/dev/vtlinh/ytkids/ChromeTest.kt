@@ -86,8 +86,8 @@ class ChromeTest {
         assertEquals(350..356, Chrome.seekBar(p, w, h))
         assertEquals(356, Chrome.seekBarBottom(p, w, h))
         assertTrue(Chrome.hasProgressRed(p, w, 350..356))
-        /* 143 rows under it, less five thicknesses. */
-        assertEquals(143 - 35, Chrome.blockHeight(p, w, h, 99))
+        /* 143 rows under it, less two thicknesses. */
+        assertEquals(143 - 14, Chrome.blockHeight(p, w, h, 99))
     }
 
     /* ------------------------------------------------------------------
@@ -112,7 +112,7 @@ class ChromeTest {
             val p = seekBar(w, h, barY = 260, thickness = 7, played = percent / 100f)
             val m = Chrome.measure(p, w, h)!!
             assertEquals("at $percent% the line is still 7px", 7, m.thickness)
-            assertEquals("at $percent% the margin is five lines", 35, m.below - m.blockPx)
+            assertEquals("at $percent% the margin is two lines", 14, m.below - m.blockPx)
             if (first == null) first = m.blockPx
             assertEquals("at $percent% the answer is unchanged", first, m.blockPx)
         }
@@ -125,7 +125,7 @@ class ChromeTest {
         val p = seekBar(w, h, barY = 260, thickness = 7, played = 6f / (22 * 60))
         val m = Chrome.measure(p, w, h)!!
         assertEquals(7, m.thickness)
-        assertEquals(m.below - 35, m.blockPx)
+        assertEquals(m.below - 14, m.blockPx)
     }
 
     /* ------------------------------------------------------------------
@@ -191,7 +191,7 @@ class ChromeTest {
         assertEquals(16, Chrome.blockHeight(strip(w, h), w, h, 16))
 
         /* And a real one still answers. */
-        assertEquals(143 - 35, Chrome.blockHeightOrNull(seekBar(w, 500, barY = 350), w, 500))
+        assertEquals(143 - 14, Chrome.blockHeightOrNull(seekBar(w, 500, barY = 350), w, 500))
     }
 
     /* Scanning is bottom-up: with a line higher in the picture and the real
@@ -213,14 +213,14 @@ class ChromeTest {
         val thin = seekBar(w, 300, barY = 197, thickness = 3)
         val a = Chrome.measure(thin, w, 300)!!
         assertEquals(3, a.thickness)
-        assertEquals("five thicknesses", 5 * 3, a.below - a.blockPx)
+        assertEquals("two thicknesses", 2 * 3, a.below - a.blockPx)
 
         /* Three times the line, three times the margin — with nothing told the
            scale changed. */
         val thick = seekBar(w, 400, barY = 191, thickness = 9)
         val b = Chrome.measure(thick, w, 400)!!
         assertEquals(9, b.thickness)
-        assertEquals("five thicknesses", 5 * 9, b.below - b.blockPx)
+        assertEquals("two thicknesses", 2 * 9, b.below - b.blockPx)
     }
 
     /* Five thicknesses is right when the thickness is the line's. If anything
@@ -330,7 +330,7 @@ class ChromeTest {
         val m = Chrome.measure(px, w, stripH)!!
         assertEquals("the line, not the knob on its head", 9, m.thickness)
         assertEquals(217, m.below)
-        assertEquals(217 - 45, m.blockPx)
+        assertEquals(217 - 18, m.blockPx)
     }
 
     /* The two things the blocker has to get right at once, on the real frame,
@@ -341,7 +341,7 @@ class ChromeTest {
         val blockTop = f.height - Chrome.blockHeight(px, w, stripH, fallbackPx = 44)
 
         assertTrue("blocker must start below the bar's last row (982)", blockTop > 982)
-        assertEquals(983 + 45, blockTop)
+        assertEquals(983 + 18, blockTop)
         /* The share button, "More videos" and the YouTube wordmark begin at
            y=1040 and must be covered. */
         assertTrue("blocker must cover the chrome starting at y=1040", blockTop <= 1040)
@@ -431,7 +431,7 @@ class ChromeTest {
 
             val thickness = dp(3).coerceAtLeast(2)
             assertEquals("${d.name}: wrong thickness", thickness, m.thickness)
-            assertEquals("${d.name}: wrong slack", 5 * thickness, m.below - m.blockPx)
+            assertEquals("${d.name}: wrong slack", 2 * thickness, m.below - m.blockPx)
             /* And the chrome, which starts about 21dp under the bar, is still
                covered on every one of them. */
             assertTrue("${d.name}: chrome left reachable", m.below - m.blockPx <= dp(21))
