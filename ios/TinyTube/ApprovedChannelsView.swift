@@ -12,42 +12,40 @@ struct ApprovedChannelsView: View {
 
     let onOpen: (Channel) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var channels: [Channel] = []
     @State private var mode: ChannelSort.Mode = .lastAdded
     @State private var window: Int?
 
+    /* PUSHED from settings rather than presented, so it brings no
+       NavigationStack and no Done button of its own — the stack it is pushed
+       into supplies the bar and the way back. Wrapping itself would nest one
+       stack inside another and give the screen two title bars. */
     var body: some View {
-        NavigationStack {
-            List {
-                if channels.isEmpty {
-                    Text("No channels approved yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Section {
-                        ForEach(channels) { channel in
-                            row(channel)
-                        }
-                    } header: {
-                        Text(header)
+        List {
+            if channels.isEmpty {
+                Text("No channels approved yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Section {
+                    ForEach(channels) { channel in
+                        row(channel)
                     }
+                } header: {
+                    Text(header)
                 }
             }
-            .navigationTitle("Approved")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    /* Cycles the three orders. Whichever is picked applies to
-                       the child's Channels tab too — it is one list. */
-                    Button {
-                        SettingsStore.setChannelSort(ChannelSort.next(mode))
-                        reload()
-                    } label: {
-                        Image(systemName: "arrow.up.arrow.down")
-                    }
+        }
+        .navigationTitle("Approved channels")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                /* Cycles the three orders. Whichever is picked applies to the
+                   child's Channels tab too — it is one list. */
+                Button {
+                    SettingsStore.setChannelSort(ChannelSort.next(mode))
+                    reload()
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down")
                 }
             }
         }

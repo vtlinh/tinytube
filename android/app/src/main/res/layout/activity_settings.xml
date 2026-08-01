@@ -268,5 +268,54 @@
 
         </LinearLayout>
 
+        <!-- The approved list. It used to be an icon on the browser's bar and
+             lives here now, with every other parent control — which also leaves
+             that bar holding only the two things used while browsing.
+
+             Last on the page deliberately: it opens a screen of its own, and a
+             control that leaves is a poor thing to meet before the ones that
+             just toggle something. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_tile"
+            android:padding="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_channels"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@color/text" />
+
+            <TextView
+                android:id="@+id/channels_count"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textSize="14sp"
+                android:textColor="@color/accent" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="@string/settings_channels_explain"
+                android:textSize="14sp"
+                android:textColor="@color/text_muted"
+                android:lineSpacingExtra="2dp" />
+
+            <Button
+                android:id="@+id/manage_channels"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="@string/settings_channels_manage" />
+
+        </LinearLayout>
+
     </LinearLayout>
 </ScrollView>

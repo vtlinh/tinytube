@@ -21,7 +21,6 @@ struct ParentView: View {
     let onClose: () -> Void
 
     @State private var currentURL = YouTubeUrls.parentStart
-    @State private var showApproved = false
     @State private var showSettings = false
     @State private var reloadToken = UUID()
     @State private var working = false
@@ -55,20 +54,31 @@ struct ParentView: View {
         }
         .background(Color.black)
         .onChange(of: currentURL) { _ in refreshApprovedState() }
-        .sheet(isPresented: $showApproved, onDismiss: refreshApprovedState) {
-            ApprovedChannelsView { channel in
-                showApproved = false
+        /* The approved list lives inside settings now, so the channel it hands
+           back arrives through here. This screen owns the web view and is the
+           only one that can act on it — settings is a pass-through for that one
+           value, exactly as SettingsActivity is on Android. */
+        .sheet(isPresented: $showSettings, onDismiss: refreshApprovedState) {
+            SettingsView { channel in
+                showSettings = false
                 currentURL = channel.url
                 reloadToken = UUID()
             }
         }
-        .sheet(isPresented: $showSettings) { SettingsView() }
     }
 
     private var bar: some View {
         HStack(spacing: 14) {
-            Button("Done", action: onClose)
+            /* SAME ORDER AND SAME WORDING AS ANDROID, left to right: the way
+               out, a gap, then settings, the approved list, and approve last.
+               These were mirrored here — approve, list, settings — and the exit
+               said "Done", so a parent moving between the two apps found the
+               same bar with its controls in the opposite order and its first
+               button renamed. Android is the one that ships; it is the
+               reference. See activity_parent.xml. */
+            Button("← Kids mode", action: onClose)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
 
             Spacer()
 
@@ -84,11 +94,6 @@ struct ParentView: View {
             }
             .disabled(!onChannelPage || working)
             .accessibilityLabel(approvedHere ? "Remove channel" : "Approve channel")
-
-            Button { showApproved = true } label: {
-                Image(systemName: "list.bullet").font(.title3)
-            }
-            .accessibilityLabel("Approved channels")
 
             Button { showSettings = true } label: {
                 Image(systemName: "gearshape").font(.title3)

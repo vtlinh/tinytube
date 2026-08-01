@@ -67,16 +67,16 @@ that browser, so your own subscriptions are a place to approve from.
 
 The **+** is live only on an actual channel page — a URL starting `/@handle`
 or `/channel/`. On a channel you have already approved it becomes **−**, which
-removes it. The list button opens every approved channel: tap one to go and
-look at it again, or **✕** to remove it.
+removes it. Every approved channel is listed at the bottom of **Settings**,
+under **Channels**: tap one to go and look at it again, or **✕** to remove it.
 
-Removing a channel drops its videos from the grid immediately, and its watch
-history with it.
+Removing a channel drops its videos from the grid immediately, its watch
+history with it, and its avatar and thumbnails off the disk.
 
-The list button's **sort** control cycles three orders, and the toolbar says
+That list's **sort** control cycles three orders, and the toolbar says
 which one is in force:
 
-- **Last added first** — the default, and what the list always did.
+- **Recently added** — the default, and what the list always did.
 - **A–Z**.
 - **Most watched** — over the last 7 days, or the last 30 if nothing was watched
   in the week, or the last year if nothing in the month, and A–Z if the device
@@ -151,8 +151,17 @@ setting a screen lock is the fix.
 
 ## Settings
 
-The gear in parent mode's bar, next to the approved-list button, holds the
-parent's choices, the version number, and the update controls.
+The gear is the last control in parent mode's bar, and holds the parent's
+choices, the version number, the update controls where there are any, and — at
+the bottom, below all of them — the approved channels. Both platforms order it
+that way, so a parent moving between the two apps finds the same screen; the
+bar itself is **← Kids mode**, then a gap, then **+/−**, then the gear, on
+both. (iOS has no update controls to place — see **Platform differences**.)
+
+The channel list sits inside settings rather than beside it because it is a
+screen of its own and everything above it just toggles something. It shows how
+many channels are approved, which is what makes an empty list readable as empty
+rather than broken.
 
 **When a video ends** — what plays next.
 
