@@ -18,15 +18,34 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false">
 
+        <!-- Not exported, and carrying no launcher filter of its own: the
+             alias below is what the launcher sees. -->
         <activity
             android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop">
+            android:exported="false"
+            android:launchMode="singleTop" />
+
+        <!-- The launcher entry, under the class name this activity had before
+             the Kotlin package was renamed to match the app.
+
+             A home-screen icon is a pinned COMPONENT NAME, not an app. Moving
+             MainActivity from dev.vtlinh.ytkids to dev.vtlinh.tinytube would
+             therefore have left every already-placed icon pointing at a class
+             that no longer exists — the app still installed, still in the
+             drawer, and its icon on the home screen dead. The applicationId
+             never moved, so this alias is a real, resolvable name and costs
+             nothing but its own four lines.
+
+             Don't "tidy" this into .MainActivity. The old name is the point. -->
+        <activity-alias
+            android:name="dev.vtlinh.ytkids.MainActivity"
+            android:targetActivity=".MainActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
 
         <!-- Not exported: nothing outside the app has any business starting a
              player, and an exported one would let any installed app hand this
