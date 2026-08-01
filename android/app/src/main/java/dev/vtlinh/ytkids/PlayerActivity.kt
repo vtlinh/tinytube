@@ -43,9 +43,10 @@ class PlayerActivity : AppCompatActivity() {
     private var showingAd = false
 
     /* True while the overlay has been deliberately lifted, so YouTube's own
-       controls are reachable. It comes back on its own once the video has run
-       for a few seconds with nobody touching anything — and, whatever state it
-       is in, as soon as the activity leaves the foreground. */
+       controls are reachable. It comes back when play is pressed, or once the
+       video has run for a few seconds with nobody touching anything — and,
+       whatever state it is in, as soon as the activity leaves the
+       foreground. */
     private var revealed = false
 
     /* Whether the video is running, as the page last reported it. The idle
@@ -305,9 +306,10 @@ class PlayerActivity : AppCompatActivity() {
        While it is lifted the whole of YouTube's player is reachable, which is
        the point — an adult wanting to scrub, or to see what a video actually
        is, has no other way to do it. It is not a mode anyone can be left in by
-       accident: while the video is running it ends on its own after a few
-       seconds of nobody touching anything. See restartIdleTimer for why a
-       paused player is the exception. */
+       accident: pressing play ends it, and while the video is running it ends
+       on its own after a few seconds of nobody touching anything. See
+       restartIdleTimer for why a paused player is the exception to the
+       second. */
     private fun setRevealed(value: Boolean) {
         revealed = value
         overlay?.visibility = if (value) View.GONE else View.VISIBLE
@@ -336,6 +338,10 @@ class PlayerActivity : AppCompatActivity() {
      * is, or to hand the phone to someone — none of which produce touches, and
      * all of which used to end with the overlay dropping back mid-sentence. So
      * the timer follows playback: it runs while the video does.
+     *
+     * This is only the unattended path. Pressing play ends the reveal outright,
+     * without waiting — see applyState. So the countdown covers the one case
+     * nothing else does: revealed during playback, and then left alone.
      *
      * The trade is that a player left paused and revealed stays that way. What
      * bounds it is the activity: onPause puts the overlay back, so leaving the
@@ -370,19 +376,22 @@ class PlayerActivity : AppCompatActivity() {
     private fun applyState(state: Int) {
         /* Only PLAYING and PAUSED move this. Buffering leaves it alone: a
            stall mid-video is not a pause, and letting it read as one would
-           stop the countdown every time the network hiccuped.
-         *
-         * Pressing play used to put the overlay straight back, on the reading
-         * that whoever lifted it was done. It isn't: an adult who scrubs and
-         * then hits play is locked out of the player at the exact moment they
-         * might want to correct the scrub. Play now starts the countdown
-         * instead, so the overlay returns a few seconds later and only if
-         * nothing else happens. */
+           both close the overlay on the way out of the stall and stop the
+           countdown every time the network hiccuped. */
+        val resumed = state == STATE_PLAYING && !playing
         when (state) {
             STATE_PLAYING -> playing = true
             STATE_PAUSED -> playing = false
         }
-        restartIdleTimer()
+        /* Pause to play is somebody pressing play, and that is the clearest
+           statement there is that they are finished with the controls: the
+           overlay goes back at once rather than counting anything down.
+         *
+         * It has to be the TRANSITION, not the state. Treating every PLAYING
+         * report as "they pressed play" would close the overlay on the far
+         * side of a buffering stall, seconds into a scrub nobody had
+         * finished. */
+        if (resumed && revealed) setRevealed(false) else restartIdleTimer()
 
         /* Only a real pause draws YouTube's chrome over the frame. */
         pausedScrim?.visibility =
