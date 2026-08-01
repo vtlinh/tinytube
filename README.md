@@ -168,6 +168,15 @@ it to a fixed `android-latest` release.
   own call. Uploaded together they race, and the tiny manifest goes live long
   before the APK finishes — a window on every release where apps are told about
   a build they then fail to download.
+- **Build reuse**: publishing a merge normally reuses the APK the pull request's
+  own run built minutes earlier, rather than compiling the same code twice — a
+  publish drops from about two and a half minutes to about thirty seconds. Each
+  build records the SHA of the `android/` tree it came from — git's own content
+  hash, nothing to commit and nothing to exclude — and the publish reuses it
+  only if that is what main now holds. Only `android/`, because that is
+  everything the APK is made of, so a docs-only merge in between costs nothing.
+  If the hashes differ the publish builds *and re-runs the tests*, because at
+  that point no run has tested the code that is about to ship.
 - **Installing**: the app checks on every foreground, pre-downloads a newer APK,
   and offers it in a notification. The install itself always waits for a tap,
   because it restarts the app — it is never applied mid-video. From the first
