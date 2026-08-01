@@ -49,9 +49,13 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Caches the whole Gradle user home, which is where both the downloaded
+      # 8.9 distribution and the local build cache live. Writes entries from
+      # main and restores them on pull requests, so a PR build starts warm.
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
       # Version name = "<year>.<week>.<patch>":
       #   year  — years since 2025, 1-indexed (2026 -> 1)
@@ -81,15 +85,18 @@ jobs:
           echo "APP_VERSION_NAME=${YEAR}.${WEEK}.${PATCH}" >> "$GITHUB_ENV"
           echo "Computed version name: ${YEAR}.${WEEK}.${PATCH}"
 
-      # Runs before the build so a broken invariant fails the run rather than
-      # publishing an APK. Plain JVM tests over the catalog parser and the
-      # player's host allowlist — the two places where a mistake shows a child
-      # the wrong thing. Seconds, no emulator.
-      - name: Unit tests
-        run: gradle -p android testReleaseUnitTest
-
-      - name: Build release APK
-        run: gradle -p android assembleRelease
+      # One invocation rather than two. Gradle starts a daemon and configures
+      # the project per invocation, and doing that twice was costing most of a
+      # minute for nothing.
+      #
+      # The tests still gate the publish, which is the property that matters:
+      # the publish steps below run only if THIS step succeeded, so a failing
+      # test means nothing reaches a device. What is lost is only the ordering
+      # — with parallel execution the APK may be assembled alongside the tests
+      # rather than after them — and an APK built during a run that then fails
+      # is simply thrown away.
+      - name: Unit tests and release APK
+        run: gradle -p android testReleaseUnitTest assembleRelease
 
       - uses: actions/upload-artifact@v4
         with:
