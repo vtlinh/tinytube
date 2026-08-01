@@ -232,9 +232,13 @@ tapped.
 `Chrome.kt` is the odd one on that list, and worth a word because of how it gets
 its input. A native overlay covers the player so none of YouTube's controls can
 be touched; holding the top-right corner lifts it for an adult, for as long as
-the settings say. The corner is invisible, and glows for a second each time the
-overlay comes back so an adult can see where it is without a coloured wedge
-sitting over the picture while a video plays.
+the settings say. The corner is invisible, and glows for a second when a video
+starts and each time the overlay comes back — so an adult can see where it is
+without a coloured wedge sitting over the picture while a video plays.
+
+The first glow waits for playback rather than firing when the screen opens: a
+web view shows a black rectangle while it loads, and a glow spent against that
+is one nobody sees.
 A strip along the bottom stays blocked even then, so a scrub that slides off the
 seek bar lands on nothing. Knowing how tall that strip should be means knowing
 where the seek bar is — and the player is a cross-origin iframe, so it cannot be

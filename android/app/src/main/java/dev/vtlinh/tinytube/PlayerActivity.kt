@@ -161,6 +161,11 @@ class PlayerActivity : AppCompatActivity() {
        paused six times is not six views. */
     private var counted = false
 
+    /* Whether the corner has announced itself for this video yet. The first
+       glow waits for playback rather than firing in onCreate, so it needs
+       something to remember that it is still owed. */
+    private var glowed = false
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -306,11 +311,13 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
 
-        /* The overlay is up the moment this screen exists, so its first glow
-           belongs here — a video that starts covered should say where the way
-           out is once, at the start, rather than the first time somebody
-           happens to touch the screen. */
-        glow()
+        /* No glow here, and that is the fix rather than an omission.
+         *
+         * It used to fire from onCreate, which is a second spent glowing over
+         * the black rectangle a WebView shows while it loads — the whole
+         * announcement was over before there was a picture to announce
+         * anything against. The first one now waits for the video to actually
+         * start; see applyState. */
     }
 
     /* The corner announces itself: up quickly, held, then down slowly, one
@@ -453,7 +460,17 @@ class PlayerActivity : AppCompatActivity() {
            countdown every time the network hiccuped. */
         val resumed = state == STATE_PLAYING && !playing
         when (state) {
-            STATE_PLAYING -> { playing = true; failures = 0; noteWatched() }
+            STATE_PLAYING -> {
+                playing = true
+                failures = 0
+                noteWatched()
+                /* The first frame is the first moment there is anything for the
+                   corner to be visible against. Once per video: playback
+                   reports PLAYING again after every pause and every buffering
+                   stall, and a corner that flashed at each of those would be a
+                   fault rather than a hint. */
+                if (!glowed) { glowed = true; glow() }
+            }
             STATE_PAUSED -> playing = false
         }
         /* Pause to play is somebody pressing play, and that is the clearest
@@ -695,6 +712,7 @@ class PlayerActivity : AppCompatActivity() {
         if (revealed) setRevealed(false)
         playing = false
         counted = false
+        glowed = false
         web?.loadDataWithBaseURL(Player.ORIGIN, page, "text/html", "utf-8", null)
     }
 

@@ -3,10 +3,13 @@
 
      A quarter-disc: the view sits flush in the top-right, so rounding only the
      inner corner makes it read as a deliberate region rather than a stray
-     rectangle. Faint even when shown — it is a hint about where to press, and
-     it appears over a video someone is trying to watch. -->
+     rectangle.
+
+     Solid enough to see. It used to be very faint because it stayed on screen
+     while a video played; it is a one-second glow now, so faint just meant
+     invisible. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="@color/reveal_tint" />
+    <solid android:color="@color/reveal_glow" />
     <corners android:bottomLeftRadius="136dp" />
 </shape>

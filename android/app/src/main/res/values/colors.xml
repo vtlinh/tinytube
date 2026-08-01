@@ -24,7 +24,12 @@
          the player is always on black, in either palette. -->
     <color name="reveal_green">#00E06A</color>
     <color name="reveal_track">#3300E06A</color>
-    <color name="reveal_tint">#2200E06A</color>
+    <!-- The corner's glow. Was 0x22 alpha — 13% — back when it was a tint that
+         sat there while a video played, where faint was the point. It is a
+         one-second flash now and 13% green over moving footage is not something
+         anyone sees, which is exactly how it came to look broken. Half opaque
+         for the second it is up, and gone the rest of the time. -->
+    <color name="reveal_glow">#7A00E06A</color>
 
     <!-- Sits behind a poster until it loads. Has to read as "empty tile"
          rather than as a broken image, in either palette. -->
