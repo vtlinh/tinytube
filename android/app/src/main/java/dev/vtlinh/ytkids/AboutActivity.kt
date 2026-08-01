@@ -7,6 +7,7 @@ import android.provider.Settings
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -29,6 +30,7 @@ class AboutActivity : AppCompatActivity() {
     /* The hairline above the notification block, so it appears and disappears
        with it rather than leaving a rule under nothing. */
     private lateinit var notifDivider: View
+    private lateinit var playerMeasure: TextView
 
     /* One at a time, so an impatient double-tap on Install queues instead of
        racing two PackageInstaller commits. */
@@ -52,6 +54,16 @@ class AboutActivity : AppCompatActivity() {
         notifStatus = findViewById(R.id.notif_status)
         notifAction = findViewById(R.id.notif_action)
         notifDivider = findViewById(R.id.notif_divider)
+        playerMeasure = findViewById(R.id.player_measure)
+        findViewById<Button>(R.id.player_remeasure).setOnClickListener {
+            BlockHeightStore.clear(this)
+            /* The store is only half of it: the running process caches the
+               number, so clearing the preference alone would change nothing
+               until the app was killed. */
+            PlayerActivity.forgetMeasurement()
+            renderMeasurement()
+            Toast.makeText(this, R.string.about_remeasured, Toast.LENGTH_SHORT).show()
+        }
 
         /* Neither tab is "here", so neither is drawn as selected — both are
            the way out. About is somewhere you arrive from the grid and leave
@@ -69,10 +81,48 @@ class AboutActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        renderMeasurement()
         refreshUpdateState()
         /* re-read on every resume: returning from the system Settings screen is
            exactly how this changes */
         renderNotifications()
+    }
+
+    /* ---- the player's measurement ---- */
+
+    /* Everything known about it, whether or not any of it looks wrong.
+     *
+     * The player blocks a strip along its bottom edge so a scrub that slides
+     * off YouTube's seek bar lands on nothing, and the height of that strip is
+     * measured off the player's own pixels rather than written down. When the
+     * measurement is wrong there is nothing on screen to say so — the strip is
+     * simply the wrong size — so this is where it can be read, and reported,
+     * without anyone having to catch it happening. */
+    private fun renderMeasurement() {
+        val live = PlayerActivity.measuredPx()
+        val raw = BlockHeightStore.rawPx(this)
+        val fallback = resources.getDimensionPixelSize(R.dimen.player_bottom_block)
+
+        /* What is in force comes from the running process, not from the
+           preference — the player does not read that back at the moment. The
+           stored line below is history, and is labelled as such. */
+        val inUse =
+            if (live >= 0) getString(R.string.about_measure_measured, live)
+            else getString(R.string.about_measure_fallback, fallback)
+        val storedText =
+            if (raw >= 0) "$raw px" else getString(R.string.about_measure_none)
+        val storedFor =
+            BlockHeightStore.storedDisplay(this) ?: getString(R.string.about_measure_none)
+
+        playerMeasure.text = getString(
+            R.string.about_measure_fmt,
+            inUse,
+            storedText,
+            BlockHeightStore.displayKey(this),
+            storedFor,
+            "${BlockHeightStore.storedVersion(this)} of ${BlockHeightStore.currentVersion()}",
+            BlockHeightStore.note(this),
+        )
     }
 
     /* ---- notifications ---- */

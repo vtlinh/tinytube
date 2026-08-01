@@ -112,6 +112,53 @@
 
         </LinearLayout>
 
+        <!-- The player's measurement, in full.
+             
+             Everything it knows, not just the parts that look wrong: the
+             height in use, where it came from, what the display is, and what
+             the last capture did. Two rounds were lost to a screen that said
+             nothing when the app was confident, because a confident wrong
+             answer and a correct one produced the same silence. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_tile"
+            android:padding="20dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/about_player"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:textAllCaps="true"
+                android:textColor="@color/text_muted" />
+
+            <TextView
+                android:id="@+id/player_measure"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="10dp"
+                android:textSize="14sp"
+                android:lineSpacingMultiplier="1.35"
+                android:fontFamily="monospace"
+                android:textColor="@color/text" />
+
+            <Button
+                android:id="@+id/player_remeasure"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:layout_marginStart="-8dp"
+                android:text="@string/about_remeasure"
+                style="?android:attr/borderlessButtonStyle"
+                android:textColor="@color/accent" />
+
+        </LinearLayout>
+
         <!-- Updates: the only part of this screen that does anything. -->
         <LinearLayout
             android:layout_width="match_parent"

@@ -65,15 +65,13 @@ class PlayerActivity : AppCompatActivity() {
     private val measureRunnable = Runnable { measureBlockHeight() }
     private var measureAttempts = 0
 
-    /* What the last capture did, for the reveal toast to report.
+    /* What the last capture did, reported on the reveal toast and on About.
      *
-     * Diagnostic, and deliberately so. Two different capture APIs have now
-     * failed silently on a real device, and a failed capture is
-     * indistinguishable from "this player has no seek bar" — which is how this
-     * went two rounds without anyone being able to say which step was wrong.
-     * Guessing at a third API was the wrong move. Saying what happened costs
-     * one line on a parent-only toast, and only while the measurement has not
-     * succeeded; once it has, the toast is plain again. */
+     * Every outcome, successes included. Reporting only failures cost two
+     * rounds: a silent success and a confident wrong answer look identical
+     * from outside, so "no message" turned out to mean "the app is certain,
+     * and it is wrong". A readout that appears only when something is known to
+     * be broken cannot report the case where nothing knows it is broken. */
     private var measureNote: String = "not tried"
 
     companion object {
@@ -118,6 +116,18 @@ class PlayerActivity : AppCompatActivity() {
          * which is the point of persisting it: otherwise every cold start put
          * the strip back to the fallback until someone paused something. */
         @Volatile private var measuredBlockPx: Int = -1
+
+        /* Drop the in-process cache so a cleared store is actually re-read.
+           Without this, About's "measure again" would clear the preference and
+           the running process would carry on using the number it already
+           had. */
+        fun forgetMeasurement() { measuredBlockPx = -1 }
+
+        /* What the player is actually using, for About to report. The stored
+           value is not read back at the moment, so this is the only thing that
+           says what is in force. -1 means nothing has been measured this
+           run. */
+        fun measuredPx(): Int = measuredBlockPx
 
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
@@ -218,7 +228,15 @@ class PlayerActivity : AppCompatActivity() {
         /* Measured before — on an earlier video, or in an earlier run of the
            app entirely — so apply it now rather than waiting for this video to
            be paused too. */
-        if (measuredBlockPx < 0) measuredBlockPx = BlockHeightStore.get(this) ?: -1
+        /* Deliberately NOT read back from BlockHeightStore for now.
+         *
+         * It is still written, so About can show what was last measured — but
+         * nothing acts on it. Persisted state is what made this hard to
+         * reason about: a stale entry, a poisoned one, or a correct one all
+         * produced the same screen, and every fix to the measurement had to
+         * get past whatever was already on disk before it could be seen at
+         * all. Measuring afresh each run costs one capture and makes what is
+         * on screen a consequence of the code that is running. */
         if (measuredBlockPx >= 0) applyBlockHeight(measuredBlockPx)
 
         /* A tap anywhere shows the corner. Nothing else: the overlay has no
@@ -338,19 +356,24 @@ class PlayerActivity : AppCompatActivity() {
             /* Say so. The overlay was transparent, so lifting it changes very
                little on screen — without a word it is not obvious the three
                seconds did anything. */
-            /* Plain once the measurement has landed. Until then it says what
-               happened, because an adult looking at a strip that is obviously
-               the wrong size has no other way to find out — and that is
-               exactly the position this spent two rounds in. */
-            val text =
-                if (measuredBlockPx >= 0) getString(R.string.player_revealed)
-                else getString(
-                    R.string.player_revealed_unmeasured,
+            /* Always the detail, success included.
+             *
+             * This used to go plain once a measurement landed, and that cost
+             * two rounds: a silent success and a wrong-but-confident answer
+             * look identical, so "no message" turned out to mean "the app is
+             * certain, and it is wrong". A readout that only appears when
+             * something is known to be broken cannot report the case where
+             * nothing knows it is broken. */
+            Toast.makeText(
+                this,
+                getString(
+                    R.string.player_revealed_detail,
                     bottomBlocker?.height ?: 0,
                     measureAttempts,
                     measureNote,
-                )
-            Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+                ),
+                Toast.LENGTH_LONG,
+            ).show()
         }
     }
 
@@ -454,7 +477,12 @@ class PlayerActivity : AppCompatActivity() {
            measure in the one state that is ideal for it — paused, overlay
            lifted, controls up and still — which is where this sat doing
            nothing on a real phone. */
-        if (pausedScrim?.isShown == true) { wantMeasurement(MEASURE_RETRY_MILLIS); return }
+        if (pausedScrim?.isShown == true) {
+            measureNote = "skipped, paused scrim up"
+            noteOutcome()
+            wantMeasurement(MEASURE_RETRY_MILLIS)
+            return
+        }
 
         val stripH = (vh * MEASURE_STRIP_FRACTION).toInt()
         if (stripH <= 0) return
@@ -473,7 +501,7 @@ class PlayerActivity : AppCompatActivity() {
             PixelCopy.request(window, src, bmp, { result ->
                 val found = if (result == PixelCopy.SUCCESS) {
                     readBlockHeight(bmp, vw, stripH)
-                        .also { measureNote = if (it != null) "ok" else "copied, no bar" }
+                        .also { measureNote = if (it != null) "measured $it px" else "copied, no bar" }
                 } else {
                     measureNote = "copy failed $result"
                     /* PixelCopy can refuse a window it considers protected, or
@@ -484,6 +512,7 @@ class PlayerActivity : AppCompatActivity() {
                     drawFallback(w, vw, vh, stripH)
                 }
                 bmp.recycle()
+                noteOutcome()
                 if (found != null) latchBlockHeight(found) else wantMeasurement(MEASURE_RETRY_MILLIS)
             }, reveal)
         } catch (e: Throwable) {
@@ -491,6 +520,7 @@ class PlayerActivity : AppCompatActivity() {
                loudly rather than by result code. */
             measureNote = "copy threw"
             bmp.recycle()
+            noteOutcome()
             wantMeasurement(MEASURE_RETRY_MILLIS)
         }
     }
@@ -505,7 +535,7 @@ class PlayerActivity : AppCompatActivity() {
             canvas.translate(0f, -(vh - stripH).toFloat())
             w.draw(canvas)
             readBlockHeight(bmp, vw, stripH).also {
-                if (it != null) measureNote = "ok (drawn)"
+                if (it != null) measureNote = "measured $it px (drawn)"
             }
         } finally {
             bmp.recycle()
@@ -524,6 +554,12 @@ class PlayerActivity : AppCompatActivity() {
         Chrome.blockHeightOrNull(pixels, width, height)
     } catch (e: Throwable) {
         null
+    }
+
+    /* Written on every attempt, so About can show what happened without
+       anyone having to reproduce it while watching. */
+    private fun noteOutcome() {
+        BlockHeightStore.putNote(this, "$measureNote · try $measureAttempts")
     }
 
     private fun latchBlockHeight(px: Int) {
