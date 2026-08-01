@@ -59,6 +59,13 @@ Green CI is part of "finished", not a separate step to skip — the unit tests a
 what stand between a bad video id and the player, and merging past a red run
 publishes a build to every installed device.
 
+The publish run itself does not re-run them: auto-merge only merges a green PR
+and then dispatches the publish, so the same question has already been asked.
+A `push` to main still runs them, because a hand-push has passed nothing. The
+gap that leaves is merge skew — the PR was tested against main as it stood when
+its run started — which one branch at a time makes unlikely rather than
+impossible.
+
 `auto-merge.yml` does the merging: a PR that isn't a draft merges itself once
 `android` passes and nothing else on the commit has failed. Label a PR
 `no-auto-merge` to hold it open. Two things follow from how it works:
