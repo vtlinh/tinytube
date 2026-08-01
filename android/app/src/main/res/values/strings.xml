@@ -38,6 +38,7 @@
     <string name="challenge_submit">Continue</string>
     <string name="challenge_wrong">Not quite — here are two new numbers.</string>
 
+    <string name="player_back">Back</string>
     <string name="parent_add_channel">Approve this channel</string>
     <string name="parent_remove_channel">Remove this channel</string>
     <string name="parent_approved_button">Approved channels</string>

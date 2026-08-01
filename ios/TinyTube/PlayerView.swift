@@ -43,6 +43,11 @@ struct PlayerView: View {
        moment — or, in RANDOM's case, never stop at all. */
     private static let maxConsecutiveFailures = 3
 
+    /* How long the overlay stays lifted with nobody touching anything. Matches
+       IDLE_MILLIS in PlayerActivity. Distinct from the hold duration, which is
+       how long an adult presses to get IN — see restartIdleTimer. */
+    private static let idleSeconds: TimeInterval = 5
+
     private var current: Video? {
         videos.indices.contains(index) ? videos[index] : nil
     }
@@ -81,10 +86,28 @@ struct PlayerView: View {
                     Color.black.opacity(0.9).ignoresSafeArea()
                 }
 
+                /* Above the web view so it sees touches, below nothing —
+                   it consumes none of them. The counterpart of
+                   dispatchTouchEvent: without it the idle countdown expires
+                   while an adult is mid-scrub. */
+                if overlayLifted {
+                    TouchReporter { restartIdleTimer() }
+                        .allowsHitTesting(false)
+                        .ignoresSafeArea()
+                }
+
                 bottomBlocker(geo)
+                if overlayLifted { backButton }
                 revealCorner(geo)
             }
         }
+        .onAppear {
+            /* A 16:9 video in portrait is a letterboxed strip. Android says
+               sensorLandscape in one line of manifest; iOS has no per-screen
+               setting, so the player asks and AppDelegate answers. */
+            OrientationLock.lockToLandscape()
+        }
+        .onDisappear { OrientationLock.unlock() }
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .onAppear { recordWatch() }
@@ -98,6 +121,38 @@ struct PlayerView: View {
                returning to a lifted one nobody is watching. */
             if phase != .active { lower() }
         }
+    }
+
+    // MARK: - The way out
+
+    /* Shown only while the overlay is lifted, exactly as on Android.
+     *
+     * Android has always had a way out — the system back button finishes the
+     * activity — but nothing on screen said so, and iOS has no system back at
+     * all, which left the player with no exit whatsoever. Both platforms now
+     * show the same control at the same moment: it is an adult's, and it
+     * arrives with the other adult controls rather than sitting over every
+     * video a child watches.
+     *
+     * Top-left, clear of the reveal corner at top-right. It carries its own
+     * dark disc because the background is whatever frame the video is showing,
+     * and a white chevron on a white scene is not a control. */
+    private var backButton: some View {
+        VStack {
+            HStack {
+                Button(action: onClose) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Circle().fill(Color.black.opacity(0.6)))
+                }
+                .accessibilityLabel("Back")
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(8)
     }
 
     // MARK: - The blocked strip
@@ -179,9 +234,35 @@ struct PlayerView: View {
     private func lift(for seconds: TimeInterval) {
         cancelHold()
         overlayLifted = true
+        restartIdleTimer()
+    }
+
+    /* The countdown that puts the overlay back, ARMED ONLY WHILE THE VIDEO IS
+       ACTUALLY RUNNING.
+     *
+     * A paused player does not count down at all, deliberately. Pausing is what
+     * an adult does to read something on screen, to look at where the scrubber
+     * is, or to hand the phone to someone — none of which produce touches, and
+     * all of which otherwise end with the overlay dropping back mid-sentence.
+     * So the timer follows playback: it runs while the video does.
+     *
+     * It is also an IDLE timeout, restarted by every touch, and not the hold
+     * duration. Those are different numbers for different jobs — the hold is
+     * how long an adult must press to get in, this is how long the player stays
+     * open with nobody touching it — and using the hold for both meant a
+     * one-second lift that re-locked while a parent was still reaching for the
+     * scrubber.
+     *
+     * The trade is that a player left paused and revealed stays that way. What
+     * bounds it is leaving the screen: backgrounding puts the overlay back, so
+     * locking the phone or switching apps both end the reveal. What is given up
+     * is only the case where the phone is set down, unlocked, on a paused
+     * video. Ported from restartIdleTimer in PlayerActivity. */
+    private func restartIdleTimer() {
         liftTask?.cancel()
+        guard overlayLifted, !paused else { return }
         liftTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(Self.idleSeconds * 1_000_000_000))
             if Task.isCancelled { return }
             lower()
         }
@@ -211,6 +292,8 @@ struct PlayerView: View {
         switch state {
         case PlayerWebView.PlayerState.playing:
             paused = false
+            /* Playback resuming arms the countdown that pausing disarmed. */
+            restartIdleTimer()
             /* The first glow of a video waits for this rather than firing when
                the screen opened, against a black rectangle. */
             if !glowedThisVideo {
@@ -220,6 +303,9 @@ struct PlayerView: View {
             }
         case PlayerWebView.PlayerState.paused:
             paused = true
+            /* And pausing disarms it, so the overlay does not drop back over an
+               adult who paused precisely in order to look at something. */
+            restartIdleTimer()
         default:
             break
         }

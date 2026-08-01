@@ -246,6 +246,20 @@ without a coloured wedge sitting over the picture while a video plays.
 The first glow waits for playback rather than firing when the screen opens: a
 web view shows a black rectangle while it loads, and a glow spent against that
 is one nobody sees.
+
+Lifting the overlay also reveals the **way out** — a back control, top-left,
+clear of the corner that summoned it. It is an adult's control and it appears
+with the other adult controls rather than sitting over every video a child
+watches. On Android the system back button has always done this; what is new is
+that something on screen says so, and that iOS has it at all, having had no
+system back to fall back on.
+
+**The overlay does not drop back while a video is paused.** Pausing is what an
+adult does to read something on screen, to look at where the scrubber is, or to
+hand the phone over — none of which produce touches, and all of which would
+otherwise end with the overlay returning mid-sentence. So the countdown follows
+playback: it runs while the video does, and every touch restarts it. A player
+left paused and revealed stays that way until the screen is left.
 A strip along the bottom stays blocked even then, so a scrub that slides off the
 seek bar lands on nothing. Knowing how tall that strip should be means knowing
 where the seek bar is — and the player is a cross-origin iframe, so it cannot be

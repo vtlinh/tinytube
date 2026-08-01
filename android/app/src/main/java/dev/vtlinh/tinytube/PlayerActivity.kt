@@ -37,6 +37,9 @@ class PlayerActivity : AppCompatActivity() {
     private var pausedScrim: View? = null
     private var holdProgress: ProgressBar? = null
 
+    /* The way out, shown only while the overlay is lifted. See setRevealed. */
+    private var backButton: View? = null
+
     /* Best-effort, from the page. While it is true the overlay stops taking
        touches — an ad has to remain interactive, and being wrong here costs a
        tappable player rather than a blocked one. */
@@ -259,6 +262,9 @@ class PlayerActivity : AppCompatActivity() {
         holdProgress = findViewById(R.id.reveal_progress)
         corner = findViewById(R.id.reveal_corner)
         bottomBlocker = findViewById(R.id.bottom_blocker)
+        backButton = findViewById<View>(R.id.player_back).also {
+            it.setOnClickListener { finish() }
+        }
 
         /* Measured before — on an earlier video, or in an earlier run of the
            app entirely — so apply it now rather than waiting for this video to
@@ -389,6 +395,12 @@ class PlayerActivity : AppCompatActivity() {
     private fun setRevealed(value: Boolean) {
         revealed = value
         overlay?.visibility = if (value) View.GONE else View.VISIBLE
+        /* The exit appears with the rest of the adult's controls and goes with
+           them. Back already worked — the system button finishes this activity
+           — but nothing on screen said so, and iOS has no system button at all.
+           Both platforms now show the same control at the same moment, rather
+           than one sitting over every video a child watches. */
+        backButton?.visibility = if (value) View.VISIBLE else View.GONE
         /* The ring has done its job either way: the hold completed, or the
            overlay came back and there is no hold in progress to show. */
         stopHoldProgress()
