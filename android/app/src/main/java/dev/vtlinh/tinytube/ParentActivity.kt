@@ -36,11 +36,13 @@ class ParentActivity : AppCompatActivity() {
     private lateinit var current: TextView
     private lateinit var addButton: ImageButton
 
-    /* The approved-channels screen hands back a channel to go and look at. */
-    private val approvedList =
+    /* Settings, which now holds the approved list too — so it can hand back a
+       channel to go and look at, forwarded up from that list. This screen owns
+       the WebView, so it is the only one that can act on it. */
+    private val settings =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
-                result.data?.getStringExtra(ApprovedChannelsActivity.EXTRA_OPEN_URL)
+                result.data?.getStringExtra(SettingsActivity.EXTRA_OPEN_URL)
                     ?.let { web?.loadUrl(it) }
             }
             /* Channels may have been removed while it was open. */
@@ -56,15 +58,15 @@ class ParentActivity : AppCompatActivity() {
         addButton = findViewById(R.id.add_channel)
 
         findViewById<Button>(R.id.kids_mode).setOnClickListener { finish() }
-        findViewById<ImageButton>(R.id.approved).setOnClickListener {
-            approvedList.launch(Intent(this, ApprovedChannelsActivity::class.java))
-        }
-        /* No gate of its own: getting here already required one. This is the
-           same reason ApprovedChannelsActivity opens straight from the button
-           next to it — everything on this side of ChallengeActivity is already
-           past it. */
+        /* No gate of its own: getting here already required one. Everything on
+           this side of ChallengeActivity is already past it.
+
+           The approved list is inside settings now rather than beside it. It is
+           a parent control and every other one already lived there, and it
+           leaves this bar holding only what is used while browsing: the way
+           back, and approve. */
         findViewById<ImageButton>(R.id.settings).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
+            settings.launch(Intent(this, SettingsActivity::class.java))
         }
         /* Nothing is loaded yet, so there is certainly no channel to approve.
            This also installs the button's click listener. */

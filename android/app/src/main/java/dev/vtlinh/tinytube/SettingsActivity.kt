@@ -1,5 +1,6 @@
 package dev.vtlinh.tinytube
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -67,6 +68,7 @@ class SettingsActivity : AppCompatActivity() {
         notifStatus = findViewById(R.id.notif_status)
         notifAction = findViewById(R.id.notif_action)
         notifDivider = findViewById(R.id.notif_divider)
+        setUpChannels()
         findViewById<TextView>(R.id.version).text = getString(
             R.string.version_fmt,
             packageManager.getPackageInfo(packageName, 0).versionName,
@@ -82,6 +84,39 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /* ---- what plays next ---- */
+
+    /* The approved list, opened from here rather than from the browser's bar.
+     *
+     * It can hand back a channel to go and look at, and this screen is not the
+     * one that can act on that — ParentActivity owns the WebView. So the result
+     * is forwarded straight up: the list returns a URL to us, we return it to
+     * whoever opened us, and ParentActivity loads it. Settings is a pass-through
+     * for that one value and nothing else. */
+    private val approvedList =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            showChannelCount()
+            if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
+            val url = result.data?.getStringExtra(ApprovedChannelsActivity.EXTRA_OPEN_URL)
+                ?: return@registerForActivityResult
+            setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_OPEN_URL, url))
+            finish()
+        }
+
+    private fun setUpChannels() {
+        showChannelCount()
+        findViewById<android.widget.Button>(R.id.manage_channels).setOnClickListener {
+            approvedList.launch(Intent(this, ApprovedChannelsActivity::class.java))
+        }
+    }
+
+    /* Says how many, because "Approved channels" with no number gives a parent
+       no reason to look and no way to notice that the list is empty. */
+    private fun showChannelCount() {
+        val count = ChannelStore.get(this).all().size
+        findViewById<TextView>(R.id.channels_count).text =
+            if (count == 0) getString(R.string.settings_channels_none)
+            else getString(R.string.settings_channels_count, count)
+    }
 
     private fun setUpNextVideo() {
         val group = findViewById<RadioGroup>(R.id.next_mode)
@@ -280,4 +315,10 @@ class SettingsActivity : AppCompatActivity() {
         installs.shutdown()
         super.onDestroy()
     }
+    companion object {
+        /* Forwarded up from ApprovedChannelsActivity so ParentActivity can load
+           it. Same key name on purpose: it is the same value passing through. */
+        const val EXTRA_OPEN_URL = "open_url"
+    }
+
 }

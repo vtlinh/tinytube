@@ -80,6 +80,14 @@
          is the only way out. -->
     <string name="install_retry">Install again</string>
 
+    <!-- The approved list moved inside settings: it is a parent control and
+         every other one already lives here, which also shortens the bar above
+         the browser to the two things used while browsing. -->
+    <string name="settings_channels">Approved channels</string>
+    <string name="settings_channels_explain">The channels your child can watch. This is the parental control — nothing else decides what appears in the grid.</string>
+    <string name="settings_channels_none">Nothing approved yet</string>
+    <string name="settings_channels_count">%d approved</string>
+    <string name="settings_channels_manage">Manage channels</string>
     <string name="parent_sort">Change the order</string>
     <string name="parent_sort_last_added">Recently added</string>
     <string name="parent_sort_a_z">A–Z</string>
