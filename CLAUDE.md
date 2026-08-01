@@ -22,7 +22,7 @@ android/                         the app
     Player.kt       pure: page + navigation allowlist (unit-tested)
     Challenge.kt    pure: the arithmetic fallback gate (unit-tested)
     YouTubeUrls.kt  pure: channel ids, parent allowlist (unit-tested)
-    Feed.kt         pure: channel upload feed         (unit-tested)
+    Feed.kt         pure: uploads page + Atom feed + cache (unit-tested)
     Schema.kt       pure: the SQL                     (unit-tested)
     Library.kt      pure: collate uploads into the grid (unit-tested)
     Chrome.kt       pure: find the seek bar's track     (unit-tested)
@@ -118,9 +118,18 @@ stops, green publishes.
   them. Anything needing a `Context` belongs in the Activity or Store that
   calls them.
 - **Validate video ids at every hop.** `Feed` refuses malformed ids coming off
-  a channel's feed and `Player.pageFor` refuses them again rather than trusting
-  its caller. An id is interpolated into both a URL and a JS string literal, so
-  a partially-checked one is how the wrong video gets played.
+  a channel's feed, off the uploads page, and off the on-disk cache; and
+  `Player.pageFor` refuses them again rather than trusting its caller. An id is
+  interpolated into both a URL and a JS string literal, so a partially-checked
+  one is how the wrong video gets played.
+- **The uploads page is the optional half of the grid.** 100 videos come from
+  YouTube's uploads-playlist page, which is a rendering of their own web app and
+  can be renamed under us; 15 come from the Atom feed, which is published for
+  the purpose. So `parseUploadsPage` returning empty must always fall through to
+  `Feed.parse`, and it must return empty rather than throw on anything it does
+  not recognise. Fifteen videos is a thinner grid; a crash or an empty one is a
+  broken app. `FeedTest` pins the parser against three entries lifted verbatim
+  from a live page — when YouTube renames the shape, that test is what says so.
 - **Curation is channel-level and on the device.** There is no hand-listed
   video catalog and no server-side list; `ChannelStore` is the parental
   control. Don't reintroduce a remote source of approvals without saying what

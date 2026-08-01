@@ -91,6 +91,34 @@ class YouTubeUrlsTest {
         assertNull(YouTubeUrls.feedUrl("UC" + "a".repeat(21) + "&x=1"))
     }
 
+    /* UC to UU, and nothing else touched. The id keeps its 22 characters, so
+       a valid channel id always makes a valid playlist id. */
+    @Test fun `derives the uploads playlist id`() {
+        assertEquals("UU" + ok.substring(2), YouTubeUrls.uploadsPlaylistId(ok))
+        assertEquals(24, YouTubeUrls.uploadsPlaylistId(ok)!!.length)
+        assertEquals("UUx_-yZ0123456789abcdefg", YouTubeUrls.uploadsPlaylistId("UCx_-yZ0123456789abcdefg"))
+    }
+
+    /* Same gate as feedUrl, and for the same reason: this string is fetched.
+       An unvalidated id here is a query parameter someone else chose. */
+    @Test fun `builds an uploads url only for a valid id`() {
+        assertEquals(
+            "https://www.youtube.com/playlist?list=UU${ok.substring(2)}&hl=en",
+            YouTubeUrls.uploadsUrl(ok),
+        )
+        for (bad in listOf("nope", "", "UC" + "a".repeat(21) + "&x=1", "UU" + "a".repeat(22))) {
+            assertNull("should have refused: $bad", YouTubeUrls.uploadsPlaylistId(bad))
+            assertNull("should have refused: $bad", YouTubeUrls.uploadsUrl(bad))
+        }
+    }
+
+    /* www, not m. The mobile page lists twenty videos and hides the rest
+       behind a continuation — the request is made with a desktop user agent
+       for the same reason, see ChannelFeeds. */
+    @Test fun `the uploads url is the desktop host`() {
+        assertTrue(YouTubeUrls.uploadsUrl(ok)!!.startsWith("https://www.youtube.com/"))
+    }
+
     @Test fun `recognises a channel page`() {
         for (u in listOf(
             "https://www.youtube.com/channel/$ok",

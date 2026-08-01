@@ -58,8 +58,12 @@ Removing a channel drops its videos from the grid immediately.
 > channel-level approval means rather than a gap in the implementation — so
 > choose channels you'd trust unattended, and check back on them.
 
-Uploads come from the channel's Atom feed, which carries roughly the latest 15
-and nothing older.
+The grid holds each channel's **latest 100 uploads**. Those come from the
+channel's uploads playlist page, whose first response lists exactly a hundred —
+about 300 KB gzipped per channel per refresh. If that page comes back empty for
+any reason, the channel falls back to YouTube's published Atom feed, which needs
+nothing and carries roughly the latest 15. Fifteen videos is a thinner grid; an
+empty one is a broken app.
 
 The gate is the device's own lock, so this app never invents or stores a secret
 of its own — it only learns whether the platform's check passed. On a device
@@ -99,11 +103,20 @@ Two of them matter most:
   Non-`http(s)` schemes — `intent:`, `javascript:`, `file:` — have no host and
   are refused outright.
 
-`Feed.kt` parses the Atom feed with regex on purpose. Nothing in a feed is
+`Feed.kt` parses both sources with regex on purpose. Nothing in either is
 trusted, and every id still goes through `VideoId` before it can become a tile,
-so the worst a malformed or hostile feed can do is yield *fewer* videos, never
-a bad one — while a DOM parser would add an XXE surface for correctness that
-isn't needed.
+so the worst a malformed or hostile response can do is yield *fewer* videos,
+never a bad one — while a DOM parser would add an XXE surface for correctness
+that isn't needed, and a JSON parser aimed at two megabytes of someone else's
+app state would buy about as much.
+
+The playlist page is the one place this app reads something YouTube publishes
+for its own web app rather than for consumers, so it is deliberately the
+*optional* half: the shape it looks for can be renamed without warning, and
+when it is, every channel quietly drops back to the Atom feed and 15 videos
+instead of breaking. The parser is pinned against three entries lifted verbatim
+from a live page, so a rename shows up as a failing test rather than as an empty
+grid.
 
 On top of that the player disables the long-press context menu, popups, file and
 content access, and closes itself the moment the video ends, before the

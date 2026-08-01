@@ -10,14 +10,14 @@ import java.util.concurrent.TimeUnit
 
 /* Recent uploads from every approved channel.
 
-   YouTube publishes a per-channel Atom feed that needs no API key and no
-   quota, which is what makes channel approval workable without a Data API key.
-   It carries roughly the latest 15 uploads and nothing older.
+   Two sources, tried in order, both needing no API key and no quota — which is
+   what makes channel approval workable here at all. The uploads playlist page
+   carries the latest 100; the Atom feed carries about 15 and is what happens
+   when the page yields nothing. Feed does the parsing and explains the trade.
 
    Worth being clear about what approving a channel therefore means: the grid
    will show that channel's NEW uploads as they appear, which no adult has
-   looked at. Video-level entries in catalog.json are reviewed; channel-level
-   approval is a standing trust in the channel. */
+   looked at. Channel-level approval is a standing trust in the channel. */
 object ChannelFeeds {
 
     private val client = OkHttpClient.Builder()
@@ -25,8 +25,31 @@ object ChannelFeeds {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
+    /* The playlist page is served to whoever asks, but WHAT is served depends
+       on the user agent: a mobile one is redirected to m.youtube.com, whose
+       page lists twenty videos and puts the rest behind a continuation. This
+       asks as a desktop browser so the hundred-video page comes back.
+
+       It is about two megabytes, and about three hundred kilobytes on the wire
+       once gzipped — which OkHttp asks for and unwraps by itself. That is the
+       price of the other 85 videos, per channel per refresh. */
+    private const val DESKTOP_UA =
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/120.0.0.0 Safari/537.36"
+
     private fun cacheDir(context: Context) = File(context.filesDir, "feeds").apply { mkdirs() }
-    private fun cacheFile(context: Context, channelId: String) = File(cacheDir(context), "$channelId.xml")
+
+    /* The parsed list, one line per video — not the bytes it was parsed from.
+       See Feed.encode. */
+    private fun cacheFile(context: Context, channelId: String) =
+        File(cacheDir(context), "$channelId.tsv")
+
+    /* What builds before this one wrote: the Atom feed's raw XML. Still read,
+       so the first launch after an update shows the grid it had rather than an
+       empty screen while the network is asked. Deleted as soon as there is a
+       .tsv to replace it. */
+    private fun legacyCacheFile(context: Context, channelId: String) =
+        File(cacheDir(context), "$channelId.xml")
 
     /* Whatever was last fetched, with no network.
 
@@ -45,11 +68,28 @@ object ChannelFeeds {
     fun cachedByChannel(context: Context): Map<String, List<Video>> {
         val out = LinkedHashMap<String, List<Video>>()
         for (channel in ChannelStore.get(context).all()) {
-            val f = cacheFile(context, channel.id)
-            if (!f.exists()) continue
-            try { out[channel.id] = Feed.parse(f.readText()) } catch (e: Exception) {}
+            readCache(context, channel.id)?.let { out[channel.id] = it }
         }
         return out
+    }
+
+    private fun readCache(context: Context, channelId: String): List<Video>? {
+        val f = cacheFile(context, channelId)
+        if (f.exists()) {
+            return try { Feed.decode(f.readText()) } catch (e: Exception) { null }
+        }
+        val legacy = legacyCacheFile(context, channelId)
+        if (legacy.exists()) {
+            return try { Feed.parse(legacy.readText()) } catch (e: Exception) { null }
+        }
+        return null
+    }
+
+    private fun writeCache(context: Context, channelId: String, videos: List<Video>) {
+        try {
+            cacheFile(context, channelId).writeText(Feed.encode(videos))
+            legacyCacheFile(context, channelId).delete()
+        } catch (e: Exception) {}
     }
 
     /* Refresh every approved channel. Returns what we have afterwards —
@@ -61,33 +101,51 @@ object ChannelFeeds {
         withContext(Dispatchers.IO) {
             val out = LinkedHashMap<String, List<Video>>()
             for (channel in ChannelStore.get(context).all()) {
-                val url = YouTubeUrls.feedUrl(channel.id) ?: continue
-                val body = try {
-                    client.newCall(Request.Builder().url(url).build()).execute().use { r ->
-                        if (r.isSuccessful) r.body?.string() else null
-                    }
-                } catch (e: Exception) {
-                    null
-                }
-                val parsed = body?.let { Feed.parse(it) }
-                if (parsed != null && parsed.isNotEmpty()) {
-                    /* only overwrite the cache once the bytes are known to parse */
-                    try { cacheFile(context, channel.id).writeText(body) } catch (e: Exception) {}
-                    out[channel.id] = parsed
+                val fetched = fetchUploads(channel.id)
+                if (fetched.isNotEmpty()) {
+                    /* only overwrite the cache once something has parsed */
+                    writeCache(context, channel.id, fetched)
+                    out[channel.id] = fetched
                 } else {
-                    val f = cacheFile(context, channel.id)
-                    if (f.exists()) {
-                        try { out[channel.id] = Feed.parse(f.readText()) } catch (e: Exception) {}
-                    }
+                    readCache(context, channel.id)?.let { out[channel.id] = it }
                 }
             }
             out
         }
+
+    /* The hundred, or the fifteen, or nothing.
+     *
+     * The order matters and so does the fallback being unconditional on the
+     * page's CONTENT rather than on its status. A page that returns 200 and
+     * parses to nothing — a consent interstitial, a locale that shapes the
+     * state differently, a rename of the entry we look for — is exactly the
+     * case the Atom feed exists to cover, and it is indistinguishable from
+     * success at the HTTP layer. */
+    private fun fetchUploads(channelId: String): List<Video> {
+        val page = YouTubeUrls.uploadsUrl(channelId)?.let { get(it, DESKTOP_UA) }
+        val fromPage = page?.let { Feed.parseUploadsPage(it) }.orEmpty()
+        if (fromPage.isNotEmpty()) return fromPage
+
+        val xml = YouTubeUrls.feedUrl(channelId)?.let { get(it, null) }
+        return xml?.let { Feed.parse(it) }.orEmpty()
+    }
+
+    private fun get(url: String, userAgent: String?): String? = try {
+        val request = Request.Builder().url(url)
+            .apply { if (userAgent != null) header("User-Agent", userAgent) }
+            .build()
+        client.newCall(request).execute().use { r ->
+            if (r.isSuccessful) r.body?.string() else null
+        }
+    } catch (e: Exception) {
+        null
+    }
 
     /* Drop the cache for a channel that is no longer approved, so its videos
        stop appearing immediately rather than lingering until something else
        evicts them. */
     fun forget(context: Context, channelId: String) {
         try { cacheFile(context, channelId).delete() } catch (e: Exception) {}
+        try { legacyCacheFile(context, channelId).delete() } catch (e: Exception) {}
     }
 }
