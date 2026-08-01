@@ -4,9 +4,10 @@ Guidance for Claude Code when working in this repository.
 
 ## Project
 
-**TinyTube** is an Android app for watching a parent-curated set of YouTube
-videos. A child sees a grid of approved videos and can reach nothing else. See
-`README.md` for the architecture and the approval workflow.
+**TinyTube** is an app for watching a parent-curated set of YouTube videos. A
+child sees a grid of approved videos and can reach nothing else. Android ships;
+iOS is being built alongside it under the rule below. See `README.md` for the
+architecture and the approval workflow.
 
 Everything is TinyTube: the label, the Kotlin package, the `applicationId`
 (`dev.vtlinh.tinytube`) and the Worker (`tinytube.vtlinh87.workers.dev`). The
@@ -97,7 +98,7 @@ ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
 android/                         the app
   signing.p12                    committed keystore; see README for why
-  app/src/main/java/dev/vtlinh/ytkids/
+  app/src/main/java/dev/vtlinh/tinytube/
     VideoId.kt      pure: which video ids are valid   (unit-tested)
     Player.kt       pure: page + navigation allowlist (unit-tested)
     Challenge.kt    pure: the arithmetic fallback gate (unit-tested)
@@ -179,8 +180,12 @@ still build; the only thing draft status changes is that auto-merge leaves them
 alone. Don't open one as a way of "saving" runs.
 
 The cost of batching is that nothing is checked until the end, so check it here
-instead. Run the three suites locally before opening anything — see Commands —
-and treat a red one exactly as you would a red CI run.
+instead. Before opening anything, run every suite that runs locally — the Gradle
+unit tests, `node --test`, `swift test`, and the `swiftc -parse` sweep over the
+app target — and treat a red one exactly as you would a red CI run. See
+**Commands**. Note what that list does NOT include: nothing under
+`ios/TinyTube/` is compiled by any of it, so a batched PR carrying app code is
+still unverified in the way that matters until `ios-app` runs.
 
 Don't leave finished work sitting on a branch with no PR either. "Everything
 that was asked" is the trigger, not "everything I can think of".
@@ -387,6 +392,16 @@ stops, green publishes.
   exclusions and the FileProvider that made it safe. Don't widen the source
   rectangle, don't keep the bitmap, and don't add a caller that wants the
   image rather than the number.
+
+  **iOS cannot keep the source-rectangle half of that promise, and says so.**
+  `PixelCopy` takes a rectangle; ReplayKit does not, so whole frames arrive and
+  `ScreenMeasurement` reads only the strip's rows out of them. Nothing above the
+  strip is ever copied into memory the app owns, nothing is written, kept or
+  sent, and capture stops the moment a measurement succeeds — but the frame does
+  exist briefly in a buffer the system owns. That is weaker than Android's
+  guarantee, it is the closest iOS allows, and it is a row in README's Platform
+  differences rather than a silent divergence. The rest of the rule binds both
+  platforms unchanged: it is a measurement, never a picture.
 - **Bump `BlockHeightStore.VERSION` whenever the measurement changes.** A
   preference file survives an app update, so a wrong answer written by one
   build is read back by every build after it — which is how fixing the latching
@@ -395,6 +410,12 @@ stops, green publishes.
   bumped once per wrong answer that got persisted: 2 when a failed capture
   could be stored as a result, 3 when the measurement moved from the red to the
   track and every number it had ever written became wrong.
+
+  iOS has its own `BlockHeightStore` with its own `version`, starting at 1 —
+  no iOS build has persisted a wrong answer yet. The NUMBERS need not agree
+  across platforms; the RULE does. On iOS the version also resets the
+  give-up counter, so a build that fixes the measurement gets another go on a
+  device that had stopped trying.
 - **A failed measurement must never be stored.** `Chrome.blockHeightOrNull`
   returns null for "could not tell" precisely so the Activity can distinguish
   it from a real answer that happens to equal the fallback. Latching on the
@@ -441,7 +462,14 @@ stops, green publishes.
 - **The Worker's parsing is tested by `worker.test.mjs`, run in CI.** It reads a
   rendering of YouTube's own web app, so it breaks without anyone touching it —
   it is pinned against three entries lifted verbatim from a live page. The
-  `node --test` step lives in `android.yml` on purpose: auto-merge waits only
-  for the `android` run, so a check anywhere else would not gate a merge.
+  `node --test` step lives in `android.yml`, and the reason once given for that
+  — "auto-merge waits only for the `android` run, so a check anywhere else
+  would not gate a merge" — **is no longer true**: auto-merge now requires
+  `build`, `ios-core` and `ios-app` by name, so a check in `ios.yml` gates a
+  merge just as well. What still argues for leaving it where it is: the Worker
+  is what feeds the grid on both platforms, `android` is the run that publishes,
+  and moving it would cost a rerun to prove nothing. If a third workflow ever
+  wants it, put it in whichever one is REQUIRED — that, not the file's name, is
+  what makes a check a gate.
 - Never commit API keys or tokens. The Worker's `GH_TOKEN` is a wrangler secret;
   `signing.p12` is committed on purpose and is not a secret (see README).
