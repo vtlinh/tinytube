@@ -10,3 +10,6 @@ android/app/build/
 android/local.properties
 *.iml
 .idea/
+
+# Swift Package Manager build output for ios/TinyTubeCore
+.build/
