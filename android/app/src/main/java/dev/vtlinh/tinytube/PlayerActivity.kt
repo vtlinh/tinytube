@@ -14,7 +14,6 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
-import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -197,30 +196,21 @@ class PlayerActivity : AppCompatActivity() {
         val w = findViewById<WebView>(R.id.web)
         web = w
 
-        /* The signed-in session, so a Premium account plays without ads.
+        /* NO third-party cookie opt-in here, and that is a revert rather than
+         * an omission.
          *
-         * WebViews share one process-wide cookie store, so the session parent
-         * mode established is already here — what was missing is that the
-         * player never opted in to using it, and that its document ran on
-         * youtube-nocookie.com, which carries no session by design. Player.ORIGIN
-         * is youtube.com now; this is the other half.
+         * It was added as the other half of signing the player in for Premium:
+         * WebViews share one process-wide cookie store, so parent mode's
+         * session was already present and the player merely had to opt in to
+         * using it. That whole attempt is gone — Player.ORIGIN is back on
+         * youtube-nocookie.com because youtube.com stopped every video playing
+         * — and an embed that carries no session has nothing to gain from
+         * third-party cookies. What it would still have is the tracking
+         * surface, on the child's screen, which is the one place this app
+         * spends nothing it does not have to.
          *
-         * Third-party cookies as well as first: the player document is
-         * youtube.com and so is the iframe inside it, but the media and API
-         * traffic underneath is spread across googlevideo and ytimg, and a
-         * partitioned store is how a "signed in" embed still plays ads.
-         *
-         * This is the child's screen, so be exact about what it does and does
-         * not open. It lets the player authenticate. It does not let the player
-         * NAVIGATE anywhere new — Player.isPlayerUrl is unchanged and
-         * www.youtube.com was always on it — and every control YouTube draws is
-         * still under the overlay. What it does mean is that a navigation that
-         * did get through would now show a signed-in page rather than a signed-
-         * out one, which is the cost written up in README. */
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(w, true)
-        }
+         * See Player.ORIGIN for the full story, and README for what buying
+         * Premium back would actually take. */
 
         w.settings.apply {
             javaScriptEnabled = true               // the IFrame API is javascript
@@ -427,7 +417,9 @@ class PlayerActivity : AppCompatActivity() {
            Both platforms now show the same control at the same moment, rather
            than one sitting over every video a child watches. */
         backButton?.visibility = if (value) View.VISIBLE else View.GONE
-        /* Locking takes Android's own bars with it; lifting gives them back. */
+        /* The bars stay hidden either way — see goFullscreen. This call is here
+           because showing or hiding the back button re-lays out the decor, and
+           a re-layout is one of the things that quietly puts them back. */
         goFullscreen()
         /* The ring has done its job either way: the hold completed, or the
            overlay came back and there is no hold in progress to show. */
@@ -824,10 +816,22 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    /* Hidden unless the overlay is lifted. Lifting it is what hands the player
-       to an adult, and an adult reaching for the system back or the shade is
-       not the case this is defending against. */
-    private fun goFullscreen() = applySystemBars(hidden = !revealed)
+    /* HIDDEN THE WHOLE TIME THE PLAYER IS UP, lifted overlay or not.
+     *
+     * They used to come back when the overlay was unlocked, on the reasoning
+     * that unlocking hands the player to an adult and an adult reaching for the
+     * shade is not what this defends against. That reasoning still holds — it
+     * is just not a reason to SHOW them. An adult who wants the bars swipes for
+     * them, which is what a swipe does in every other full-screen Android app,
+     * and BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE has been giving them exactly
+     * that all along. Popping them up unasked meant the video re-laid-out
+     * twice — once on unlock, once when they left again — under an adult who
+     * was reaching for the scrubber.
+     *
+     * So the rule is now the simple one: entering the player hides them,
+     * leaving it restores them, and in between the system's own gesture is the
+     * way to see them. */
+    private fun goFullscreen() = applySystemBars(hidden = true)
 
     /* Back returns to the grid. It never navigates within the WebView — going
        "back" inside the player would land on a previous YouTube page rather

@@ -427,11 +427,12 @@ stops, green publishes.
   watched — and is one row per play in the same SQLite file. Nothing in this app
   uploads it and the Worker is never told what was played.
 
-  Be precise about what that does and does not promise now. Since the player
-  signs in for Premium, **YouTube itself sees what is played**, the same as it
-  would in any signed-in browser. This rule is about THIS APP's history table,
-  which is still device-only; it is not, and can no longer be, a claim that
-  nobody knows what the child watched. Don't let the two blur together.
+  Be precise about what it promises. The player is back on the nocookie domain
+  and therefore signed OUT, so this is once again close to a real claim — but
+  don't overstate it either: parent mode browses real YouTube signed in, and
+  the moment the player is ever made first-party again (see the Premium note
+  below) YouTube sees every play. This rule is about THIS APP's history table,
+  which is device-only under every one of those arrangements.
   Nothing uploads the table, removing a channel removes its rows, and
   `WatchStore` prunes past the widest rung of `ChannelSort`'s ladder. Don't grow
   it into analytics, and don't send it anywhere.
@@ -486,19 +487,32 @@ stops, green publishes.
   allowlist is separate and narrower on purpose — accounts.google.com and the
   rest of the sign-in chain are not on it and must not be added.
 
-  What changed deliberately is the player's own origin. It runs on
-  `www.youtube.com` rather than `www.youtube-nocookie.com`, and shares the
-  cookie store, so a **YouTube Premium account plays without ads** — which is
-  the entire reason, and was asked for knowing the cost. The nocookie domain is
-  unauthenticated by design, so nothing short of this could have done it.
+  **The player runs on `www.youtube-nocookie.com` and must keep doing so.** It
+  was moved to `www.youtube.com` on purpose — same-origin with parent mode's
+  session, so a **YouTube Premium account would play without ads**, which was
+  asked for explicitly and is the only way Premium could ever apply, the
+  nocookie domain being unauthenticated by design.
 
-  The consequences, stated rather than discovered later: what a child watches is
-  now recorded against that Google account and shapes its recommendations, and a
-  navigation that did get past the overlay would show a SIGNED-IN page rather
-  than a signed-out one. `www.youtube.com` was always in the player's allowlist
-  — the IFrame API is served from it — so nothing about where the player may go
-  changed. The overlay and the allowlist are what hold, and they matter more now
-  than they did.
+  It broke playback on BOTH platforms: every video came up "Video unavailable".
+  The player page is a SYNTHETIC DOCUMENT — `loadDataWithBaseURL` on Android,
+  `loadHTMLString` on iOS — so naming `www.youtube.com` as its base claims an
+  origin the document cannot prove, and YouTube's embed refuses to serve a
+  player to it. The nocookie domain tolerates exactly that, because being
+  embedded by pages that are not YouTube is what it is FOR.
+
+  So `Player.ORIGIN` / `Player.origin` is not a configuration knob, and
+  changing it back on its own is not a trade between ads and no ads — it is
+  reintroducing the bug. `PlayerTest` pins it on both platforms now; nothing
+  did before, which is how one constant reached a phone and stopped every
+  video playing.
+
+  Premium is still possible, but it needs a different design rather than a
+  different string: navigate the WebView straight to
+  `https://www.youtube.com/embed/<id>`, which is a real first-party document
+  carrying the real session, and hook the `<video>` element's own events
+  instead of the IFrame API's. That gives up the `Bridge` contract the shared
+  page is built on, so it is a rewrite of the player's plumbing on both
+  platforms. Cost it before starting.
 - **Approving a channel approves its future uploads**, which no adult has seen.
   That is the deal the app now makes, and it is the weakest point in it.
   Anything that widens it further — auto-approving related channels, following
@@ -562,6 +576,16 @@ stops, green publishes.
   iOS polls its copy — there is no self-update — because the habit is worth
   more than the exception, and the file is read by a person asking which build
   the download link is serving.
+- **Each publish writes what it published into the release notes**, and that is
+  a workaround rather than decoration. GitHub's releases list prints a
+  release's `published_at`, which for a FIXED TAG is the day the tag was first
+  created and never moves — `android-latest` read "3 days ago" while serving an
+  APK from twenty minutes earlier. It cannot be fixed at the source: the only
+  thing that moves `published_at` is toggling the release to draft and
+  republishing, and a draft's asset URLs 404, which is the path every installed
+  phone updates through. Don't do that to buy a date. Keep the notes truthful
+  instead, and read the build numbers out of `dist/version.json` rather than
+  from the publishing run — on the reuse path that run compiled nothing.
 - **The Worker's release routes are a fixed table of path → {tag, name}**, and
   `/app/version.json` and `/app/app-release.apk` are compiled into installed
   Android apps. Renaming either strands every phone: the update mechanism is

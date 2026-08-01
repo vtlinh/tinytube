@@ -107,4 +107,23 @@ final class PlayerTests: XCTestCase {
         XCTAssertTrue(page.contains("videoId: 'dQw4w9WgXcQ'"))
         XCTAssertTrue(page.contains(Player.origin) || page.contains("youtube.com/iframe_api"))
     }
+
+    /* THE PLAYER RUNS ON THE NOCOOKIE DOMAIN, and this pins it because moving
+       it cost both apps their playback.
+     *
+     * It was set to https://www.youtube.com so a signed-in Premium account
+     * would play without ads. That shipped, and every video on both platforms
+     * came up "Video unavailable": the page is a synthetic document built by
+     * loadHTMLString, so claiming youtube.com claims an origin it cannot prove,
+     * and YouTube's embed refuses to serve a player to it. The nocookie domain
+     * exists to be embedded by pages that are not YouTube, which is exactly
+     * what this is.
+     *
+     * Nothing failed when that constant changed, which is why it reached a
+     * phone. Now something does. If you are here because this test is red, read
+     * the comment on Player.origin before changing the expectation. */
+    func testThePlayersOriginIsTheEmbeddableOne() {
+        XCTAssertEqual("https://www.youtube-nocookie.com", Player.origin)
+        XCTAssertTrue(Player.isPlayerURL(Player.origin + "/embed/aaaaaaaaaaa"))
+    }
 }
