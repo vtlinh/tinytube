@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "YtKids"
+rootProject.name = "TinyTube"
 include(":app")

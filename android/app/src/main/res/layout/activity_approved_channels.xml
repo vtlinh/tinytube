@@ -10,8 +10,8 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="@color/surface"
-        android:theme="@style/ThemeOverlay.YtKids.Toolbar"
-        android:popupTheme="@style/ThemeOverlay.YtKids.Toolbar" />
+        android:theme="@style/ThemeOverlay.TinyTube.Toolbar"
+        android:popupTheme="@style/ThemeOverlay.TinyTube.Toolbar" />
 
     <FrameLayout
         android:layout_width="match_parent"
