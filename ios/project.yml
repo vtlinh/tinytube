@@ -1,0 +1,89 @@
+# The Xcode project, as something a person can read.
+#
+# XcodeGen generates TinyTube.xcodeproj from this file; the .xcodeproj is NOT
+# committed. A pbxproj is two thousand lines of generated UUIDs — unreviewable
+# in a pull request, and it conflicts on every branch that adds a file. This is
+# the same file expressed in a form where "what changed" is a legible diff.
+#
+# CI runs `xcodegen generate` before it builds. To open it locally:
+#
+#     brew install xcodegen && (cd ios && xcodegen generate)
+#
+# You do not need Xcode to get a build — that is what the ios-app job is for.
+name: TinyTube
+
+options:
+  bundleIdPrefix: dev.vtlinh
+  # LocalAuthentication, WKWebView and everything else here is long-settled by
+  # 16. Nothing in this app wants a newer API, and a lower floor is more phones
+  # a sideloaded build still runs on.
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+packages:
+  # The pure layer, unchanged and shared. A local path rather than a version:
+  # it is the same working tree, and it is meant to move in lockstep with the
+  # app rather than be released to it.
+  TinyTubeCore:
+    path: TinyTubeCore
+
+targets:
+  TinyTube:
+    type: application
+    platform: iOS
+    sources:
+      - path: TinyTube
+    dependencies:
+      - package: TinyTubeCore
+        product: TinyTubeCore
+    info:
+      path: TinyTube/Info.plist
+      properties:
+        CFBundleDisplayName: TinyTube
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        # Dark, not dark-when-the-phone-is — the same choice as Android, and for
+        # the same reason: nearly all of this app's screen time is a video on
+        # black, and a grid that follows the system setting flashes white on
+        # every return from the player.
+        UIUserInterfaceStyle: Dark
+        # No exemption paperwork on a build nobody submits, but the key has to
+        # be present or Xcode asks about it on every archive.
+        ITSAppUsesNonExemptEncryption: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.vtlinh.tinytube
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # CI has no signing identity and never will on the free tier — free
+        # provisioning is interactive-Xcode-only. The archive is deliberately
+        # unsigned and the sideloader re-signs it. See README's Distribution.
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGN_IDENTITY: ""
+
+  TinyTubeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: TinyTubeTests
+    dependencies:
+      - target: TinyTube
+
+schemes:
+  TinyTube:
+    build:
+      targets:
+        TinyTube: all
+    test:
+      targets:
+        - TinyTubeTests
+    archive:
+      config: Release

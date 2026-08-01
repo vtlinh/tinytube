@@ -13,3 +13,10 @@ android/local.properties
 
 # Swift Package Manager build output for ios/TinyTubeCore
 .build/
+
+# Xcode. The project is GENERATED from ios/project.yml by xcodegen, so it is
+# build output rather than source — see that file for why it isn't committed.
+ios/TinyTube.xcodeproj/
+ios/build/
+xcuserdata/
+DerivedData/

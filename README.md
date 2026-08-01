@@ -518,11 +518,29 @@ nothing in the app has to change to take it.
 ```bash
 gradle -p android testReleaseUnitTest   # id, player, gate, uploads and schema tests
 gradle -p android assembleRelease       # → android/app/build/outputs/apk/release/
+swift test --package-path ios/TinyTubeCore   # the same tests, in Swift
 node --test                             # the Worker's parsers
 npx wrangler deploy --dry-run           # checks the Worker still bundles
 ```
 
-CI runs the first, the third and the fourth before anything is published.
+All four run in CI before anything is published, and all four run without a Mac
+— which is the point of `TinyTubeCore` being a package rather than a folder in
+the app target.
+
+The iOS **app** is the exception, and needs Xcode:
+
+```bash
+brew install xcodegen && (cd ios && xcodegen generate)
+open ios/TinyTube.xcodeproj
+```
+
+`TinyTube.xcodeproj` is generated and not committed — a `pbxproj` is thousands
+of lines of generated identifiers, unreviewable in a diff and conflicting on
+every branch that adds a file. `ios/project.yml` is the same thing in a form a
+person can read, and CI regenerates the project before it builds.
+
+You do not need any of this to get a build. That is what the `ios-app` job is
+for; see **Distribution**.
 
 Local builds get `versionCode 1` and `versionName "dev"`, since both come from
 CI environment variables.
