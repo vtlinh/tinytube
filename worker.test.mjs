@@ -30,6 +30,7 @@ import {
   parseChannelId,
   parseChannelTitle,
   parseChannelAvatar,
+  channelTargetFromUrl,
 } from "./worker.js";
 
 const OK_CHANNEL = "UC" + "a".repeat(22);
@@ -309,8 +310,59 @@ test("reads the avatar, and only from youtube's image hosts", () => {
   }
 });
 
-/* The third and last shape of caller input this Worker accepts. It is what
-   stands between /channel and a caller-supplied URL reaching fetch(). */
+/* The apps send the URL they are standing on; this is what makes that safe.
+   The caller's string is never fetched — it is taken apart and the address is
+   rebuilt from the validated pieces. */
+test("a channel url is taken apart and rebuilt", () => {
+  assert.deepEqual(channelTargetFromUrl("https://m.youtube.com/@Mrwhosetheboss"), {
+    handle: "Mrwhosetheboss",
+    url: "https://www.youtube.com/@Mrwhosetheboss",
+  });
+  assert.deepEqual(channelTargetFromUrl(`https://www.youtube.com/channel/${OK_CHANNEL}`), {
+    id: OK_CHANNEL,
+    url: `https://www.youtube.com/channel/${OK_CHANNEL}`,
+  });
+  /* Trailing path is dropped rather than carried into the fetch. */
+  assert.equal(
+    channelTargetFromUrl("https://m.youtube.com/@some.channel/videos").url,
+    "https://www.youtube.com/@some.channel",
+  );
+});
+
+test("anything that is not a channel page is refused", () => {
+  for (const bad of [
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",   // a watch page is not a channel
+    "https://www.youtube.com/results?search_query=x",
+    "https://www.youtube.com/",
+    "https://www.youtube.com/feed/subscriptions",
+    "https://www.youtube.com/x/@handle",             // handle must be the FIRST segment
+    "https://www.youtube.com/channel/short",
+    "https://attacker.example/@evil",                // wrong host
+    "https://www.youtube.com.attacker.example/@evil", // lookalike host
+    "https://yt3.ggpht.com/@evil",                   // an image host is not a page host
+    "javascript:alert(1)",
+    "file:///etc/passwd",
+    "",
+  ]) {
+    assert.equal(channelTargetFromUrl(bad), null, `should have refused: ${JSON.stringify(bad)}`);
+  }
+});
+
+/* Whatever a caller sends, the fetched address is one this Worker built. */
+test("the rebuilt url is always youtube's own, however odd the input", () => {
+  for (const url of [
+    "https://m.youtube.com/@Mrwhosetheboss?si=tracking#frag",
+    "https://youtube.com/@Mrwhosetheboss/",
+    "https://WWW.YOUTUBE.COM/@Mrwhosetheboss",
+  ]) {
+    const t = channelTargetFromUrl(url);
+    assert.ok(t, `should have accepted: ${url}`);
+    assert.equal(t.url, "https://www.youtube.com/@Mrwhosetheboss");
+  }
+});
+
+/* The shape a handle has to have. It is what stands between /channel and a
+   path a caller chose. */
 test("handles are a fixed pattern, not a path", () => {
   for (const ok of ["SomeChannel", "a.b-c_d", "abc", "a".repeat(30)]) {
     assert.ok(HANDLE.test(ok), `should have allowed ${ok}`);

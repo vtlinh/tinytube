@@ -145,13 +145,26 @@ struct ParentView: View {
                 /* Approving a channel approves its FUTURE uploads, which no
                    adult has seen. That is the deal this app makes and it is the
                    weakest point in it. */
+                let now = Int64(Date().timeIntervalSince1970 * 1000)
                 ChannelStore.add(
                     channelId: resolved.id,
                     title: resolved.title,
                     handle: YouTubeUrls.handleFromURL(url),
                     avatarURL: resolved.avatarURL,
-                    now: Int64(Date().timeIntervalSince1970 * 1000)
+                    now: now
                 )
+
+                /* The videos came back with the resolution, so the grid is full
+                   before the parent has closed this screen — rather than empty
+                   until the next refresh. Marked as fetched only because it
+                   PRODUCED something: marking a failure would buy the outage a
+                   full day, and an empty list here means the Worker could not
+                   tell rather than that the channel is empty. */
+                if !resolved.videos.isEmpty {
+                    VideoStore.replace(channelId: resolved.id, videos: resolved.videos)
+                    ChannelStore.markUploadsFetched(channelId: resolved.id, now: now)
+                }
+
                 message = "Approved \(resolved.title)."
                 /* Re-derive rather than just flipping the flag: resolving hit
                    the network, and the parent may have navigated away while it
@@ -222,14 +235,20 @@ struct ParentWebView: UIViewRepresentable {
 
         init(currentURL: Binding<String>) { _currentURL = currentURL }
 
-        /* YouTube's mobile site is a SINGLE-PAGE APP. Tapping a channel swaps
-           the content with pushState and never loads a page, so didFinish does
-           not fire and the tracked URL stays wherever the last real navigation
-           left it — which is why the approve button never lit up.
-
-           Observing `url` catches those history updates. It is the iOS
-           counterpart of Android's doUpdateVisitedHistory, which exists in
-           ParentActivity for precisely the same reason and says so. */
+        /* Track the address itself, not page loads.
+         *
+         * Navigating YouTube DOES change the URL — tapping a channel lands on
+         * m.youtube.com/@Whoever, and `webView.url` reflects it immediately.
+         * What it does not always do is LOAD A PAGE: the mobile site routes
+         * client-side, and `didFinish` fires only for real navigations. Reading
+         * the URL solely in `didFinish`, which is what this did at first, meant
+         * the tracked URL sat on whatever last triggered one — and the approve
+         * button was deciding from a stale address.
+         *
+         * Observing `url` covers both kinds, because both change it. Android
+         * needs the same thing for the same reason and does it with
+         * doUpdateVisitedHistory, which fires on history updates as well as
+         * loads; this is its counterpart. */
         func observe(_ web: WKWebView) {
             observation = web.observe(\.url, options: [.new]) { [weak self] _, change in
                 guard let url = change.newValue??.absoluteString else { return }

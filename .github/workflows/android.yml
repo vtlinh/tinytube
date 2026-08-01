@@ -51,7 +51,88 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Which halves of the repository does this change actually touch?
+  #
+  # Seconds on ubuntu, and it decides whether the expensive jobs run at all. A
+  # Worker-only change has no business spending a Gradle build or a macOS
+  # runner, and before this it spent both on every pull request.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+      worker: ${{ steps.filter.outputs.worker }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+
+          # Anything but a pull request builds everything: a push to main and a
+          # manual dispatch are both cases where somebody wants the artifact.
+          if [ -z "${PR:-}" ]; then
+            echo "Not a pull request — running everything."
+            echo "android=true" >> "$GITHUB_OUTPUT"
+            echo "worker=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Failing to read the file list runs everything. The costly direction
+          # to be wrong in is the one where a break merges unnoticed.
+          if ! FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
+            echo "Could not list PR #$PR's files — running everything."
+            echo "android=true" >> "$GITHUB_OUTPUT"
+            echo "worker=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          ANDROID=false
+          WORKER=false
+          for f in $FILES; do
+            case "$f" in
+              android/*|.github/workflows/android.yml) ANDROID=true ;;
+            esac
+            case "$f" in
+              worker.js|worker.test.mjs|wrangler.toml) WORKER=true ;;
+            esac
+          done
+          echo "android=$ANDROID worker=$WORKER"
+          echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
+          echo "worker=$WORKER" >> "$GITHUB_OUTPUT"
+
+  # The Worker's parsers, in a job of their own.
+  #
+  # They used to be a step inside `build`, which meant they only ran when the
+  # APK was built — so gating `build` on android/** would have silently stopped
+  # testing the Worker on exactly the changes that touch it. Splitting them out
+  # is what lets `build` skip.
+  #
+  # Required by auto-merge BY NAME, like the others. It reads a rendering of
+  # YouTube's own web app and is the piece most likely to break without anyone
+  # touching it, so it has to be able to hold a merge.
+  worker:
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node --test
+      - name: The Worker still bundles
+        run: npx wrangler deploy --dry-run
+
+  # The job name is the check-run name, and auto-merge.yml requires this exact
+  # string. Renaming it silently stops the merge gate waiting for Android.
+  #
+  # Skipped — not absent — when nothing under android/ changed. A job skipped by
+  # `if` still REPORTS, as `skipped`, which auto-merge counts as passing; a
+  # workflow skipped by a path filter reports nothing and would hang the merge
+  # forever. That distinction is why the `pull_request` trigger above stays
+  # unfiltered and the filtering happens here.
   build:
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -194,16 +275,6 @@ jobs:
       # Reaching here on a publish means the reuse was refused, which means no
       # run has tested this exact tree, which is exactly when skipping the
       # tests would be skipping the only check there is.
-      # The Worker's parsing used to live in the app, under the Kotlin tests.
-      # It moved to worker.js to save the phone two megabytes per channel, and
-      # its tests moved with it — it is the piece most likely to break without
-      # anyone touching it, because it reads a rendering of YouTube's own web
-      # app. Run here rather than in a workflow of its own so auto-merge waits
-      # for it: it only waits for `android`.
-      - name: Worker tests
-        if: steps.reuse.outputs.reused != 'yes'
-        run: node --test
-
       - name: Unit tests and release APK
         if: steps.reuse.outputs.reused != 'yes'
         run: gradle -p android testReleaseUnitTest assembleRelease

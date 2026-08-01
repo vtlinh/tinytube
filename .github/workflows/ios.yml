@@ -34,7 +34,14 @@ concurrency:
 jobs:
   # The job name is the check-run name, and auto-merge.yml requires this exact
   # string before it will merge. Renaming the job silently stops it waiting.
+  #
+  # Skipped, not absent, when nothing under ios/ changed — a Worker-only or
+  # Android-only change has no Swift to test. A job skipped by `if` still
+  # REPORTS, as `skipped`, which auto-merge counts as passing; a path filter on
+  # the workflow would report nothing and hang the merge.
   ios-core:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

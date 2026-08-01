@@ -145,7 +145,15 @@ jobs:
           # it filters with a job-level `if` rather than a path filter on the
           # workflow, since a path-filtered workflow reports nothing and this
           # loop would wait for it forever.
-          REQUIRED="build ios-core ios-app"
+          # `worker` joins them because the Worker's parsers stopped being a
+          # step inside `build`. They had to: gating `build` on android/** would
+          # otherwise have silently stopped testing the Worker on exactly the
+          # changes that touch it. Now every one of these four skips itself when
+          # its half of the repository is untouched, and a skipped check counts
+          # as passing below — so a Worker-only pull request spends no Gradle
+          # build and no macOS runner, while a break in any half still holds
+          # the merge.
+          REQUIRED="build ios-core ios-app worker"
           if RUNS=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
             --jq '[.check_runs[] | select(.status == "completed")
                    | select([.conclusion] | inside(["success","neutral","skipped"]))
