@@ -364,13 +364,18 @@ class PlayerActivity : AppCompatActivity() {
              * certain, and it is wrong". A readout that only appears when
              * something is known to be broken cannot report the case where
              * nothing knows it is broken. */
+            /* measureAttempts and measureNote belong to THIS video; the strip
+               height is process-wide and may have been measured during an
+               earlier one. Saying so avoids the reading that cost a round —
+               "strip 35 px · 0 tries · not tried" looks like a contradiction
+               until you know the 35 came from the video before it. */
             Toast.makeText(
                 this,
                 getString(
                     R.string.player_revealed_detail,
                     bottomBlocker?.height ?: 0,
-                    measureAttempts,
-                    measureNote,
+                    if (measureAttempts == 0) getString(R.string.player_measured_earlier)
+                    else getString(R.string.player_measured_now, measureAttempts, measureNote),
                 ),
                 Toast.LENGTH_LONG,
             ).show()
@@ -500,6 +505,11 @@ class PlayerActivity : AppCompatActivity() {
         try {
             PixelCopy.request(window, src, bmp, { result ->
                 val found = if (result == PixelCopy.SUCCESS) {
+                    /* Keep the frame, so a reading that looks wrong can be
+                       looked at rather than reasoned about. Same rectangle as
+                       was analysed, app-internal, one file, overwritten each
+                       time — see CaptureStore. */
+                    CaptureStore.save(this, bmp)
                     readBlockHeight(bmp, vw, stripH)
                         .also { if (it == null) measureNote = "copied, no bar" }
                 } else {

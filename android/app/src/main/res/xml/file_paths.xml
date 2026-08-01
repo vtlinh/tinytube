@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exactly one directory is shareable, and it holds exactly one file: the
+     player's last measured strip. Sharing it is an explicit tap in About and
+     the grant lasts for that one intent. Nothing else in the app's storage is
+     reachable through the provider. -->
+<paths>
+    <files-path name="capture" path="capture/" />
+</paths>

@@ -5,11 +5,14 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
+import android.graphics.BitmapFactory
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.util.concurrent.ExecutorService
@@ -31,6 +34,10 @@ class AboutActivity : AppCompatActivity() {
        with it rather than leaving a rule under nothing. */
     private lateinit var notifDivider: View
     private lateinit var playerMeasure: TextView
+    private lateinit var capturePreview: ImageView
+    private lateinit var captureNone: TextView
+    private lateinit var captureShare: Button
+    private lateinit var captureDelete: Button
 
     /* One at a time, so an impatient double-tap on Install queues instead of
        racing two PackageInstaller commits. */
@@ -55,6 +62,16 @@ class AboutActivity : AppCompatActivity() {
         notifAction = findViewById(R.id.notif_action)
         notifDivider = findViewById(R.id.notif_divider)
         playerMeasure = findViewById(R.id.player_measure)
+        capturePreview = findViewById(R.id.capture_preview)
+        captureNone = findViewById(R.id.capture_none)
+        captureShare = findViewById(R.id.capture_share)
+        captureDelete = findViewById(R.id.capture_delete)
+        captureShare.setOnClickListener { shareCapture() }
+        captureDelete.setOnClickListener {
+            CaptureStore.clear(this)
+            renderCapture()
+            Toast.makeText(this, R.string.about_capture_deleted, Toast.LENGTH_SHORT).show()
+        }
         findViewById<Button>(R.id.player_remeasure).setOnClickListener {
             BlockHeightStore.clear(this)
             /* The store is only half of it: the running process caches the
@@ -82,6 +99,7 @@ class AboutActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         renderMeasurement()
+        renderCapture()
         refreshUpdateState()
         /* re-read on every resume: returning from the system Settings screen is
            exactly how this changes */
@@ -123,6 +141,43 @@ class AboutActivity : AppCompatActivity() {
             "${BlockHeightStore.storedVersion(this)} of ${BlockHeightStore.currentVersion()}",
             BlockHeightStore.note(this),
         )
+    }
+
+    /* The frame the analysis looked at, if there is one.
+     *
+     * Shown small — it is a wide strip and this is a phone — with Share for
+     * getting the real pixels off the device, since a screenshot of a preview
+     * is not what anyone needs to inspect. */
+    private fun renderCapture() {
+        val has = CaptureStore.exists(this)
+        captureNone.visibility = if (has) View.GONE else View.VISIBLE
+        capturePreview.visibility = if (has) View.VISIBLE else View.GONE
+        captureShare.isEnabled = has
+        captureDelete.isEnabled = has
+        if (!has) { capturePreview.setImageDrawable(null); return }
+        capturePreview.setImageBitmap(
+            try {
+                BitmapFactory.decodeFile(CaptureStore.file(this).absolutePath)
+            } catch (e: Throwable) {
+                null
+            },
+        )
+    }
+
+    private fun shareCapture() {
+        if (!CaptureStore.exists(this)) return
+        val uri = try {
+            FileProvider.getUriForFile(this, "$packageName.files", CaptureStore.file(this))
+        } catch (e: Throwable) {
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("image/png")
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(Intent.createChooser(send, getString(R.string.about_capture_share_title)))
+        } catch (e: Throwable) {}
     }
 
     /* ---- notifications ---- */
