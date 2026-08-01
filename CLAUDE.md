@@ -53,14 +53,18 @@ explicitly — sort by an explicit tiebreaker rather than trusting the order in.
 
 Two answers already bought with a spike, so don't re-derive them:
 
-- **`Chrome.swift` is unused on iOS on purpose. Don't delete it as dead code.**
-  No iOS API hands the app the composited pixels of a playing video —
+- **`Chrome.swift` is fed by ReplayKit on iOS, and by nothing else.**
   `takeSnapshot` is software-painted, `CALayer.render(in:)` can't see an
-  out-of-process layer, `drawHierarchy` returns black over video on devices
-  *while working in the simulator*, and ReplayKit is a recording API that
-  yields a picture rather than a measurement. The iOS blocker is a fixed 16pt.
-  The file stays because its Kotlin counterpart is live and the line-for-line
-  rule would otherwise have a hole in it.
+  out-of-process layer, and `drawHierarchy` returns black over video on devices
+  *while working in the simulator* — don't "confirm" that one on a simulator.
+  ReplayKit reads the real screen, which is what Android's `PixelCopy` does.
+  That it hands over a frame is NOT a reason to refuse it: `PixelCopy` hands
+  over a bitmap too, and the rule below is about retention, not about pixels
+  existing. What is different on iOS is the **consent alert** — once per app
+  process, again after 8 minutes backgrounded — which a child can be the one
+  looking at. So it captures **once per install**, stores the answer per
+  display, and gives up after three fruitless launches rather than prompting
+  forever. A failure stores nothing. See `ScreenMeasurement`.
 - **Google sign-in inside a webview works only by user-agent evasion**, on both
   platforms — Android removes `; wv`, iOS adds `Version/… Safari/…`. It is
   expected to break. `SFSafariViewController` is not the fallback: the app
@@ -76,7 +80,9 @@ worker.test.mjs                  its parsers, under `node --test` (CI runs it)
 ios/project.yml                  the Xcode project, as a readable file; the
                                  .xcodeproj is GENERATED, never committed
 ios/TinyTube/                    the app target
-  PlayerChrome.swift             the fixed bottom inset (the spike's answer)
+  PlayerChrome.swift             the blocker's height: measured, else 16pt
+  BlockHeightStore.swift         it, remembered — per display, per version
+  ScreenMeasurement.swift        ReplayKit capture; feeds Chrome, once ever
   BrowserUserAgent.swift         the Safari suffix that lets Google sign in
 ios/TinyTubeTests/               app-target tests; run on a simulator in CI
 ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
@@ -135,8 +141,21 @@ commands; CI provisions it.
 avoid.** `swift test` covers `TinyTubeCore` and nothing else — that package is
 Linux-buildable on purpose. Everything under `ios/TinyTube/` needs Xcode, so the
 `ios-app` job on a macOS runner is the first thing that ever compiles it. Don't
-claim a screen is verified because the core tests are green. If you need the
-project locally on a Mac:
+claim a screen is verified because the core tests are green.
+
+One thing you CAN do here, and should before batching up a lot of app code:
+
+```bash
+for f in ios/TinyTube/*.swift ios/TinyTubeTests/*.swift; do swiftc -parse "$f"; done
+```
+
+`-parse` stops before type checking, so it never loads UIKit or ReplayKit and
+runs on Linux. It catches typos and malformed declarations; it CANNOT tell you
+an API call is wrong. `ios-core` runs the same check, so a syntax error costs a
+Linux run rather than a macOS one — but a batched PR full of app code is still
+mostly unverified until `ios-app` runs. Say so when reporting it.
+
+If you need the project locally on a Mac:
 
 ```bash
 brew install xcodegen && (cd ios && xcodegen generate)   # writes TinyTube.xcodeproj

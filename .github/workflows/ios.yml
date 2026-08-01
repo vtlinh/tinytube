@@ -64,6 +64,29 @@ jobs:
       - name: Core tests
         run: /opt/swift/usr/bin/swift test --package-path ios/TinyTubeCore
 
+      # A syntax check on the APP target, on the cheap runner.
+      #
+      # `-parse` stops before type checking, so it never tries to load UIKit,
+      # WebKit or ReplayKit and runs perfectly well on Linux. It cannot tell you
+      # that an API call is wrong — only ios-app can — but it catches every
+      # typo, unbalanced brace and malformed declaration for free.
+      #
+      # That matters because of how this repository batches: a pull request is
+      # opened once the whole request is implemented, so app code can accumulate
+      # for a long time with NO local check at all — `swift test` covers only
+      # TinyTubeCore. This is the one thing that can be said about
+      # ios/TinyTube/** without a Mac, so it is said here rather than nowhere.
+      - name: Parse the app target
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FILES=(ios/TinyTube/*.swift ios/TinyTubeTests/*.swift)
+          if [ ${#FILES[@]} -eq 0 ]; then echo "No app sources yet."; exit 0; fi
+          for f in "${FILES[@]}"; do
+            echo "parse $f"
+            /opt/swift/usr/bin/swiftc -parse "$f"
+          done
+
   # Does this change touch the iOS app at all?
   #
   # A macOS runner bills at 10x, so a free-plan private repository gets about

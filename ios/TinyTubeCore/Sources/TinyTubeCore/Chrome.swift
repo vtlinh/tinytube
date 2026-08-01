@@ -23,12 +23,15 @@ import Foundation
 
    Ported from Chrome.kt, constant for constant.
 
-   ⚠️ NOTHING ON iOS CAN FEED IT. This file is UNUSED on iOS, deliberately.
+   ⚠️ ON iOS ONLY ReplayKit CAN FEED IT, and it asks the user first — so the
+   capture happens ONCE PER INSTALL. See ScreenMeasurement.swift in the app
+   target for the shape that forces, and BlockHeightStore.swift for where the
+   answer goes.
 
    On Android the pixels come from PixelCopy, which reads the composited window
    INCLUDING the hardware video surface — precisely why WebView.draw(Canvas)
-   failed there and PixelCopy did not. iOS has no PixelCopy, and every candidate
-   fails the same way:
+   failed there and PixelCopy did not. iOS has no PixelCopy, and every cheaper
+   candidate fails the same way:
 
      - WKWebView.takeSnapshot(with:) is software-painted. WebKit's own Tim
        Horton, on the bug that added it: "a software painted snapshot, meaning
@@ -39,17 +42,15 @@ import Foundation
      - UIView.drawHierarchy(in:afterScreenUpdates:) returns black over video ON
        DEVICES, while working in the SIMULATOR. Do not "verify" this on a
        simulator; it will agree with you and be wrong.
-     - ReplayKit does capture the composited screen, and is refused rather than
-       unavailable: it is a recording API that yields a picture, and the rule in
-       CLAUDE.md is that this capture stays a measurement.
+   ReplayKit is the one that works, and its cost is a consent alert rather than
+   a blank frame. That it hands over a picture is not a reason to refuse it —
+   PixelCopy hands over a bitmap too, and the rule in CLAUDE.md is about
+   retention, not about pixels existing. What the alert buys is rarity: iOS
+   captures once, stores the answer per display, and never asks again.
 
-   So the iOS player uses a fixed 16pt inset — the same constant Android's
-   player_bottom_block falls back to before it has measured.
-
-   Kept, and kept tested, for two reasons: the port was already paid for, and
-   the Kotlin counterpart it mirrors is still live, so deleting it would put a
-   hole in the line-for-line rule for no gain. If iOS ever exposes composited
-   pixels, the logic is here with its tests already around it.
+   Until it has an answer — and on a device that refuses the capture — the iOS
+   player uses a fixed 16pt inset, the same constant Android's
+   player_bottom_block falls back to.
 
    See README's Platform differences and the spike written up beneath it. */
 public enum Chrome {
