@@ -1,0 +1,409 @@
+package dev.vtlinh.tinytube
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageInstaller
+import android.net.Uri
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.content.pm.PackageInfoCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.util.concurrent.TimeUnit
+
+/* Self-update against the fixed "android-latest" GitHub release: CI uploads the
+   APK plus a version.json carrying the build's versionCode. On app start and
+   each return to the foreground the two are compared; if the release is newer
+   the APK is downloaded straight away so it's ready to go, and a notification
+   offers to install it. Installing waits for a tap — it restarts the app, so it
+   is never done out from under whoever is watching something.
+
+   That tap commits a PackageInstaller session with USER_ACTION_NOT_REQUIRED:
+   once this app is the installer of record of itself (true from the first
+   self-performed update on), Android 12+ applies it with no further
+   confirmation. Every CI build is signed with the same committed key, so
+   updates install over the existing app rather than being refused. */
+object Updater {
+    /* Not the GitHub release directly. The repository is private, so those
+       assets answer 404 to a device with no credential — every installed copy
+       would quietly stop finding updates, with nothing on the device able to
+       recover from it. The Worker holds a read-only GitHub token and serves
+       these two files, and only these two, without one. */
+    private const val BASE = "${Endpoints.WORKER}/app"
+    private const val VERSION_URL = "$BASE/version.json"
+    private const val APK_URL = "$BASE/app-release.apk"
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
+
+    @Volatile private var lastAutoCheck = 0L
+
+    /* Runs whenever the app is brought to the foreground, throttled to once a
+       minute. Fetches a newer build as soon as it's published so it's sitting on
+       disk ready to go, then posts a notification and stops. Downloading can't
+       interrupt what's on screen the way installing could, so it isn't held
+       back. */
+    fun autoCheck(context: Context, scope: CoroutineScope) {
+        val now = System.currentTimeMillis()
+        if (now - lastAutoCheck < 60_000) return
+        lastAutoCheck = now
+        scope.launch {
+            val latest = latestVersion() ?: return@launch
+            if (latest.first <= currentVersionCode(context)) return@launch
+            /* a build this device already refused isn't news — offering it
+               again just replaces the reason it failed with another prompt */
+            if (isRejected(context, latest.first)) return@launch
+            val apk = ensureApk(context, latest.first) ?: return@launch
+            if (apk.length() <= 0L) return@launch
+            rememberPendingName(context, latest.second)
+            notifyUpdateReady(context, latest.second)
+        }
+    }
+
+    /* ---- "update ready" notification ---- */
+
+    private const val UPDATE_CHANNEL = "updates"
+    private const val UPDATE_NOTIF_ID = 4711
+    /* Its own slot, so the next foreground's "update ready" cannot overwrite
+       the explanation of why the last install failed. */
+    private const val FAILED_NOTIF_ID = 4712
+    private const val REJECTED_VERSION_KEY = "rejectedUpdateCode"
+    /* Left on the old name deliberately, along with the manifest filter that
+       matches it. A notification posted by the build before an update holds a
+       PendingIntent naming this string; renaming it would leave that Install
+       button doing nothing until the notification was reposted. It is an
+       identifier rather than a label — same reason applicationId did not move
+       when the app was renamed. */
+    const val ACTION_INSTALL_UPDATE = "dev.vtlinh.ytkids.INSTALL_UPDATE"
+    private const val PENDING_NAME_KEY = "pendingUpdateName"
+
+    fun rememberPendingName(context: Context, versionName: String) {
+        prefs(context).edit().putString(PENDING_NAME_KEY, versionName).apply()
+    }
+
+    /* version name of the downloaded-but-not-installed build, if any */
+    fun pendingUpdateName(context: Context): String? {
+        val cached = prefs(context).getLong(CACHED_VERSION_KEY, -1L)
+        if (cached <= currentVersionCode(context)) return null
+        val f = apkFile(context)
+        if (!f.exists() || f.length() <= 0L) return null
+        return prefs(context).getString(PENDING_NAME_KEY, null) ?: cached.toString()
+    }
+
+    private fun notifyUpdateReady(context: Context, versionName: String) {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return
+        try {
+            nm.createNotificationChannel(
+                /* LOW: it lands silently in the shade. The check runs while the
+                   app is already open, so a sound would be noise — and this is
+                   an app a child is holding. */
+                NotificationChannel(UPDATE_CHANNEL, "Updates", NotificationManager.IMPORTANCE_LOW),
+            )
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
+            val install = PendingIntent.getBroadcast(
+                context, 1,
+                Intent(context, UpdateReceiver::class.java).setAction(ACTION_INSTALL_UPDATE),
+                flags,
+            )
+            /* Tapping the notification opens the GRID, not the settings the
+               update controls now live on. A notification sits in the shade
+               and on the lock screen, where a child can reach it — a content
+               intent straight into the parent's settings would be a way past
+               ChallengeActivity, and one of the things on that screen is how
+               long the player's corner has to be held. The Install action
+               below still does the useful thing in one tap without opening
+               anything. */
+            val open = PendingIntent.getActivity(
+                context, 2,
+                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                flags,
+            )
+            nm.notify(
+                UPDATE_NOTIF_ID,
+                NotificationCompat.Builder(context, UPDATE_CHANNEL)
+                    .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                    .setContentTitle("Update ready — v$versionName")
+                    .setContentText("Downloaded. Tap Install to update.")
+                    .setContentIntent(open)
+                    .addAction(0, "Install", install)
+                    .setOnlyAlertOnce(true)
+                    .setAutoCancel(true)
+                    .build(),
+            )
+        } catch (e: Exception) {}
+    }
+
+    /* An install session reports its outcome long after the tap that started
+       it. A failure that goes nowhere leaves the button reading "Installing…"
+       for good, so put the reason in the shade. */
+    fun notifyInstallFailed(context: Context, reason: String) {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return
+        try {
+            nm.createNotificationChannel(
+                NotificationChannel(UPDATE_CHANNEL, "Updates", NotificationManager.IMPORTANCE_LOW),
+            )
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
+            /* Tapping the notification opens the GRID, not the settings the
+               update controls now live on. A notification sits in the shade
+               and on the lock screen, where a child can reach it — a content
+               intent straight into the parent's settings would be a way past
+               ChallengeActivity, and one of the things on that screen is how
+               long the player's corner has to be held. The Install action
+               below still does the useful thing in one tap without opening
+               anything. */
+            val open = PendingIntent.getActivity(
+                context, 2,
+                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                flags,
+            )
+            nm.notify(
+                FAILED_NOTIF_ID,
+                NotificationCompat.Builder(context, UPDATE_CHANNEL)
+                    .setSmallIcon(android.R.drawable.stat_notify_error)
+                    .setContentTitle("Update could not be installed")
+                    .setContentText(reason)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(reason))
+                    .setContentIntent(open)
+                    .setAutoCancel(true)
+                    .build(),
+            )
+        } catch (e: Exception) {}
+    }
+
+    fun cancelUpdateNotification(context: Context) {
+        try {
+            val nm = context.getSystemService(NotificationManager::class.java)
+            nm?.cancel(UPDATE_NOTIF_ID)
+            /* Clear the failure notice too — separate ids stopped one
+               overwriting the other, but left the failure with nothing to
+               remove it after a later attempt succeeded. */
+            nm?.cancel(FAILED_NOTIF_ID)
+        } catch (e: Exception) {}
+    }
+
+    fun isRejected(context: Context, versionCode: Long): Boolean =
+        versionCode >= 0 && prefs(context).getLong(REJECTED_VERSION_KEY, -1L) == versionCode
+
+    /* The install didn't happen but the build is fine — a dismissed
+       confirmation, or a session we abandoned ourselves. Put the offer back. */
+    fun reofferPendingUpdate(context: Context) {
+        val name = pendingUpdateName(context) ?: return
+        notifyUpdateReady(context, name)
+    }
+
+    /* The OS rejected this exact build — a signing mismatch, an incompatible or
+       malformed package. Re-committing the same bytes gets the same answer, so
+       drop them and stop offering it. A later versionCode is a different
+       question and downloads normally. */
+    fun rejectPendingUpdate(context: Context) {
+        val cached = prefs(context).getLong(CACHED_VERSION_KEY, -1L)
+        try { apkFile(context).delete() } catch (e: Exception) {}
+        prefs(context).edit()
+            .remove(CACHED_VERSION_KEY)
+            .remove(PENDING_NAME_KEY)
+            .putLong(REJECTED_VERSION_KEY, cached)
+            .apply()
+        cancelUpdateNotification(context)
+    }
+
+    /* Install the APK autoCheck already fetched. Returns why a commit didn't
+       happen — null when it did. The caller has to tell "nothing to install"
+       from "the system refused", because those need opposite handling. */
+    fun installPending(context: Context): String? {
+        val cached = prefs(context).getLong(CACHED_VERSION_KEY, -1L)
+        if (cached <= currentVersionCode(context)) return "There is no newer version waiting."
+        val f = apkFile(context)
+        if (!f.exists() || f.length() <= 0L) {
+            /* cacheDir is evictable and "Clear cache" wipes it, while the
+               marker in prefs survives — drop the marker so the next check
+               downloads again instead of pointing at nothing */
+            prefs(context).edit().remove(CACHED_VERSION_KEY).remove(PENDING_NAME_KEY).apply()
+            return "The downloaded update was no longer on the device. It will be fetched again."
+        }
+        return try {
+            abandonSessions(context)
+            install(context, f)
+            null
+        } catch (e: Exception) {
+            /* createSession/openWrite/commit threw — low storage, or the
+               install permission revoked since we checked. fetchApk
+               short-circuits on a cached file, so without clearing it the
+               update would be wedged for good. */
+            try { apkFile(context).delete() } catch (e2: Exception) {}
+            prefs(context).edit().remove(CACHED_VERSION_KEY).remove(PENDING_NAME_KEY).apply()
+            "The system refused to start the install (${e.message}). It will be downloaded again."
+        }
+    }
+
+    /* Android requires a per-app "Install unknown apps" grant before an app can
+       install packages. Without it PackageInstaller is blocked outright. */
+    fun canInstall(context: Context): Boolean =
+        context.packageManager.canRequestPackageInstalls()
+
+    fun openInstallPermission(context: Context) {
+        try {
+            context.startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${context.packageName}"),
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e: Exception) {
+            try {
+                context.startActivity(
+                    Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (e2: Exception) {}
+        }
+    }
+
+    fun currentVersionCode(context: Context): Long {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        return PackageInfoCompat.getLongVersionCode(info)
+    }
+
+    suspend fun latestVersion(): Pair<Long, String>? = withContext(Dispatchers.IO) {
+        try {
+            client.newCall(Request.Builder().url(VERSION_URL).build()).execute().use { r ->
+                if (!r.isSuccessful) return@withContext null
+                val body = r.body?.string() ?: return@withContext null
+                val code = Regex("\"versionCode\"\\s*:\\s*(\\d+)")
+                    .find(body)?.groupValues?.get(1)?.toLongOrNull() ?: return@withContext null
+                val name = Regex("\"versionName\"\\s*:\\s*\"([^\"]+)\"")
+                    .find(body)?.groupValues?.get(1) ?: code.toString()
+                Pair(code, name)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private const val APK_NAME = "update.apk"
+    private const val CACHED_VERSION_KEY = "cachedApkVersion"
+
+    private fun apkFile(context: Context) = File(context.cacheDir, APK_NAME)
+    private fun prefs(context: Context) =
+        context.getSharedPreferences("app", Context.MODE_PRIVATE)
+
+    /* One download at a time: the foreground check and the About button both
+       call this, and without the lock two of them write the same .part file and
+       produce a corrupt APK. Whoever waits finds it cached and returns. */
+    private val apkLock = Mutex()
+
+    suspend fun ensureApk(context: Context, versionCode: Long): File? = withContext(Dispatchers.IO) {
+        apkLock.withLock { fetchApk(context, versionCode) }
+    }
+
+    private fun fetchApk(context: Context, versionCode: Long): File? {
+        val f = apkFile(context)
+        if (f.exists() && f.length() > 0 &&
+            prefs(context).getLong(CACHED_VERSION_KEY, -1L) == versionCode
+        ) {
+            return f   // already downloaded this version
+        }
+        /* download to a .part file and rename on completion, so a kill
+           mid-transfer can't leave a truncated file where a complete APK
+           belongs */
+        val part = File(context.cacheDir, "$APK_NAME.part")
+        return try {
+            client.newCall(Request.Builder().url(APK_URL).build()).execute().use { r ->
+                /* Not before we know the download can happen. version.json and
+                   the APK are separate uploads, so there is a window on every
+                   release where the new version is advertised and the APK is
+                   still going up — clearing the marker first would throw away a
+                   good APK the user was one tap from installing. */
+                if (!r.isSuccessful) return null
+                val stream = r.body?.byteStream() ?: return null
+                prefs(context).edit().remove(CACHED_VERSION_KEY).apply()
+                stream.use { input -> part.outputStream().use { out -> input.copyTo(out) } }
+            }
+            if (part.length() <= 0L) return null
+            try { f.delete() } catch (e: Exception) {}
+            if (!part.renameTo(f)) {
+                part.copyTo(f, overwrite = true)
+                part.delete()
+            }
+            prefs(context).edit().putLong(CACHED_VERSION_KEY, versionCode).apply()
+            f
+        } catch (e: Exception) {
+            try { part.delete() } catch (e2: Exception) {}
+            try { f.delete() } catch (e2: Exception) {}
+            prefs(context).edit().remove(CACHED_VERSION_KEY).apply()
+            null
+        }
+    }
+
+    fun cleanupApk(context: Context) {
+        try { apkFile(context).delete() } catch (e: Exception) {}
+        prefs(context).edit().remove(CACHED_VERSION_KEY).remove(PENDING_NAME_KEY).apply()
+        cancelUpdateNotification(context)
+    }
+
+    /* Called on app start: if the running version is already at (or past) the
+       cached APK's version, the update went through — clean it up. Otherwise
+       the cached APK is kept for a retry. */
+    fun cleanupIfInstalled(context: Context) {
+        val cached = prefs(context).getLong(CACHED_VERSION_KEY, -1L)
+        if (cached >= 0 && cached <= currentVersionCode(context)) cleanupApk(context)
+    }
+
+    /* Abandon leftover PackageInstaller sessions for our own updates. A stalled
+       "Installing…" leaves a committed session that never resolves; clearing it
+       lets a fresh commit start clean. */
+    fun abandonSessions(context: Context) {
+        try {
+            val pi = context.packageManager.packageInstaller
+            for (s in pi.mySessions) {
+                try { pi.abandonSession(s.sessionId) } catch (e: Exception) {}
+            }
+        } catch (e: Exception) {}
+    }
+
+    /* Commit the update. Silent when permitted (Android 12+, this app its own
+       installer of record); otherwise the system posts its confirmation UI via
+       InstallReceiver. The process is killed by the system as it applies. */
+    fun install(context: Context, apk: File) {
+        val pi = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        params.setAppPackageName(context.packageName)
+        if (Build.VERSION.SDK_INT >= 31) {
+            params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
+        /* Android 14+ only honors USER_ACTION_NOT_REQUIRED silently when this
+           app is the package's registered "update owner". Claim it so that from
+           the first ownership-claiming update onward every self-update installs
+           with no banner tap. That very first claim still shows one
+           confirmation; there is no way around the initial handshake. */
+        if (Build.VERSION.SDK_INT >= 34) {
+            params.setRequestUpdateOwnership(true)
+        }
+        val sessionId = pi.createSession(params)
+        pi.openSession(sessionId).use { session ->
+            session.openWrite("app.apk", 0, apk.length()).use { out ->
+                apk.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
+            }
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+            val pending = PendingIntent.getBroadcast(
+                context, 0, Intent(context, InstallReceiver::class.java), flags,
+            )
+            session.commit(pending.intentSender)
+        }
+    }
+}

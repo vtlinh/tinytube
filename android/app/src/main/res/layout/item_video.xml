@@ -14,7 +14,7 @@
 
     <!-- Ratio-locked so the grid does not reflow as posters arrive; see
          RatioImageView. -->
-    <dev.vtlinh.ytkids.RatioImageView
+    <dev.vtlinh.tinytube.RatioImageView
         android:id="@+id/thumb"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

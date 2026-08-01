@@ -1,9 +1,8 @@
 # TinyTube
 
-An Android app for watching YouTube videos for kids. The repository is still
-`yt_kids`, the package is still `dev.vtlinh.ytkids` and the Worker is still
-`yt-kids` — see **Naming** below for why those are not the same question as
-what the app is called.
+An Android app for watching YouTube videos for kids. The `applicationId` is
+still `dev.vtlinh.ytkids` and the Worker is still `yt-kids` — see **Naming**
+below for why those two are not the same question as what the app is called.
 
 ## What this is
 
@@ -357,19 +356,31 @@ otherwise is an update they can no longer find.
 
 ## Naming
 
-The app is **TinyTube**. Three things deliberately did not change with it:
+The app is **TinyTube**, and so is the Kotlin package: `dev.vtlinh.tinytube`.
+
+Two things deliberately did *not* change with it, because they are **addresses
+rather than labels**:
 
 - **`applicationId` — `dev.vtlinh.ytkids`.** Android identifies an installed app
-  by its package. A new one would install *beside* the old app rather than
-  update it, and every phone already carrying this would keep the old copy,
-  still self-updating from the old release, forever.
+  by this, not by its class names. A new one would install *beside* the old app
+  rather than update it, and every phone already carrying this would keep the
+  old copy, still self-updating from the old release, forever. It can differ
+  from the namespace, and now does.
 - **The Worker — `yt-kids.vtlinh87.workers.dev`.** Its hostname is compiled into
   `Endpoints.kt`. An installed copy could only learn a new one through an update
   it would have to fetch from the old one.
-- **The repository and the Kotlin package.** Neither is user-visible, and
-  renaming them is churn that would break every link into this history.
 
-A rename is a label. Those three are addresses.
+Moving the Kotlin package renamed every Android component with it, and a
+home-screen icon is a pinned **component name**. So `MainActivity` keeps its old
+name as an `activity-alias` — `dev.vtlinh.ytkids.MainActivity` — and that alias
+is what carries the launcher filter. Without it, updating would have left the
+app installed and in the drawer with every already-placed icon pointing at a
+class that no longer exists. Don't tidy the alias away; the old name is the
+point.
+
+`Updater.ACTION_INSTALL_UPDATE` stays on the old string for the same class of
+reason: a notification posted by the previous build holds a `PendingIntent`
+naming it, and renaming it would leave that Install button doing nothing.
 
 ## Building locally
 

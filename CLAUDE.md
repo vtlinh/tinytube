@@ -8,12 +8,21 @@ Guidance for Claude Code when working in this repository.
 videos. A child sees a grid of approved videos and can reach nothing else. See
 `README.md` for the architecture and the approval workflow.
 
-The app's NAME is TinyTube; its addresses are not. The repository is `yt_kids`,
-the package and `applicationId` are `dev.vtlinh.ytkids`, and the Worker is
-`yt-kids`. Renaming the applicationId would install a second app beside the
-first on every phone that already has this one, and renaming the Worker would
+The app's NAME is TinyTube and so is the Kotlin package, `dev.vtlinh.tinytube`.
+Its ADDRESSES are not: `applicationId` stays `dev.vtlinh.ytkids` and the Worker
+stays `yt-kids`. Renaming the applicationId would install a second app beside
+the first on every phone that already has this one; renaming the Worker would
 strand installed copies on a hostname they can only be told about by an update
-they would fetch from it. Change `app_name` and the docs; leave the rest.
+they would fetch from it.
+
+Two consequences of the package move, both load-bearing:
+
+- `MainActivity` keeps its OLD class name as an `activity-alias`, and the alias
+  carries the launcher filter. A home-screen icon is a pinned component name, so
+  without it every already-placed icon would point at a class that no longer
+  exists. Don't collapse it into `.MainActivity`.
+- `Updater.ACTION_INSTALL_UPDATE` stays `dev.vtlinh.ytkids.INSTALL_UPDATE`. A
+  notification from the previous build holds a `PendingIntent` naming it.
 
 ## Layout
 

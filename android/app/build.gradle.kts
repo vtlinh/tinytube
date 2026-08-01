@@ -15,10 +15,19 @@ val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 val appVersionName = System.getenv("APP_VERSION_NAME") ?: "dev"
 
 android {
-    namespace = "dev.vtlinh.ytkids"
+    /* The Kotlin package and the R class. Renamed with the app; this one is
+       only a name.
+
+       The applicationId below is NOT, and the two are deliberately different
+       now. Android identifies an installed app by its applicationId: change it
+       and the next build installs BESIDE the old app on every phone that has
+       one, rather than updating it — and the old copy keeps self-updating from
+       the old release forever, with nothing able to migrate anyone off it. */
+    namespace = "dev.vtlinh.tinytube"
     compileSdk = 34
 
     defaultConfig {
+        /* Never rename this. It is the address of every installed copy. */
         applicationId = "dev.vtlinh.ytkids"
         minSdk = 26
         targetSdk = 34
