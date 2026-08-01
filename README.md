@@ -84,6 +84,7 @@ before anything is published:
 | `Challenge.kt` | the arithmetic fallback gate |
 | `Schema.kt` | the SQL behind the approved list |
 | `Library.kt` | how feeds become the grid |
+| `Chrome.kt` | where YouTube's seek bar is, from the pixels |
 
 Two of them matter most:
 
@@ -107,6 +108,23 @@ isn't needed.
 On top of that the player disables the long-press context menu, popups, file and
 content access, and closes itself the moment the video ends, before the
 end-screen grid of related videos can be tapped.
+
+`Chrome.kt` is the odd one on that list, and worth a word because of how it gets
+its input. A native overlay covers the player so none of YouTube's controls can
+be touched; holding the top-right corner for two seconds lifts it for an adult.
+A strip along the bottom stays blocked even then, so a scrub that slides off the
+seek bar lands on nothing. Knowing how tall that strip should be means knowing
+where the seek bar is — and the player is a cross-origin iframe, so it cannot be
+asked. It can be looked at: on the first pause the app draws the bottom fifth of
+the player into an in-memory bitmap and finds the bar's red played portion in
+the pixels.
+
+That capture is a measurement, not a picture. Only the bottom fifth is ever
+drawn, so the part of the screen with the video in it is never captured at all;
+the bitmap is read into an array and recycled inside the method that made it; it
+is never written to storage, handed to another component, or sent anywhere. It
+happens once per process, and every failure falls back to the compiled-in
+constant.
 
 This is a lock on the front door, not a guarantee about YouTube itself. The
 videos are served by YouTube and carry YouTube's ads.

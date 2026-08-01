@@ -25,6 +25,7 @@ android/                         the app
     Feed.kt         pure: channel upload feed         (unit-tested)
     Schema.kt       pure: the SQL                     (unit-tested)
     Library.kt      pure: collate uploads into the grid (unit-tested)
+    Chrome.kt       pure: find the seek bar in pixels    (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
     ChannelFeeds.kt per-channel uploads + cache
     MainActivity.kt the grid
@@ -78,7 +79,7 @@ publishes to every installed device. `no-autofix` on a PR opts out entirely.
 ## Conventions
 
 - **The pure files must stay free of Android imports.** `VideoId`, `Player`,
-  `Challenge`, `YouTubeUrls`, `Feed`, `Schema` and `Library` are the app's
+  `Challenge`, `YouTubeUrls`, `Feed`, `Schema`, `Library` and `Chrome` are the app's
   safety boundary and they are testable precisely because a plain JVM can run
   them. Anything needing a `Context` belongs in the Activity or Store that
   calls them.
@@ -111,6 +112,12 @@ publishes to every installed device. `no-autofix` on a PR opts out entirely.
   That is the deal the app now makes, and it is the weakest point in it.
   Anything that widens it further — auto-approving related channels, following
   playlists, surfacing recommendations — is a bigger change than it looks.
+- **The player's frame capture stays a measurement, never a picture.**
+  `PlayerActivity.measureBlockHeight` draws the bottom fifth of the WebView to
+  find the seek bar. Only that fifth is ever drawn, the bitmap is recycled in
+  the method that made it, and nothing is written, passed on or sent. Don't
+  widen the captured rectangle, don't keep the bitmap, and don't add a caller
+  that wants the image rather than the number.
 - **`version.json` is published last, in its own upload.** It is what tells an
   app a new build exists; landing it before the APK advertises a version that
   can't be downloaded.

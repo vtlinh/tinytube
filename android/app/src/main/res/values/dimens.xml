@@ -10,13 +10,16 @@
          downward off the bar lands there, on whatever the player puts under
          it, or on the system's back/home gesture.
 
-         This is a constant because it has to be. The player is a cross-origin
-         iframe: its DOM cannot be read, so there is no way to ask where the
-         bar actually is. The number is the inset YouTube's mobile embed
-         currently uses, and it is the one value in the player that depends on
-         somebody else's layout — if a future embed moves its controls, this is
-         what needs revisiting. Erring small on purpose: too tall and it eats
-         the seek bar, which is the one control the reveal exists to reach. -->
+         This is now only the STARTING value. The player is a cross-origin
+         iframe, so its DOM cannot be read and there is no way to ask where the
+         bar is — but there is a way to look, and PlayerActivity does: on the
+         first pause it draws the bottom of the player and finds the seek bar
+         in the pixels (see Chrome.kt), then sets this height from what it
+         found. What is left here is the fallback for before that has happened
+         and for when it fails.
+
+         Erring small on purpose: too tall and it eats the seek bar, which is
+         the one control the reveal exists to reach. -->
     <dimen name="player_bottom_block">16dp</dimen>
 
 </resources>

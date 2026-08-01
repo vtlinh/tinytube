@@ -4,6 +4,8 @@ import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -57,6 +59,9 @@ class PlayerActivity : AppCompatActivity() {
     private var corner: View? = null
     private val fadeTintRunnable = Runnable { setTintShown(false) }
 
+    private var bottomBlocker: View? = null
+    private val measureRunnable = Runnable { measureBlockHeight() }
+
     companion object {
         /* YT.PlayerState */
         private const val STATE_PLAYING = 1
@@ -72,6 +77,23 @@ class PlayerActivity : AppCompatActivity() {
         private const val TINT_MILLIS = 1000L
         private const val TINT_IN_MILLIS = 120L
         private const val TINT_OUT_MILLIS = 400L
+
+        /* Long enough after a pause for YouTube's controls to have finished
+           animating in. Measuring mid-fade reads a half-opaque bar. */
+        private const val MEASURE_DELAY_MILLIS = 400L
+        /* How much of the player's bottom edge is looked at. The seek bar
+           lives in the last few percent; a fifth is generous and keeps the
+           captured rectangle — and the analysis — small. */
+        private const val MEASURE_STRIP_FRACTION = 0.2f
+
+        /* The measured blocker height, in pixels, or 0 for "not yet".
+         *
+         * Deliberately here rather than on the instance: it is a property of
+         * this device and this build of YouTube's player, not of one video, so
+         * measuring it once is enough for every video afterwards. A process
+         * restart measures again, which is the right cadence for something
+         * that only changes when the player does. */
+        @Volatile private var measuredBlockPx: Int = 0
 
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
@@ -167,6 +189,11 @@ class PlayerActivity : AppCompatActivity() {
         pausedScrim = findViewById(R.id.paused_scrim)
         holdProgress = findViewById(R.id.reveal_progress)
         corner = findViewById(R.id.reveal_corner)
+        bottomBlocker = findViewById(R.id.bottom_blocker)
+
+        /* Already worked out earlier in this process — apply it now rather
+           than waiting for this video to be paused too. */
+        if (measuredBlockPx > 0) applyBlockHeight(measuredBlockPx)
 
         /* A tap anywhere shows the corner. Nothing else: the overlay has no
            controls to toggle, so this is the whole of what tapping does. */
@@ -301,6 +328,78 @@ class PlayerActivity : AppCompatActivity() {
         /* Only a real pause draws YouTube's chrome over the frame. */
         pausedScrim?.visibility =
             if (state == STATE_PAUSED && !showingAd) View.VISIBLE else View.GONE
+
+        /* A pause is the one moment the controls are certainly on screen and
+           certainly still, which is why the measurement waits for one. */
+        if (state == STATE_PAUSED && !showingAd && measuredBlockPx == 0) {
+            reveal.removeCallbacks(measureRunnable)
+            reveal.postDelayed(measureRunnable, MEASURE_DELAY_MILLIS)
+        }
+    }
+
+    /* Measure the player's bottom inset from the pixels it actually drew.
+     *
+     * The height of the bottom blocker used to be a constant, because the
+     * player is a cross-origin iframe and there is no way to ask it where its
+     * seek bar is. There is a way to LOOK, though: draw the WebView onto a
+     * bitmap and find the bar. Chrome does the finding, and is pure so it can
+     * be tested; this does the capturing.
+     *
+     * Three things about the capture, all deliberate:
+     *
+     * - Nothing is saved. The bitmap exists inside this method, is read into
+     *   an int array, and is recycled before the method returns. It is never
+     *   written to storage, never handed to another component, and never
+     *   leaves the process. The pixels are a measurement, not a picture.
+     * - Only the bottom fifth is drawn at all, by translating the canvas. The
+     *   part of the screen with the video in it is never captured, which makes
+     *   the above true by construction rather than by promise.
+     * - It happens once. measuredBlockPx is on the companion, so every later
+     *   video in this process reuses the answer.
+     *
+     * Any failure leaves the compiled-in fallback in place, which is what the
+     * app used before this existed. */
+    private fun measureBlockHeight() {
+        if (measuredBlockPx > 0) return
+        val w = web ?: return
+        val vw = w.width
+        val vh = w.height
+        if (vw <= 0 || vh <= 0) return
+
+        val stripH = (vh * MEASURE_STRIP_FRACTION).toInt()
+        if (stripH <= 0) return
+        val fallback = resources.getDimensionPixelSize(R.dimen.player_bottom_block)
+
+        val measured = try {
+            val bmp = Bitmap.createBitmap(vw, stripH, Bitmap.Config.ARGB_8888)
+            try {
+                val canvas = Canvas(bmp)
+                /* Slide the WebView up so only its last stripH rows land in
+                   the bitmap. */
+                canvas.translate(0f, -(vh - stripH).toFloat())
+                w.draw(canvas)
+                val pixels = IntArray(vw * stripH)
+                bmp.getPixels(pixels, 0, vw, 0, 0, vw, stripH)
+                Chrome.blockHeight(pixels, vw, stripH, fallback)
+            } finally {
+                bmp.recycle()
+            }
+        } catch (e: Throwable) {
+            /* OutOfMemory on a large display, or a WebView that refuses to
+               draw to a software canvas. Neither is worth crashing a video
+               over; the constant was good enough before. */
+            fallback
+        }
+
+        measuredBlockPx = measured
+        applyBlockHeight(measured)
+    }
+
+    private fun applyBlockHeight(px: Int) {
+        val b = bottomBlocker ?: return
+        if (b.layoutParams.height == px) return
+        b.layoutParams = b.layoutParams.apply { height = px }
+        b.requestLayout()
     }
 
     /* While an ad is playing the overlay stops intercepting, so the ad stays
@@ -392,6 +491,10 @@ class PlayerActivity : AppCompatActivity() {
         corner?.animate()?.cancel()
         corner?.alpha = 0f
         if (revealed) setRevealed(false)
+        /* A pending measurement dies with the screen. Drawing a WebView that
+           has just been paused would read a stale or blank frame and pin the
+           wrong height for the rest of the process. */
+        reveal.removeCallbacks(measureRunnable)
     }
 
     override fun onResume() {
@@ -404,6 +507,7 @@ class PlayerActivity : AppCompatActivity() {
         reveal.removeCallbacks(holdRunnable)
         reveal.removeCallbacks(idleRunnable)
         reveal.removeCallbacks(fadeTintRunnable)
+        reveal.removeCallbacks(measureRunnable)
         holdAnimator?.cancel()
         holdAnimator = null
         corner?.animate()?.cancel()
