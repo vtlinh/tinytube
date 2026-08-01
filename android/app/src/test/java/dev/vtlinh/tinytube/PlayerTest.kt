@@ -26,7 +26,7 @@ class PlayerTest {
      * read the comment on Player.ORIGIN before changing the expectation. */
     @Test fun `the player's origin is the embeddable one`() {
         assertEquals("https://www.youtube-nocookie.com", Player.ORIGIN)
-        assertTrue(Player.isPlayerURL(Player.ORIGIN + "/embed/aaaaaaaaaaa"))
+        assertTrue(Player.isPlayerUrl(Player.ORIGIN + "/embed/aaaaaaaaaaa"))
     }
 
     @Test fun `allows the player's own origins`() {
