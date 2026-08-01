@@ -64,20 +64,10 @@
             android:maxLines="1"
             android:ellipsize="end" />
 
-        <!-- The parent's settings. A second control on the bar, and it earns
-             its place the same way the first one does: it goes through
-             ChallengeActivity before it opens anything, so what a child can
-             reach here is still nothing. An icon rather than a word, because
-             the bar is 44dp and "Parent" is the one that has to be findable by
-             someone who has never used this app. -->
-        <ImageButton
-            android:id="@+id/settings"
-            android:layout_width="40dp"
-            android:layout_height="match_parent"
-            android:src="@drawable/ic_settings"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:scaleType="centerInside"
-            android:contentDescription="@string/settings_title" />
+        <!-- Settings had a button here for one build, gated the same way this
+             one is. It reads better in parent mode, next to the approved list
+             and the approve button, which is where every other parent control
+             already lives — and this bar goes back to holding exactly one. -->
 
         <Button
             android:id="@+id/parent_mode"

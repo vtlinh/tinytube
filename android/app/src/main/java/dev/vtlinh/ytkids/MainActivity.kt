@@ -66,16 +66,10 @@ class MainActivity : AppCompatActivity() {
         channelList.layoutManager = LinearLayoutManager(this)
         channelList.adapter = channelAdapter
 
-        /* Parent mode, behind the device lock. */
+        /* Parent mode, behind the device lock. The one control on this bar —
+           the settings live inside parent mode, next to the approved list. */
         findViewById<View>(R.id.parent_mode).setOnClickListener {
             parentGate.launch(Intent(this, ChallengeActivity::class.java))
-        }
-
-        /* And the settings, behind the same lock. Two buttons on the bar now,
-           and the rule they are both under is unchanged: neither opens
-           anything without a RESULT_OK from ChallengeActivity first. */
-        findViewById<View>(R.id.settings).setOnClickListener {
-            settingsGate.launch(Intent(this, ChallengeActivity::class.java))
         }
 
         /* About stays on the long press. It is parent-facing but harmless —
@@ -152,17 +146,6 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
                 startActivity(Intent(this, ParentActivity::class.java))
-            }
-        }
-
-    /* A gate of its own rather than a flag on the one above: two launchers
-       cannot be confused about which one a result belongs to, and "which
-       screen was I trying to open" is not state worth keeping across a
-       process death. */
-    private val settingsGate =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                startActivity(Intent(this, SettingsActivity::class.java))
             }
         }
 

@@ -5,25 +5,39 @@
     android:orientation="vertical"
     android:background="@color/bg">
 
-    <!-- The parent-mode status bar: get out, approve what you're looking at,
-         review what you've approved. -->
+    <!-- The parent-mode bar: get out, change a setting, review what you've
+         approved, approve what you're looking at.
+
+         A FIXED height with the buttons' minimums cleared, the same as the
+         child's bar and for the same reason: borderlessButtonStyle carries a
+         48dp minHeight, so with wrap_content the bar was 48dp of button plus
+         its padding however small the text was. Trimming the padding did
+         nothing, because the padding was never what set the height.
+
+         44dp, and the buttons fill it — so the bar is shorter than a stock one
+         while what a thumb can hit is the full height rather than the few dp
+         the icon occupies. This one sits above real YouTube, which draws its
+         own header underneath; two tall bars stacked was most of a phone
+         before the page began. -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="44dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@color/surface"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:paddingTop="6dp"
-        android:paddingBottom="6dp">
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp">
 
         <Button
             android:id="@+id/kids_mode"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:text="@string/kids_mode"
             style="?android:attr/borderlessButtonStyle"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
             android:textColor="@color/text_muted"
             android:textSize="14sp" />
 
@@ -32,10 +46,24 @@
             android:layout_height="1dp"
             android:layout_weight="1" />
 
+        <!-- Settings live here rather than on the child's bar. They were
+             reachable there, behind the same challenge — but this side of the
+             gate is where every other parent control already is, and it gives
+             the child's screen back its one and only button. -->
+        <ImageButton
+            android:id="@+id/settings"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:src="@drawable/ic_settings"
+            android:tint="@color/text_muted"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:scaleType="centerInside"
+            android:contentDescription="@string/settings_title" />
+
         <ImageButton
             android:id="@+id/approved"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
             android:src="@drawable/ic_approved_list"
             android:tint="@color/text_muted"
             android:background="?android:attr/selectableItemBackgroundBorderless"
@@ -46,8 +74,8 @@
              YouTubeUrls.isChannelPage and ParentActivity.updateApproveButton. -->
         <ImageButton
             android:id="@+id/add_channel"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
             android:src="@drawable/ic_approve_channel"
             android:tint="@color/accent"
             android:background="?android:attr/selectableItemBackgroundBorderless"
