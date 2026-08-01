@@ -352,7 +352,11 @@ jobs:
             echo "APK auto-built from main."
             echo
             echo "- **versionCode $CODE** · versionName $NAME"
-            echo "- built $(date -u +%Y-%m-%dT%H:%M:%SZ) from \`$GITHUB_SHA\`"
+            # New York time, because a person reads this line and "was that
+            # before or after the thing I just fixed?" is the question it
+            # answers. %Z prints EDT or EST, so the answer is unambiguous and
+            # daylight saving looks after itself.
+            echo "- built $(TZ='America/New_York' date +'%Y-%m-%d %H:%M %Z') from \`$GITHUB_SHA\`"
             echo
             echo "Install: <https://tinytube.vtlinh87.workers.dev/app/app-release.apk>"
             echo

@@ -394,11 +394,22 @@ jobs:
           # this run would name a build that never existed.
           BUILD=$(sed -n 's/.*"build"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' dist/version.json)
           BUILT=$(sed -n 's/.*"builtAt"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' dist/version.json)
+          # version.json keeps UTC — it is the machine-readable record, and an
+          # ISO instant with a Z on it means exactly one thing anywhere. The
+          # NOTES are read by a person, so they get New York time, with %Z
+          # printing EDT or EST so daylight saving looks after itself.
+          #
+          # Converted here rather than written that way upstream because this
+          # job is ubuntu (GNU date parses the ISO string) while the build that
+          # wrote it is macOS (BSD date does not, with the same flags). Falls
+          # back to the raw value: a release note with an awkward timestamp
+          # beats a publish that fails over one.
+          BUILT_NYC=$(TZ='America/New_York' date -d "$BUILT" +'%Y-%m-%d %H:%M %Z' 2>/dev/null || echo "$BUILT")
           SHA=$(sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' dist/version.json)
           {
             echo "Unsigned IPA auto-built from main. Sideload it with AltStore or Sideloadly; CI cannot sign for a free Apple ID."
             echo
-            echo "- **build $BUILD** · built $BUILT"
+            echo "- **build $BUILD** · built $BUILT_NYC"
             echo "- from \`$SHA\`"
             echo
             echo "Download: <https://tinytube.vtlinh87.workers.dev/ios/TinyTube.ipa>"
