@@ -123,6 +123,12 @@ class PlayerActivity : AppCompatActivity() {
            had. */
         fun forgetMeasurement() { measuredBlockPx = -1 }
 
+        /* What the player is actually using, for About to report. The stored
+           value is not read back at the moment, so this is the only thing that
+           says what is in force. -1 means nothing has been measured this
+           run. */
+        fun measuredPx(): Int = measuredBlockPx
+
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
 
@@ -222,7 +228,15 @@ class PlayerActivity : AppCompatActivity() {
         /* Measured before — on an earlier video, or in an earlier run of the
            app entirely — so apply it now rather than waiting for this video to
            be paused too. */
-        if (measuredBlockPx < 0) measuredBlockPx = BlockHeightStore.get(this) ?: -1
+        /* Deliberately NOT read back from BlockHeightStore for now.
+         *
+         * It is still written, so About can show what was last measured — but
+         * nothing acts on it. Persisted state is what made this hard to
+         * reason about: a stale entry, a poisoned one, or a correct one all
+         * produced the same screen, and every fix to the measurement had to
+         * get past whatever was already on disk before it could be seen at
+         * all. Measuring afresh each run costs one capture and makes what is
+         * on screen a consequence of the code that is running. */
         if (measuredBlockPx >= 0) applyBlockHeight(measuredBlockPx)
 
         /* A tap anywhere shows the corner. Nothing else: the overlay has no

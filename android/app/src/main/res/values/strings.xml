@@ -59,10 +59,11 @@
          exists so a fault can be reported without reproducing it live. -->
     <string name="about_player">Player</string>
     <string name="about_remeasure">Measure again</string>
-    <string name="about_measure_fmt">strip in use   %1$s\nstored        %2$s\ndisplay       %3$s\nstored for    %4$s\nversion       %5$s\nlast capture  %6$s</string>
+    <string name="about_measure_fmt">strip in use   %1$s\nstored*       %2$s\ndisplay       %3$s\nstored for    %4$s\nversion       %5$s\nlast capture  %6$s\n\n* written but not read back — the player\nmeasures afresh each run</string>
     <string name="about_measure_fallback">%1$d px (fallback, not measured)</string>
     <string name="about_measure_measured">%1$d px (measured)</string>
     <string name="about_measure_none">nothing stored</string>
+    <string name="about_measure_unmeasured">not measured yet this run</string>
     <string name="about_remeasured">Cleared. It will measure again on the next video.</string>
     <!-- The versionCode is what the updater actually compares, but it means
          nothing to a parent — the version name is the human-facing one. -->

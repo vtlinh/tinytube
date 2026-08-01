@@ -99,12 +99,15 @@ class AboutActivity : AppCompatActivity() {
      * simply the wrong size — so this is where it can be read, and reported,
      * without anyone having to catch it happening. */
     private fun renderMeasurement() {
-        val stored = BlockHeightStore.get(this)
+        val live = PlayerActivity.measuredPx()
         val raw = BlockHeightStore.rawPx(this)
         val fallback = resources.getDimensionPixelSize(R.dimen.player_bottom_block)
 
+        /* What is in force comes from the running process, not from the
+           preference — the player does not read that back at the moment. The
+           stored line below is history, and is labelled as such. */
         val inUse =
-            if (stored != null) getString(R.string.about_measure_measured, stored)
+            if (live >= 0) getString(R.string.about_measure_measured, live)
             else getString(R.string.about_measure_fallback, fallback)
         val storedText =
             if (raw >= 0) "$raw px" else getString(R.string.about_measure_none)

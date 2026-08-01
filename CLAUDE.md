@@ -141,6 +141,14 @@ stops, green publishes.
   recycled in the callback that received it, and nothing is written, passed on
   or sent. Don't widen the source rectangle, don't keep the bitmap, and don't
   add a caller that wants the image rather than the number.
+- **The player does not read `BlockHeightStore` back at the moment**, on
+  purpose. It is still written so About can show what was last measured, but
+  nothing acts on it and the strip is measured afresh each run. Persisted
+  state is what made this hard to reason about — a stale entry, a poisoned one
+  and a correct one all produced the same screen, and every fix had to get
+  past whatever was already on disk before it could be seen. Restoring the
+  read is a deliberate decision to make once the measurement is trusted, not a
+  tidy-up.
 - **Bump `BlockHeightStore.VERSION` whenever the measurement changes.** A
   preference file survives an app update, so a wrong answer written by one
   build is read back by every build after it — which is how fixing the latching
