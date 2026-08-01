@@ -74,10 +74,6 @@ class AboutActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.player_remeasure).setOnClickListener {
             BlockHeightStore.clear(this)
-            /* The store is only half of it: the running process caches the
-               number, so clearing the preference alone would change nothing
-               until the app was killed. */
-            PlayerActivity.forgetMeasurement()
             renderMeasurement()
             Toast.makeText(this, R.string.about_remeasured, Toast.LENGTH_SHORT).show()
         }
@@ -117,15 +113,15 @@ class AboutActivity : AppCompatActivity() {
      * simply the wrong size — so this is where it can be read, and reported,
      * without anyone having to catch it happening. */
     private fun renderMeasurement() {
-        val live = PlayerActivity.measuredPx()
         val raw = BlockHeightStore.rawPx(this)
         val fallback = resources.getDimensionPixelSize(R.dimen.player_bottom_block)
 
-        /* What is in force comes from the running process, not from the
-           preference — the player does not read that back at the moment. The
-           stored line below is history, and is labelled as such. */
+        /* Every player session measures for itself now, so there is no single
+           value "in force" to report — only the last one measured, which is
+           what the store holds. Until one succeeds, the fallback is what the
+           next video will start with. */
         val inUse =
-            if (live >= 0) getString(R.string.about_measure_measured, live)
+            if (raw >= 0) getString(R.string.about_measure_measured, raw)
             else getString(R.string.about_measure_fallback, fallback)
         val storedText =
             if (raw >= 0) "$raw px" else getString(R.string.about_measure_none)

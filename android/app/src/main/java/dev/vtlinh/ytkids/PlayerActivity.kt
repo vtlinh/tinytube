@@ -74,6 +74,17 @@ class PlayerActivity : AppCompatActivity() {
      * be broken cannot report the case where nothing knows it is broken. */
     private var measureNote: String = "not tried"
 
+    /* The measured blocker height in pixels, or -1 for "not measured yet".
+     *
+     * Per video, not per process. It was a companion field, measured once and
+     * reused, which is efficient and was a bad idea while any of this is still
+     * being worked out: the first video's answer — right or wrong — became
+     * every later video's, and the later ones reported "0 tries, not tried"
+     * beside a number they had never computed. Every cached copy of this has
+     * now cost a round of debugging. A capture is cheap; certainty about where
+     * a number came from is not. */
+    private var measuredBlockPx: Int = -1
+
     companion object {
         /* YT.PlayerState */
         private const val STATE_PLAYING = 1
@@ -106,28 +117,6 @@ class PlayerActivity : AppCompatActivity() {
            deliberately never captured. Two fifths is far more than any inset
            and still leaves the picture out of it. */
         private const val MEASURE_STRIP_FRACTION = 0.4f
-
-        /* The measured blocker height in pixels, or -1 for "not looked yet".
-         *
-         * Only a cache in front of BlockHeightStore, which is where the answer
-         * actually lives. It is a property of this device and this build of
-         * YouTube's player, not of one video, so it is measured once and then
-         * read back for every video afterwards — including after a reboot,
-         * which is the point of persisting it: otherwise every cold start put
-         * the strip back to the fallback until someone paused something. */
-        @Volatile private var measuredBlockPx: Int = -1
-
-        /* Drop the in-process cache so a cleared store is actually re-read.
-           Without this, About's "measure again" would clear the preference and
-           the running process would carry on using the number it already
-           had. */
-        fun forgetMeasurement() { measuredBlockPx = -1 }
-
-        /* What the player is actually using, for About to report. The stored
-           value is not read back at the moment, so this is the only thing that
-           says what is in force. -1 means nothing has been measured this
-           run. */
-        fun measuredPx(): Int = measuredBlockPx
 
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
@@ -364,18 +353,15 @@ class PlayerActivity : AppCompatActivity() {
              * certain, and it is wrong". A readout that only appears when
              * something is known to be broken cannot report the case where
              * nothing knows it is broken. */
-            /* measureAttempts and measureNote belong to THIS video; the strip
-               height is process-wide and may have been measured during an
-               earlier one. Saying so avoids the reading that cost a round —
-               "strip 35 px · 0 tries · not tried" looks like a contradiction
-               until you know the 35 came from the video before it. */
+            /* All three now describe THIS video, which they did not while the
+               height was process-wide: "strip 35 px · 0 tries · not tried"
+               was literally true and completely misleading. */
             Toast.makeText(
                 this,
                 getString(
                     R.string.player_revealed_detail,
                     bottomBlocker?.height ?: 0,
-                    if (measureAttempts == 0) getString(R.string.player_measured_earlier)
-                    else getString(R.string.player_measured_now, measureAttempts, measureNote),
+                    getString(R.string.player_measured_now, measureAttempts, measureNote),
                 ),
                 Toast.LENGTH_LONG,
             ).show()

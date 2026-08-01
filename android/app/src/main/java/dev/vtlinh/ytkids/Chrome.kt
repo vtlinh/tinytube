@@ -130,23 +130,53 @@ object Chrome {
      * whole inset. Measured on a real device: a 9px line reported as 36, a
      * 180px margin against a 204px gap, a 35px strip where 170 was right.
      *
-     * So the thickness is counted per column and reduced to the MEDIAN, not
-     * taken from the band's height. Most of the played portion is line and
-     * only its head is knob, so the middle value is the line.
+     * So the thickness is counted per column, and taken as the THINNEST run
+     * that occurs on enough columns to be a drawn line rather than an edge.
      *
-     * Median rather than minimum, which was tried first and is worse: the
-     * columns at either end of the bar are antialiased down to a pixel or two,
-     * so the smallest run describes the rendering rather than the line. On the
-     * real frame that came out as 1, which made the gap forty times the
-     * thickness and got the whole measurement rejected as implausible. */
+     * Two rejected alternatives, both of which fail on a real frame:
+     *
+     * - The plain minimum. The columns at either end of the bar are
+     *   antialiased down to a pixel or two, so the smallest run describes the
+     *   rendering rather than the line. On the real frame that came out as 1,
+     *   which made the gap forty times the thickness and got the whole
+     *   measurement rejected as implausible.
+     * - The median. Fine while the knob is a small minority, which it is once
+     *   a video is a few percent in — but at the very start the knob is most
+     *   of the red there is, and the median becomes the knob again. The bug
+     *   this replaced was exactly that, seen at 0:06 of a 22-minute video.
+     *
+     * Requiring a minimum number of columns keeps the antialiased ends out
+     * while still finding the line when the knob outnumbers it. Where there is
+     * genuinely no line yet — a video paused at zero — the knob is all there
+     * is, and the ceiling in measure() is what stops that from mattering. */
     fun barThickness(pixels: IntArray, width: Int, height: Int, band: IntRange): Int {
+        /* Anchor on the band's densest row. The line spans the whole played
+           portion while the knob is a few dozen columns, so the row with the
+           most red in it is a line row — which also excludes the stray red the
+           video itself contributes, since that is scattered rather than in a
+           row hundreds of pixels long. */
+        var anchor = band.first
+        var most = -1
+        for (y in band) {
+            var count = 0
+            for (x in 0 until width) if (isProgressRed(pixels[y * width + x])) count++
+            if (count > most) { most = count; anchor = y }
+        }
+        if (most <= 0) return band.last - band.first + 1
+
+        /* Then the CONTIGUOUS run through that row, per column. Contiguous
+           matters: counting red anywhere in the band lets a red frame behind
+           the bar add a pixel to every column and drag the answer to 1, which
+           made the gap forty times the thickness and got the whole measurement
+           thrown out as implausible. */
         val runs = ArrayList<Int>()
         for (x in 0 until width) {
-            var run = 0
-            for (y in band) {
-                if (isProgressRed(pixels[y * width + x])) run++
-            }
-            if (run > 0) runs.add(run)
+            if (!isProgressRed(pixels[anchor * width + x])) continue
+            var top = anchor
+            while (top - 1 >= band.first && isProgressRed(pixels[(top - 1) * width + x])) top--
+            var bottom = anchor
+            while (bottom + 1 <= band.last && isProgressRed(pixels[(bottom + 1) * width + x])) bottom++
+            runs.add(bottom - top + 1)
         }
         if (runs.isEmpty()) return band.last - band.first + 1
         runs.sort()
