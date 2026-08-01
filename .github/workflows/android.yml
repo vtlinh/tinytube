@@ -326,3 +326,36 @@ jobs:
           gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber \
             dist/app-release.apk
           gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber dist/version.json
+
+          # What is actually in there, written into the release itself.
+          #
+          # GitHub's releases list prints a release's published_at, and for a
+          # FIXED TAG that is the day the tag was first created and never moves
+          # again — android-latest read "3 days ago" while holding an APK from
+          # twenty minutes earlier. The date cannot be corrected: the only way
+          # to move published_at is to toggle the release back to draft and
+          # republish it, and a draft's asset URLs 404 — which is the exact path
+          # every installed phone uses to fetch its update. A cosmetic date is
+          # not worth a window where updating is broken.
+          #
+          # So the page says what the header can't. Costs one API call and is
+          # the difference between a release that looks stale and one that
+          # tells you what it is holding.
+          #
+          # AFTER the uploads, deliberately. version.json still lands last among
+          # the ASSETS, which is what the "publish version.json last" rule is
+          # about; notes are read by people and by nothing on a device, so
+          # editing them afterwards cannot advertise a build that isn't up yet.
+          CODE=$(sed -n 's/.*"versionCode"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' dist/version.json)
+          NAME=$(sed -n 's/.*"versionName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' dist/version.json)
+          {
+            echo "APK auto-built from main."
+            echo
+            echo "- **versionCode $CODE** · versionName $NAME"
+            echo "- built $(date -u +%Y-%m-%dT%H:%M:%SZ) from \`$GITHUB_SHA\`"
+            echo
+            echo "Install: <https://tinytube.vtlinh87.workers.dev/app/app-release.apk>"
+            echo
+            echo "_The date GitHub shows above this is when the \`android-latest\` tag was first created, not when this APK was built. The tag is fixed on purpose so installed apps have one URL that never moves; its assets are replaced in place. The two lines above are what it is holding now._"
+          } > release-notes.md
+          gh release edit android-latest --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md

@@ -562,6 +562,16 @@ stops, green publishes.
   iOS polls its copy — there is no self-update — because the habit is worth
   more than the exception, and the file is read by a person asking which build
   the download link is serving.
+- **Each publish writes what it published into the release notes**, and that is
+  a workaround rather than decoration. GitHub's releases list prints a
+  release's `published_at`, which for a FIXED TAG is the day the tag was first
+  created and never moves — `android-latest` read "3 days ago" while serving an
+  APK from twenty minutes earlier. It cannot be fixed at the source: the only
+  thing that moves `published_at` is toggling the release to draft and
+  republishing, and a draft's asset URLs 404, which is the path every installed
+  phone updates through. Don't do that to buy a date. Keep the notes truthful
+  instead, and read the build numbers out of `dist/version.json` rather than
+  from the publishing run — on the reuse path that run compiled nothing.
 - **The Worker's release routes are a fixed table of path → {tag, name}**, and
   `/app/version.json` and `/app/app-release.apk` are compiled into installed
   Android apps. Renaming either strands every phone: the update mechanism is

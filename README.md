@@ -612,6 +612,16 @@ read-only one.
 `/ios/version.json` says which build the iOS link is currently serving. Nothing
 reads it — it is there to answer "is this the one I already installed?".
 
+**Ignore the date GitHub prints on the releases page.** Both tags are fixed and
+reused forever, so their `published_at` is the day the tag was first created and
+never moves again: `android-latest` read "3 days ago" while holding an APK built
+twenty minutes earlier. There is no way to correct it — the only thing that
+moves `published_at` is toggling the release back to a draft and republishing,
+and a draft's asset URLs 404, which is the exact path installed phones use to
+fetch an update. So each publish writes the build into the release NOTES
+instead: versionCode, version name, build time and commit. The header stays
+wrong; the body is right.
+
 **Weekly**, because free-tier profiles expire after seven days and the app then
 refuses to launch until it is re-signed. Three sideloaded apps is the ceiling on
 the whole device, not just this one.
