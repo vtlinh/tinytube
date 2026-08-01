@@ -19,12 +19,12 @@ object Endpoints {
 
        Changing this strands every installed copy: they keep asking the old
        hostname, and the only thing that could tell them otherwise is an update
-       they can no longer find. It was changed once — from yt-kids, alongside
+       they can no longer find. It was changed once, alongside
        the applicationId — which works only because the app carrying this
        hostname is a NEW install rather than an update to the old one.
 
        The old hostname did NOT survive that. Cloudflare's git build renames
-       the service rather than adding one, so yt-kids.vtlinh87.workers.dev
+       the service rather than adding one, so the previous hostname
        began answering 404 the moment this deployed, and every app already
        carrying it lost its uploads and its updates with nothing able to tell
        it where to look. Installing the new app by hand was the only recovery.

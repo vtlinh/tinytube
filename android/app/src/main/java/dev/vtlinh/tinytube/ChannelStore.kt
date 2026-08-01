@@ -137,6 +137,9 @@ class ChannelStore private constructor(context: Context) :
         /* One helper for the process. Two SQLiteOpenHelper instances on the
            same file each keep their own connection and will lock each other
            out under concurrent writes. */
+        /* No migration from the database an earlier build used — see the note
+           on Schema.DATABASE. A device updating into this build starts with an
+           empty approved list, which was the accepted cost of the rename. */
         fun get(context: Context): ChannelStore =
             instance ?: synchronized(this) {
                 instance ?: ChannelStore(context).also { instance = it }

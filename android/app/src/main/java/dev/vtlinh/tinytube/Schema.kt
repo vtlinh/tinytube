@@ -9,27 +9,25 @@ package dev.vtlinh.tinytube
    device. */
 object Schema {
 
-    /* ⚠️ THE FILENAME STAYS "ytkids.db". IT IS NOT A LABEL, IT IS AN ADDRESS.
-       This is the name of the SQLite file sitting on every phone that has ever
-       run this app. Rename it and the app opens a new, empty database: every
-       approved channel, every video in the grid and all of the watch history
-       become unreachable — not deleted, just no longer looked for — and the
-       parental control silently resets to nothing on next launch.
-
-       There would be no error and no crash. A child would simply be shown an
-       empty grid, and an adult would have to approve everything again.
-
-       That is the same class of breakage as renaming the applicationId or the
-       Worker, which cost every installed phone its channels once already — see
-       README's Naming. A rename sweep across this repository has come past here
-       once. Leave it.
-
-       iOS uses "tinytube.sqlite" in Schema.swift, and that divergence is fine:
-       no iOS build has ever shipped, so nothing there has a file to lose. The
-       two platforms need not agree on a filename; they need to agree on the
-       LADDER, which is what SchemaTest and SchemaTests check. */
-    const val DATABASE = "ytkids.db"
+    const val DATABASE = "tinytube.db"
     const val VERSION = 5
+
+    /* ⚠️ RENAMING THIS FILE COSTS EVERY EXISTING INSTALL ITS DATA, and that
+       was accepted deliberately when the name changed.
+
+       The filename is the address of the SQLite file on a device. A build
+       carrying a new one opens a NEW, empty database: the approved channels,
+       the grid and the watch history from before are still on disk under the
+       old name and are never looked for again. There is no crash and no error
+       — a parent simply finds an empty grid and approves their channels again.
+
+       There is deliberately NO migration. One was written and removed on
+       request: the owner did not want the old database carried across. So if
+       this ever looks like an oversight, it isn't — leaving it out was the
+       decision, and adding a migration now would only find files on devices
+       that have not yet run this build.
+
+       Rename it again and the same thing happens again. */
 
     const val CHANNELS = "channels"
     const val VIDEOS = "videos"

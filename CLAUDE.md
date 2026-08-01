@@ -21,7 +21,7 @@ channels. Don't do it again:
 - The Worker's hostname is compiled into `Endpoints.kt`, so a renamed Worker
   cannot tell an installed app where it went. Worse than expected in practice:
   Cloudflare's git build RENAMES the service rather than adding one, so
-  `yt-kids.vtlinh87.workers.dev` went to 404 the moment the new name deployed
+  the previous hostname went to 404 the moment the new name deployed
   and every installed app lost its uploads and updates at once. There was no
   bridge and no way to build one after the fact.
 
@@ -489,23 +489,32 @@ stops, green publishes.
 - **`version.json` is published last, in its own upload.** It is what tells an
   app a new build exists; landing it before the APK advertises a version that
   can't be downloaded.
-- **Two more strings look like stale names and are not.** A rename sweep will
-  find both, and changing either breaks installed phones silently rather than
-  loudly, so each carries a warning in place:
-  - **`Schema.DATABASE = "ytkids.db"`** is the SQLite file on every device that
-    has run the app. Rename it and the app opens a new empty database: the
-    approved channels, the grid and the watch history are all still there and
-    simply never looked for. No crash, no error — a child sees an empty grid
-    and the parental control has reset itself. iOS's `tinytube.sqlite` differs
-    on purpose; nothing has shipped there to lose.
-  - **`storePassword` / `keyAlias` / `keyPassword = "ytkids"`** in
-    `build.gradle.kts` are the committed keystore's actual credentials, not a
-    label. Renaming them stops the build opening `signing.p12`; a build signed
-    with a different key could never update an installed app.
+- **The old name is gone from this repository, and two of the places it lived
+  were not text.** Both were renamed properly rather than edited, and both
+  would have broken installed phones SILENTLY if they had been edited:
+  - **The database filename.** `Schema.DATABASE` is the address of the SQLite
+    file on a device, so renaming it means an existing install opens a NEW,
+    empty database — the approved channels, the grid and the watch history all
+    still on disk under the old name and never looked for again. No crash, no
+    error: a parent finds an empty grid and approves their channels again.
+    That cost was accepted deliberately. A migration was written and removed on
+    request, so its absence is a decision rather than an oversight, and adding
+    one now would only help devices that have not yet run the renamed build.
+  - **The keystore.** `storePassword` / `keyAlias` / `keyPassword` are
+    `signing.p12`'s real credentials, not labels, so the KEYSTORE was re-keyed
+    with `keytool -changealias` and `-storepasswd`. That alters the container,
+    not the key: the certificate SHA-256 is unchanged, which is the only reason
+    installed apps still accept an update. Verify with `keytool -list -v`.
 
-  What IS safe to rename, and has been: the CI artifact name, the Worker's
-  outgoing `User-Agent`, the Gradle `rootProject.name`, and the `Theme.*`
-  resource names. None of those is persisted on a device or inside a file.
+  The certificate's own subject still carries the old name and cannot be
+  changed the same way — a subject is part of what is signed, so a new one is a
+  new certificate, a new fingerprint, and every installed copy stranded. It is
+  inside a binary and no text search finds it. Changing it needs APK Signature
+  Scheme v3 key rotation, which is a migration rather than a rename.
+
+  Renamed with no such care needed, because none is persisted on a device: the
+  CI artifact, the Worker's outgoing `User-Agent`, `rootProject.name` and the
+  `Theme.*` resources.
 - **Don't rename the Worker or the `applicationId`.** The Worker's hostname is
   compiled into `Endpoints.kt` and installed copies can only learn a new one via
   an update they'd fetch from the old one; the `applicationId` is how Android
