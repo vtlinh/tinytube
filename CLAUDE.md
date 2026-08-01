@@ -205,6 +205,16 @@ still unverified in the way that matters until `ios-app` runs.
 Don't leave finished work sitting on a branch with no PR either. "Everything
 that was asked" is the trigger, not "everything I can think of".
 
+**Then stop. Don't schedule a check-in to poll the pull request.** Generic
+PR-watching advice says to, on the grounds that CI success is not reliably
+delivered — but that advice assumes a human has to merge. Here `auto-merge.yml`
+does it: it fires on `workflow_run` completion, re-checks every required check,
+and merges. A failure arrives as an event, a merge arrives as an event, and a
+red `android` run additionally gets `claude-autofix.yml`. Polling adds a
+permission prompt and a wake-up to a loop that already closes itself. If a PR
+seems stuck, read `auto-merge`'s own run log — it prints which check it is
+waiting for — rather than setting a timer.
+
 Green CI is part of "finished", not a separate step to skip — the unit tests are
 what stand between a bad video id and the player, and merging past a red run
 publishes a build to every installed device.
