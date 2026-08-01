@@ -60,7 +60,28 @@ or `/channel/`. On a channel you have already approved it becomes **−**, which
 removes it. The list button opens every approved channel: tap one to go and
 look at it again, or **✕** to remove it.
 
-Removing a channel drops its videos from the grid immediately.
+Removing a channel drops its videos from the grid immediately, and its watch
+history with it.
+
+The list button's **sort** control cycles three orders, and the toolbar says
+which one is in force:
+
+- **Last added first** — the default, and what the list always did.
+- **A–Z**.
+- **Most watched** — over the last 7 days, or the last 30 if nothing was watched
+  in the week, or the last year if nothing in the month, and A–Z if the device
+  has no history at all. Narrowing first is the point: a channel watched daily
+  this week should lead one watched more often a year ago, and a list sorted
+  over all time would freeze into whatever was popular when the phone was new.
+  Whichever window applied is named in the bar, so "most watched" over an empty
+  history says so rather than looking unsorted.
+
+Which order you pick applies to the child's Channels tab too. It is one list.
+
+That history is one row per play, in the same database as everything else. It is
+never uploaded — the Worker is never told what was played — rows older than the
+widest window are deleted, and removing a channel removes its rows. It exists
+for that sort and nothing else.
 
 > **Approving a channel approves its future uploads.** The grid shows whatever
 > that channel posts next, and no adult will have seen it first. That is what
@@ -150,6 +171,7 @@ before anything is published:
 | `Schema.kt` | the SQL behind the approved list |
 | `Library.kt` | how uploads become the grid, and its order |
 | `Playlist.kt` | what plays after a video ends |
+| `ChannelSort.kt` | what order the approved channels are listed in |
 | `Chrome.kt` | where YouTube's seek bar is, from the pixels |
 
 Two of them matter most:

@@ -10,10 +10,11 @@ package dev.vtlinh.ytkids
 object Schema {
 
     const val DATABASE = "ytkids.db"
-    const val VERSION = 4
+    const val VERSION = 5
 
     const val CHANNELS = "channels"
     const val VIDEOS = "videos"
+    const val WATCHES = "watches"
 
     private val V1 = listOf(
         """
@@ -85,6 +86,35 @@ object Schema {
         "ALTER TABLE channels ADD COLUMN uploads_at INTEGER",
     )
 
+    /* What has been watched, so the approved list can be sorted by it.
+     *
+       One row per play, rather than a counter per channel: "most watched in the
+       last 7 days" cannot be answered by a running total, and a total is what
+       you end up stuck with the first time somebody wants a different window.
+       Rows are pruned by age — see WatchStore — so this does not grow forever.
+
+       channel_id is denormalised out of `videos` at write time on purpose. The
+       counting query has to work for a channel whose videos have since been
+       replaced by a refresh, or removed by the uploader; joining to `videos`
+       would quietly drop exactly the history that is oldest and therefore most
+       likely to matter to the 365-day rung.
+
+       It never leaves the device. Nothing uploads it, the Worker is never told
+       what was played, and removing a channel removes its rows. */
+    private val V5 = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS watches (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_id TEXT NOT NULL,
+            video_id   TEXT NOT NULL,
+            watched_at INTEGER NOT NULL
+        )
+        """.trimIndent(),
+        /* Every read is "since when", and the prune is "older than". */
+        "CREATE INDEX IF NOT EXISTS idx_watches_at ON watches (watched_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_watches_channel ON watches (channel_id, watched_at DESC)",
+    )
+
     /* Every statement needed to move a database from `from` to `to`.
        from == 0 means a fresh install, which is just every version in order. */
     fun statementsFor(from: Int, to: Int): List<String> {
@@ -93,6 +123,7 @@ object Schema {
         if (from < 2 && to >= 2) out += V2
         if (from < 3 && to >= 3) out += V3
         if (from < 4 && to >= 4) out += V4
+        if (from < 5 && to >= 5) out += V5
         /* Later versions append their own block here. Nothing is ever edited
            in place: a device that already ran V1 will never run it again, so
            changing it only affects fresh installs and silently splits the

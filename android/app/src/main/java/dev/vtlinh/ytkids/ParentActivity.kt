@@ -250,7 +250,7 @@ class ParentActivity : AppCompatActivity() {
         val url = web?.url.orEmpty()
         if (url.isEmpty()) return
         addButton.isEnabled = false
-        say(getString(R.string.parent_resolving))
+        say(getString(R.string.parent_resolving), toast = false)
         lifecycleScope.launch {
             val resolved = ChannelResolver.resolve(url)
             /* Re-derive rather than just re-enabling: resolving hits the
@@ -286,8 +286,10 @@ class ParentActivity : AppCompatActivity() {
             .setPositiveButton(R.string.parent_remove) { _, _ ->
                 ChannelStore.get(this).remove(channel.id)
                 /* drop the cached feed too, or its videos keep showing in the
-                   grid after the channel is gone */
+                   grid after the channel is gone — and the watch history with
+                   it, so an unapproved channel leaves nothing behind */
                 ChannelFeeds.forget(this, channel.id)
+                WatchStore.forget(this, channel.id)
                 say(getString(R.string.parent_removed, channel.title))
                 updateApproveButton(web?.url)
             }
@@ -298,10 +300,14 @@ class ParentActivity : AppCompatActivity() {
     /* The status line is normally invisible — a browser does not need a
        caption. It appears only to report something that just happened, and
        goes again on the next navigation. */
-    private fun say(message: String) {
+    private fun say(message: String, toast: Boolean = true) {
         current.text = message
         current.visibility = View.VISIBLE
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        /* Outcomes get a toast; progress does not. "Working out which channel
+           this is" is a thing that is happening, not a thing that happened,
+           and it was covering the page for three seconds to say so while the
+           same words sat in the status line underneath it. */
+        if (toast) Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     /* Back walks the browsing history — an adult in a browser expects that —

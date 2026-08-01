@@ -27,11 +27,13 @@ android/                         the app
     Schema.kt       pure: the SQL                     (unit-tested)
     Library.kt      pure: collate + date + order the grid (unit-tested)
     Playlist.kt     pure: what plays next             (unit-tested)
+    ChannelSort.kt  pure: the approved list's order   (unit-tested)
     Chrome.kt       pure: find the seek bar's track     (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
     SettingsStore.kt the parent's choices; SettingsActivity edits them, inside parent mode
     ChannelFeeds.kt asks the Worker, once a day per channel
     VideoStore.kt   the grid, in SQLite
+    WatchStore.kt   what was played, on the device only — feeds the sort
     BlockHeightStore.kt the measured player inset, per display
     MainActivity.kt the grid + the read-only Channels tab
     BottomTabs.kt   the two-tab bottom bar, shared by the child's screens
@@ -118,8 +120,8 @@ stops, green publishes.
 ## Conventions
 
 - **The pure files must stay free of Android imports.** `VideoId`, `Player`,
-  `Challenge`, `YouTubeUrls`, `Uploads`, `Schema`, `Library`, `Playlist` and
-  `Chrome` are the app's safety boundary and they are testable precisely
+  `Challenge`, `YouTubeUrls`, `Uploads`, `Schema`, `Library`, `Playlist`,
+  `ChannelSort` and `Chrome` are the app's safety boundary and they are testable precisely
   because a plain JVM can run them. Anything needing a `Context` belongs in the
   Activity or Store that calls them.
 - **Validate video ids at every hop.** The Worker refuses malformed ids off the
@@ -181,6 +183,19 @@ stops, green publishes.
   list, where every other parent control already is. Anything reachable from
   that bar without the gate does not belong on it. `AboutActivity` remains the
   exception, on the long-press: parent-facing but harmless.
+- **Watch history never leaves the device, and stays small.** It exists for one
+  feature — ordering the approved list by what is actually being watched — and
+  is one row per play in the same SQLite file. Nothing uploads it, the Worker is
+  never told what was played, removing a channel removes its rows, and
+  `WatchStore` prunes past the widest rung of `ChannelSort`'s ladder. Don't grow
+  it into analytics, and don't send it anywhere.
+- **"Most watched" is a ladder, not a window.** 7 days, then 30, then 365, then
+  A-Z — each rung used only when every narrower one found nothing at all. A
+  window of zeroes counts as empty; otherwise one stale row pins the ladder to
+  its rung forever. The final fallback is A-Z rather than last-added on purpose:
+  an absent answer must not masquerade as the default one having agreed with it.
+  And the list has to SAY which rung applied, or "most watched" over an empty
+  history is indistinguishable from a broken sort.
 - **Nothing inside parent mode needs its own gate.** `ParentActivity` is only
   reachable through a `RESULT_OK` from `ChallengeActivity`, so the approved
   list and the settings open straight from its bar. Adding a second challenge

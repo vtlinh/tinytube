@@ -53,6 +53,38 @@ class ApprovedChannelsActivity : AppCompatActivity() {
         backfillAvatars()
     }
 
+    /* One button in the bar, cycling the three orders. A menu of three would
+       be more discoverable and this is a screen a parent visits rarely; the
+       toolbar's subtitle is what makes cycling legible, by naming the order
+       that is now in force rather than leaving the list to have silently
+       rearranged itself. */
+    override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
+        menuInflater.inflate(R.menu.approved_channels, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        if (item.itemId != R.id.action_sort) return super.onOptionsItemSelected(item)
+        SettingsStore.setChannelSort(this, ChannelSort.next(SettingsStore.channelSort(this)))
+        reload()
+        return true
+    }
+
+    /* What the order is, in words — including which rung of the ladder the
+       watch counts actually landed on. "Most watched" that fell all the way
+       through to A-Z has to say so: a list that looks unsorted and a list that
+       is broken look the same otherwise. */
+    private fun describe(mode: ChannelSort.Mode, countsByWindow: List<Map<String, Int>>): String =
+        when (mode) {
+            ChannelSort.Mode.LAST_ADDED -> getString(R.string.parent_sort_last_added)
+            ChannelSort.Mode.A_Z -> getString(R.string.parent_sort_a_z)
+            ChannelSort.Mode.MOST_WATCHED -> {
+                val window = ChannelSort.windowIndex(countsByWindow)
+                if (window == null) getString(R.string.parent_sort_watched_none)
+                else getString(R.string.parent_sort_watched_days, ChannelSort.WINDOWS_DAYS[window])
+            }
+        }
+
     /* The up arrow means "back to what I was doing", not "up to a parent
        screen that doesn't exist" — finish rather than synthesise a stack. */
     override fun onSupportNavigateUp(): Boolean {
@@ -61,9 +93,18 @@ class ApprovedChannelsActivity : AppCompatActivity() {
     }
 
     private fun reload() {
+        val mode = SettingsStore.channelSort(this)
+        /* Read even for the two orders that don't need them, so the subtitle
+           can be written from the same snapshot the list was sorted from.
+           Three grouped counts over a table pruned to a year is not work worth
+           arranging around. */
+        val counts = WatchStore.countsByWindow(this, System.currentTimeMillis())
+
         channels.clear()
-        channels.addAll(ChannelStore.get(this).all())
+        channels.addAll(ChannelSort.sort(ChannelStore.get(this).all(), mode, counts))
         adapter.notifyDataSetChanged()
+        supportActionBar?.subtitle = describe(mode, counts)
+
         val none = channels.isEmpty()
         empty.visibility = if (none) View.VISIBLE else View.GONE
         list.visibility = if (none) View.GONE else View.VISIBLE
@@ -102,8 +143,10 @@ class ApprovedChannelsActivity : AppCompatActivity() {
             .setPositiveButton(R.string.parent_remove) { _, _ ->
                 ChannelStore.get(this).remove(channel.id)
                 /* drop the cached feed too, or its videos keep showing in the
-                   grid after the channel is gone */
+                   grid after the channel is gone — and the watch history with
+                   it, so an unapproved channel leaves nothing behind */
                 ChannelFeeds.forget(this, channel.id)
+                WatchStore.forget(this, channel.id)
                 reload()
             }
             .setNegativeButton(android.R.string.cancel, null)

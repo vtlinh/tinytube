@@ -133,7 +133,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun reloadChannels() {
         channels.clear()
-        channels.addAll(ChannelStore.get(this).all())
+        /* The same order the parent set on their own list. It is one list, and
+           two orders for it is how a parent ends up unable to find on this
+           screen what they just arranged on the other. Read-only here, like
+           everything else on this tab — the button that changes it is in
+           parent mode. */
+        channels.addAll(
+            ChannelSort.sort(
+                ChannelStore.get(this).all(),
+                SettingsStore.channelSort(this),
+                WatchStore.countsByWindow(this, System.currentTimeMillis()),
+            ),
+        )
         channelAdapter.notifyDataSetChanged()
         /* A channel approved and then removed while its videos were on screen
            would otherwise leave the grid filtered to nothing, with a heading
