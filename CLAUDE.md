@@ -94,8 +94,8 @@ ios/TinyTube/                    the app target
   PlayerView.swift      overlay, reveal corner, blocker, what plays next
   PlayerWebView.swift   the locked-down WKWebView + the Bridge shim
   ParentView.swift      real YouTube, only ever reached through the gate
-  ApprovedChannelsView.swift  the approved list, with open and remove
-  SettingsView.swift    the parent's choices + About; no updates on iOS
+  SettingsView.swift    the parent's choices + About + the approved list,
+                        with open and remove; no updates on iOS
   Gate.swift            LocalAuthentication; arithmetic only with no lock
   ChallengeView.swift   that arithmetic fallback
   PlayerChrome.swift    the blocker's height: measured, else 16pt
@@ -130,7 +130,9 @@ android/                         the app
     ChannelSort.kt  pure: the approved list's order   (unit-tested)
     Chrome.kt       pure: find the seek bar's track     (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
-    SettingsStore.kt the parent's choices; SettingsActivity edits them + About, in parent mode
+    SettingsStore.kt the parent's choices; SettingsActivity edits them + About
+                    + the approved list, with open and remove, in parent mode
+    Tooltip.kt      the ? beside each settings heading
     ChannelFeeds.kt asks the Worker, once a day per channel
     VideoStore.kt   the grid, in SQLite
     WatchStore.kt   what was played, on the device only — feeds the sort
@@ -139,8 +141,7 @@ android/                         the app
     BottomTabs.kt   the two-tab bottom bar, shared by the child's screens
     PlayerActivity.kt the locked-down WebView
     ParentActivity.kt YouTube in a WebView, behind ChallengeActivity
-    ApprovedChannelsActivity.kt the approved list, with open and remove
-    Updater.kt      self-update against android-latest
+      Updater.kt      self-update against android-latest
   app/src/test/                  plain JVM tests, no emulator
 ```
 
@@ -462,9 +463,18 @@ stops, green publishes.
 - **The Channels tab is read-only, and must stay that way.** It shows the
   approved list and narrows the grid to one channel. It cannot remove a channel
   and it cannot open YouTube — `ChannelStore` is the parental control and
-  editing it lives behind the gate, in `ApprovedChannelsActivity`. The two
-  screens share `item_approved_channel.xml`; the child's copy hides the remove
-  button. Don't give this one an action that changes what is approved.
+  editing it lives behind the gate, in `SettingsActivity`. The two screens
+  share `item_approved_channel.xml`; the child's copy hides the remove button,
+  and settings inflates the same row into a plain `LinearLayout`. Don't give
+  this one an action that changes what is approved.
+- **The settings screen explains itself through the `?` beside each heading,
+  not in prose under it.** Four permanent grey paragraphs were most of that
+  screen, and a parent scrolling for the hold slider read three explanations of
+  things they already understood to reach it. Android gets a real anchored
+  popup (`Tooltip.kt`); iOS gets an alert, because `.popover` only stays a
+  popover on an iPhone from 16.4 and the deployment target is 16.0 — on 16.0 it
+  takes over the whole screen, which is worse than the alert. Same words on
+  both, and a new setting brings its own `?` rather than a paragraph.
 - **`ParentActivity` must never be reachable without the gate.** It is real
   YouTube. It is not exported, and the only thing that starts it is a
   `RESULT_OK` from `ChallengeActivity`. Don't add another caller.

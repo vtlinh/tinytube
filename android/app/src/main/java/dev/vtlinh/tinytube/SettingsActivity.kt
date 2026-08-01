@@ -5,19 +5,25 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.RadioGroup
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-/* Everything parent-facing that isn't the approved list.
+/* Every parent-facing control there is, the approved list included.
 
    Not exported, and reached only from parent mode's bar, which is itself only
    reachable through a RESULT_OK from ChallengeActivity. Nothing here needs a
@@ -25,16 +31,26 @@ import java.util.concurrent.Executors
 
    The bottom half of this screen used to be AboutActivity, opened by
    long-pressing the grid's title. That put a parent-facing screen on the
-   child's side of the app, behind a gesture nobody would guess was there. Its
-   "N approved channels" line went with the move: the approved list is one tap
-   away in the bar above this screen, and a count of a list you can see is not
-   news.
+   child's side of the app, behind a gesture nobody would guess was there.
+
+   THE APPROVED LIST IS IN HERE TOO, and as the list rather than as a button
+   that opens one. ApprovedChannelsActivity is gone: a whole screen — toolbar,
+   up arrow, overflow menu — existed to show three or four rows, and the
+   question a parent came to settings with is usually "what IS approved",
+   which is now answered by looking rather than by tapping.
+
+   The explanations are behind the ? beside each heading. See Tooltip.
 
    Settings save on the tap rather than behind a Save button. There is no draft
    state to lose and nothing to confirm; the control IS the setting. */
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var holdValue: TextView
+
+    private lateinit var channelsList: LinearLayout
+    private lateinit var channelsEmpty: TextView
+    private lateinit var channelsCount: TextView
+    private lateinit var channelsOrder: TextView
 
     private lateinit var status: TextView
     private lateinit var action: Button
@@ -69,6 +85,7 @@ class SettingsActivity : AppCompatActivity() {
         notifAction = findViewById(R.id.notif_action)
         notifDivider = findViewById(R.id.notif_divider)
         setUpChannels()
+        setUpHelp()
         findViewById<TextView>(R.id.version).text = getString(
             R.string.version_fmt,
             packageManager.getPackageInfo(packageName, 0).versionName,
@@ -83,40 +100,151 @@ class SettingsActivity : AppCompatActivity() {
         renderNotifications()
     }
 
-    /* ---- what plays next ---- */
+    /* ---- the approved channels ---- */
 
-    /* The approved list, opened from here rather than from the browser's bar.
-     *
-     * It can hand back a channel to go and look at, and this screen is not the
-     * one that can act on that — ParentActivity owns the WebView. So the result
-     * is forwarded straight up: the list returns a URL to us, we return it to
-     * whoever opened us, and ParentActivity loads it. Settings is a pass-through
-     * for that one value and nothing else. */
-    private val approvedList =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            showChannelCount()
-            if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
-            val url = result.data?.getStringExtra(ApprovedChannelsActivity.EXTRA_OPEN_URL)
-                ?: return@registerForActivityResult
-            setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_OPEN_URL, url))
-            finish()
-        }
+    private val channels = mutableListOf<Channel>()
+
+    /* A row tapped means "take me to that channel", which this screen cannot
+       do — ParentActivity owns the WebView. So it is handed back up: we finish
+       with the URL, and ParentActivity loads it. Settings is a pass-through for
+       that one value and nothing else. It used to pass through TWICE, because
+       the list was a third screen behind this one. */
+    private fun openChannel(channel: Channel) {
+        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_OPEN_URL, channel.url))
+        finish()
+    }
 
     private fun setUpChannels() {
-        showChannelCount()
-        findViewById<android.widget.Button>(R.id.manage_channels).setOnClickListener {
-            approvedList.launch(Intent(this, ApprovedChannelsActivity::class.java))
+        channelsList = findViewById(R.id.channels_list)
+        channelsEmpty = findViewById(R.id.channels_empty)
+        channelsCount = findViewById(R.id.channels_count)
+        channelsOrder = findViewById(R.id.channels_order)
+
+        findViewById<ImageButton>(R.id.channels_sort).setOnClickListener {
+            SettingsStore.setChannelSort(this, ChannelSort.next(SettingsStore.channelSort(this)))
+            showChannels()
+        }
+        showChannels()
+        backfillAvatars()
+    }
+
+    /* Rebuilds the rows from scratch. There are as many of these as a parent
+       typed in by hand, so removing and re-inflating them costs nothing and
+       avoids a diffing adapter for a list that changes twice a year. */
+    private fun showChannels() {
+        val mode = SettingsStore.channelSort(this)
+        /* Read even for the two orders that don't use them, so the label is
+           written from the same snapshot the list was sorted from. */
+        val counts = WatchStore.countsByWindow(this, System.currentTimeMillis())
+
+        channels.clear()
+        channels.addAll(ChannelSort.sort(ChannelStore.get(this).all(), mode, counts))
+
+        channelsCount.text =
+            if (channels.isEmpty()) getString(R.string.settings_channels_none)
+            else getString(R.string.settings_channels_count, channels.size)
+        channelsOrder.text = describe(mode, counts)
+        channelsEmpty.visibility = if (channels.isEmpty()) View.VISIBLE else View.GONE
+
+        channelsList.removeAllViews()
+        val inflater = LayoutInflater.from(this)
+        for (channel in channels) bind(inflater, channelsList, channel)
+    }
+
+    private fun bind(inflater: LayoutInflater, into: ViewGroup, channel: Channel) {
+        val row = inflater.inflate(R.layout.item_approved_channel, into, false)
+        row.findViewById<TextView>(R.id.title).text = channel.title
+        /* the handle if we have one, the id otherwise — something to tell two
+           similarly-named channels apart by */
+        row.findViewById<TextView>(R.id.subtitle).text =
+            channel.handle?.let { "@$it" } ?: channel.id
+        row.setOnClickListener { openChannel(channel) }
+
+        val remove = row.findViewById<ImageButton>(R.id.remove)
+        remove.contentDescription = getString(R.string.parent_remove_named, channel.title)
+        remove.setOnClickListener { confirmRemove(channel) }
+
+        val avatar = row.findViewById<ImageView>(R.id.avatar)
+        val url = channel.avatarUrl
+        avatar.setImageDrawable(null)
+        Thumbnails.tagFor(avatar, url.orEmpty())
+        into.addView(row)
+        if (url == null) return
+        Thumbnails.cached(url)?.let { avatar.setImageBitmap(it); return }
+        lifecycleScope.launch {
+            val bmp = Thumbnails.load(url) ?: return@launch
+            if (Thumbnails.stillWanted(avatar, url)) avatar.setImageBitmap(bmp)
         }
     }
 
-    /* Says how many, because "Approved channels" with no number gives a parent
-       no reason to look and no way to notice that the list is empty. */
-    private fun showChannelCount() {
-        val count = ChannelStore.get(this).all().size
-        findViewById<TextView>(R.id.channels_count).text =
-            if (count == 0) getString(R.string.settings_channels_none)
-            else getString(R.string.settings_channels_count, count)
+    /* What the order is, in words — including which rung of the ladder the
+       watch counts actually landed on. "Most watched" that fell all the way
+       through to A-Z has to say so: a list that looks unsorted and a list that
+       is broken look the same otherwise. */
+    private fun describe(mode: ChannelSort.Mode, countsByWindow: List<Map<String, Int>>): String =
+        when (mode) {
+            ChannelSort.Mode.LAST_ADDED -> getString(R.string.parent_sort_last_added)
+            ChannelSort.Mode.A_Z -> getString(R.string.parent_sort_a_z)
+            ChannelSort.Mode.MOST_WATCHED ->
+                if (ChannelSort.windowIndex(countsByWindow) == null) {
+                    getString(R.string.parent_sort_watched_none)
+                } else {
+                    getString(R.string.parent_sort_watched_days)
+                }
+        }
+
+    /* Confirmed, because it is destructive and one row looks much like another
+       on a small screen. */
+    private fun confirmRemove(channel: Channel) {
+        AlertDialog.Builder(this)
+            .setTitle(channel.title)
+            .setMessage(getString(R.string.parent_remove_confirm, channel.title))
+            .setPositiveButton(R.string.parent_remove) { _, _ ->
+                /* Everything goes together inside remove(): the row, its
+                   videos, its watch history and its cached pictures. */
+                ChannelStore.get(this).remove(channel.id)
+                showChannels()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
+
+    /* Channels approved before avatars were recorded have none, and would sit
+       as blank circles for good otherwise. Fetch them once, quietly; a row that
+       fails stays blank and is tried again next time this screen opens. */
+    private fun backfillAvatars() {
+        val missing = channels.filter { it.avatarUrl == null }
+        if (missing.isEmpty()) return
+        lifecycleScope.launch {
+            var found = false
+            for (channel in missing) {
+                val resolved = ChannelResolver.resolve(channel.url) ?: continue
+                val avatar = resolved.avatarUrl ?: continue
+                ChannelStore.get(this@SettingsActivity).setAvatar(channel.id, avatar)
+                found = true
+            }
+            if (found) showChannels()
+        }
+    }
+
+    /* ---- the ? beside each heading ---- */
+
+    /* Every explanation this screen used to print under its headings, moved
+       behind a tap. The next-video card had two paragraphs — what the choice
+       does, and what "the list" means — and they are one tooltip rather than
+       two questions marks a millimetre apart. */
+    private fun setUpHelp() {
+        Tooltip.attach(findViewById<View>(R.id.help_next_video), buildString {
+            append(getString(R.string.settings_next_video_explain))
+            append("\n\n")
+            append(getString(R.string.settings_next_scope_explain))
+        })
+        Tooltip.attach(findViewById<View>(R.id.help_hold), R.string.settings_hold_explain)
+        Tooltip.attach(findViewById<View>(R.id.help_updates), R.string.settings_updates_explain)
+        Tooltip.attach(findViewById<View>(R.id.help_channels), R.string.settings_channels_explain)
+    }
+
+    /* ---- what plays next ---- */
 
     private fun setUpNextVideo() {
         val group = findViewById<RadioGroup>(R.id.next_mode)
@@ -316,8 +444,7 @@ class SettingsActivity : AppCompatActivity() {
         super.onDestroy()
     }
     companion object {
-        /* Forwarded up from ApprovedChannelsActivity so ParentActivity can load
-           it. Same key name on purpose: it is the same value passing through. */
+        /* Read by ParentActivity, which is the only thing that can act on it. */
         const val EXTRA_OPEN_URL = "open_url"
     }
 

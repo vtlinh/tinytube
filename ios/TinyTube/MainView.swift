@@ -11,7 +11,7 @@ import TinyTubeCore
    THE CHANNELS TAB IS READ-ONLY. It shows the approved list and narrows the
    grid to one channel. It cannot remove a channel and it cannot open YouTube —
    `ChannelStore` is the parental control and editing it lives behind the gate,
-   in ApprovedChannelsView. Don't give this one an action that changes what is
+   in SettingsView. Don't give this one an action that changes what is
    approved. */
 struct MainView: View {
 

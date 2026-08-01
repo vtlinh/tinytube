@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The body of a tooltip popup. See Tooltip.kt. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/tooltip_text"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_tooltip"
+    android:padding="14dp"
+    android:textSize="14sp"
+    android:lineSpacingExtra="2dp"
+    android:textColor="@color/text" />
