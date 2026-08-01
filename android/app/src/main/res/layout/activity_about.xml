@@ -13,82 +13,177 @@
     android:layout_height="0dp"
     android:layout_weight="1">
 
+    <!-- Three cards on a plain background, rather than one column of text with
+         a screenful of nothing under it. Everything here was already on the
+         screen; what was missing was any grouping — which line was about the
+         app, and which was a control you could press.
+
+         Cards also make the space below read as the end of a short page
+         rather than as something that failed to load. -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="20dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/app_name"
-            android:textSize="24sp"
-            android:textStyle="bold"
-            android:textColor="@color/text" />
-
-        <TextView
-            android:id="@+id/version"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingTop="6dp"
-            android:textSize="15sp"
-            android:textColor="@color/text_muted" />
-
-        <TextView
-            android:id="@+id/catalog_count"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingTop="2dp"
-            android:textSize="15sp"
-            android:textColor="@color/text_muted" />
-
-        <TextView
-            android:id="@+id/author"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingTop="2dp"
-            android:text="@string/author"
-            android:textSize="15sp"
-            android:textColor="@color/text_muted" />
-
-        <!-- Shown only when notifications can't appear. Without them an update
-             downloads and nothing says so, so the state is worth surfacing on
-             the one screen a parent actually reads. -->
-        <TextView
-            android:id="@+id/notif_status"
+        <!-- Who this is. -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="28dp"
-            android:textSize="15sp"
-            android:textColor="@color/text_muted"
-            android:lineSpacingMultiplier="1.2"
-            android:visibility="gone" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_tile"
+            android:padding="20dp">
 
-        <Button
-            android:id="@+id/notif_action"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            style="?android:attr/borderlessButtonStyle"
-            android:textColor="@color/accent"
-            android:visibility="gone" />
+            <ImageView
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginEnd="16dp"
+                android:src="@mipmap/ic_launcher"
+                android:background="@drawable/bg_app_icon"
+                android:clipToOutline="true"
+                android:scaleType="centerCrop"
+                android:contentDescription="@null" />
 
-        <TextView
-            android:id="@+id/status"
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/app_name"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text" />
+
+                <TextView
+                    android:id="@+id/version"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="3dp"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_muted" />
+
+                <TextView
+                    android:id="@+id/author"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="1dp"
+                    android:text="@string/author"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_muted" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- What is approved, stated as a fact about the app rather than as a
+             control: changing it lives behind the gate, and this screen is
+             not behind the gate. -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="28dp"
-            android:textSize="16sp"
-            android:textColor="@color/text" />
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_tile"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp">
 
-        <Button
-            android:id="@+id/action"
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_marginEnd="14dp"
+                android:src="@drawable/ic_tab_channels"
+                android:contentDescription="@null" />
+
+            <TextView
+                android:id="@+id/catalog_count"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="15sp"
+                android:textColor="@color/text" />
+
+        </LinearLayout>
+
+        <!-- Updates: the only part of this screen that does anything. -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:backgroundTint="@color/accent"
-            android:textColor="@color/on_accent" />
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_tile"
+            android:padding="20dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/about_updates"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08"
+                android:textAllCaps="true"
+                android:textColor="@color/text_muted" />
+
+            <TextView
+                android:id="@+id/status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="10dp"
+                android:textSize="16sp"
+                android:lineSpacingMultiplier="1.15"
+                android:textColor="@color/text" />
+
+            <Button
+                android:id="@+id/action"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:backgroundTint="@color/accent"
+                android:textColor="@color/on_accent" />
+
+            <!-- Shown only when notifications can't appear. Without them an
+                 update downloads and nothing says so, so the state is worth
+                 surfacing on the one screen a parent actually reads.
+
+                 Below the update control rather than above it: it explains a
+                 limitation of the thing above it, and leading with it made a
+                 working app look broken. -->
+            <View
+                android:id="@+id/notif_divider"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="20dp"
+                android:background="@color/divider"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/notif_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="16dp"
+                android:textSize="14sp"
+                android:textColor="@color/text_muted"
+                android:lineSpacingMultiplier="1.2"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/notif_action"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:layout_marginStart="-8dp"
+                style="?android:attr/borderlessButtonStyle"
+                android:textColor="@color/accent"
+                android:visibility="gone" />
+
+        </LinearLayout>
 
     </LinearLayout>
 

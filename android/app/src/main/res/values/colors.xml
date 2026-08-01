@@ -12,6 +12,9 @@
     <color name="on_accent">#FFFFFF</color>
 
     <color name="text">#12212E</color>
+    <!-- Hairlines between rows inside a card. Barely there on purpose: it is
+         separating related things, not fencing them off. -->
+    <color name="divider">#1A12212E</color>
     <color name="text_muted">#52657A</color>
     <color name="black">#000000</color>
 
