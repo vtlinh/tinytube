@@ -10,10 +10,15 @@ import java.util.concurrent.TimeUnit
 
 /* Recent uploads from every approved channel.
 
-   Two sources, tried in order, both needing no API key and no quota — which is
-   what makes channel approval workable here at all. The uploads playlist page
-   carries the latest 100; the Atom feed carries about 15 and is what happens
-   when the page yields nothing. Feed does the parsing and explains the trade.
+   Two sources, both needing no API key and no quota — which is what makes
+   channel approval workable here at all. The playlist page carries the latest
+   100 in upload order; the Atom feed carries about 15 WITH the upload times the
+   grid sorts on, and is also the whole answer when the page yields nothing.
+   Feed does the parsing and explains the trade.
+
+   Both name the channel's UULF playlist rather than its UU one — the same
+   uploads with Shorts taken out, by YouTube's own classification. That is the
+   entirety of how Shorts stay off a child's screen; see YouTubeUrls.
 
    Worth being clear about what approving a channel therefore means: the grid
    will show that channel's NEW uploads as they appear, which no adult has
@@ -113,21 +118,36 @@ object ChannelFeeds {
             out
         }
 
-    /* The hundred, or the fifteen, or nothing.
+    /* One channel's uploads, dated.
      *
-     * The order matters and so does the fallback being unconditional on the
-     * page's CONTENT rather than on its status. A page that returns 200 and
-     * parses to nothing — a consent interstitial, a locale that shapes the
-     * state differently, a rename of the entry we look for — is exactly the
-     * case the Atom feed exists to cover, and it is indistinguishable from
-     * success at the HTTP layer. */
+     * BOTH sources, every time, because they know different halves. The page
+     * gives a hundred videos in upload order and no dates; the ten-kilobyte
+     * feed gives fifteen with real timestamps, which is what the grid sorts
+     * on. Library.datePositions reconciles them.
+     *
+     * And the feed is the fallback as well: when the page yields nothing it
+     * is the whole answer, at fifteen videos rather than none. That fallback
+     * turns on the page's CONTENT rather than its status, because a page that
+     * returns 200 and parses to nothing — a consent interstitial, a locale
+     * that shapes the state differently, a rename of the entry we look for —
+     * is indistinguishable from success at the HTTP layer.
+     *
+     * Neither source can carry a Short: both name the UULF playlist, which is
+     * YouTube's own uploads list with Shorts taken out. */
     private fun fetchUploads(channelId: String): List<Video> {
-        val page = YouTubeUrls.uploadsUrl(channelId)?.let { get(it, DESKTOP_UA) }
-        val fromPage = page?.let { Feed.parseUploadsPage(it) }.orEmpty()
-        if (fromPage.isNotEmpty()) return fromPage
+        val dated = YouTubeUrls.feedUrl(channelId)?.let { get(it, null) }
+            ?.let { Feed.parse(it) }
+            .orEmpty()
 
-        val xml = YouTubeUrls.feedUrl(channelId)?.let { get(it, null) }
-        return xml?.let { Feed.parse(it) }.orEmpty()
+        val page = YouTubeUrls.uploadsUrl(channelId)?.let { get(it, DESKTOP_UA) }
+        val ordered = page?.let { Feed.parseUploadsPage(it) }.orEmpty()
+        if (ordered.isEmpty()) return dated
+
+        return Library.datePositions(
+            ordered = ordered,
+            dated = dated.mapNotNull { v -> v.publishedAt?.let { v.id to it } }.toMap(),
+            fallback = System.currentTimeMillis() / 1000,
+        )
     }
 
     private fun get(url: String, userAgent: String?): String? = try {

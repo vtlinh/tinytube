@@ -24,9 +24,11 @@ android/                         the app
     YouTubeUrls.kt  pure: channel ids, parent allowlist (unit-tested)
     Feed.kt         pure: uploads page + Atom feed + cache (unit-tested)
     Schema.kt       pure: the SQL                     (unit-tested)
-    Library.kt      pure: collate uploads into the grid (unit-tested)
+    Library.kt      pure: collate + date + order the grid (unit-tested)
+    Playlist.kt     pure: what plays next             (unit-tested)
     Chrome.kt       pure: find the seek bar's track     (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
+    SettingsStore.kt the parent's choices; SettingsActivity edits them, behind the gate
     ChannelFeeds.kt per-channel uploads + cache
     BlockHeightStore.kt the measured player inset, per display
     MainActivity.kt the grid + the read-only Channels tab
@@ -113,10 +115,10 @@ stops, green publishes.
 ## Conventions
 
 - **The pure files must stay free of Android imports.** `VideoId`, `Player`,
-  `Challenge`, `YouTubeUrls`, `Feed`, `Schema`, `Library` and `Chrome` are the app's
-  safety boundary and they are testable precisely because a plain JVM can run
-  them. Anything needing a `Context` belongs in the Activity or Store that
-  calls them.
+  `Challenge`, `YouTubeUrls`, `Feed`, `Schema`, `Library`, `Playlist` and
+  `Chrome` are the app's safety boundary and they are testable precisely
+  because a plain JVM can run them. Anything needing a `Context` belongs in the
+  Activity or Store that calls them.
 - **Validate video ids at every hop.** `Feed` refuses malformed ids coming off
   a channel's feed, off the uploads page, and off the on-disk cache; and
   `Player.pageFor` refuses them again rather than trusting its caller. An id is
@@ -125,11 +127,39 @@ stops, green publishes.
 - **The uploads page is the optional half of the grid.** 100 videos come from
   YouTube's uploads-playlist page, which is a rendering of their own web app and
   can be renamed under us; 15 come from the Atom feed, which is published for
-  the purpose. So `parseUploadsPage` returning empty must always fall through to
-  `Feed.parse`, and it must return empty rather than throw on anything it does
-  not recognise. Fifteen videos is a thinner grid; a crash or an empty one is a
-  broken app. `FeedTest` pins the parser against three entries lifted verbatim
-  from a live page — when YouTube renames the shape, that test is what says so.
+  the purpose and is also the only source carrying an upload TIME. So
+  `parseUploadsPage` returning empty must always fall through to `Feed.parse`,
+  and it must return empty rather than throw on anything it does not recognise.
+  Fifteen videos is a thinner grid; a crash or an empty one is a broken app.
+  `FeedTest` pins the parser against three entries lifted verbatim from a live
+  page — when YouTube renames the shape, that test is what says so.
+- **Shorts are excluded by naming the `UULF` playlist, and by nothing else.**
+  Every URL in `YouTubeUrls` — the page and the feed — is built from
+  `longFormPlaylistId`, which is the channel id with `UC` replaced by `UULF`:
+  YouTube's own uploads list with Shorts removed. Do not classify videos here.
+  The page reports every entry as `LOCKUP_CONTENT_TYPE_VIDEO` whether it is a
+  Short or not, and duration is not the rule — YouTube sorts by aspect ratio, so
+  filtering by length would drop exactly the short, wide videos a children's
+  channel posts while keeping three-minute vertical Shorts. A `UU` playlist id
+  anywhere in that file puts Shorts back silently; there is a test that fails
+  if one appears.
+- **The grid is ordered by upload time, newest first, across all channels.**
+  The page gives order and no dates, the feed gives dates and no depth;
+  `Library.datePositions` reconciles them by keeping every date the feed knows
+  and placing everything below it one second apart in page order. That number
+  is a SORT KEY, not a claim about when something was posted — don't display it
+  as a date, and don't let anything downstream treat it as one.
+- **What plays next comes from the list the child tapped on.** `PlayerActivity`
+  is handed the whole visible list and an index, so a video started from a
+  channel-filtered grid cannot lead out of that channel — and there is no rule
+  in the player saying so, which is the point. Don't give the player its own
+  idea of what is playable; the screen that was on is the authority.
+- **Both status bar controls are gated.** The bar holds the Parent button and
+  the Settings button, and neither opens anything without a `RESULT_OK` from
+  `ChallengeActivity` first. That is the invariant — not the number of buttons.
+  A control that reaches anything without the gate does not belong there,
+  whatever it does. `AboutActivity` remains the exception, on the long-press:
+  parent-facing but harmless.
 - **Curation is channel-level and on the device.** There is no hand-listed
   video catalog and no server-side list; `ChannelStore` is the parental
   control. Don't reintroduce a remote source of approvals without saying what
@@ -138,9 +168,8 @@ stops, green publishes.
   parsed host, never a substring of the URL. If you add a host, add the
   lookalike test cases for it too.
 - **Never widen the child-facing surface.** No search, no free text entry, no
-  link that leaves the app. The status bar holds exactly one control, the
-  Parent button, and everything behind it is gated by `ChallengeActivity`.
-  `AboutActivity` stays on the long-press: it is parent-facing but harmless.
+  link that leaves the app. Every control on the status bar is parent-facing
+  and behind `ChallengeActivity` — see the gating rule below.
 - **The Channels tab is read-only, and must stay that way.** It shows the
   approved list and narrows the grid to one channel. It cannot remove a channel
   and it cannot open YouTube — `ChannelStore` is the parental control and

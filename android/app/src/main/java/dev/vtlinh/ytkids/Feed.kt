@@ -35,6 +35,7 @@ object Feed {
     private val ENTRY = Regex("<entry>(.*?)</entry>", RegexOption.DOT_MATCHES_ALL)
     private val VIDEO_ID = Regex("<yt:videoId>\\s*([^<\\s]+)\\s*</yt:videoId>")
     private val TITLE = Regex("<title[^>]*>(.*?)</title>", RegexOption.DOT_MATCHES_ALL)
+    private val PUBLISHED = Regex("<published>\\s*([^<\\s]+)\\s*</published>")
 
     /* Never throws and never returns a video whose id isn't well-formed. An
        empty result is the honest answer for a feed that is empty, truncated,
@@ -49,7 +50,14 @@ object Feed {
                 if (!VideoId.isValid(id)) continue
                 if (!seen.add(id)) continue
                 val title = TITLE.find(body)?.groupValues?.get(1)?.let { unescape(it).trim() }
-                out.add(Video(id = id, title = title?.ifEmpty { null } ?: id))
+                val published = PUBLISHED.find(body)?.groupValues?.get(1)?.let { epochSeconds(it) }
+                out.add(
+                    Video(
+                        id = id,
+                        title = title?.ifEmpty { null } ?: id,
+                        publishedAt = published,
+                    ),
+                )
             }
         } catch (e: Exception) {
             return emptyList()
@@ -79,6 +87,24 @@ object Feed {
 
     private fun codePoint(cp: Int): String? =
         if (cp in 1..0x10FFFF) String(Character.toChars(cp)) else null
+
+    /* An Atom <published> as epoch seconds.
+     *
+     * The feed writes "2026-07-29T15:58:06+00:00" — RFC 3339, always with an
+     * offset. java.time parses that exactly and is available from API 26, which
+     * is this app's minimum; the alternative is a hand-rolled parser that gets
+     * leap years or offsets wrong on somebody's phone in a timezone I never
+     * tested. Null for anything it will not parse, and the caller treats an
+     * undated video as older than every dated one rather than dropping it. */
+    fun epochSeconds(iso: String): Long? = try {
+        java.time.OffsetDateTime.parse(iso).toEpochSecond()
+    } catch (e: Exception) {
+        try {
+            java.time.Instant.parse(iso).epochSecond
+        } catch (e2: Exception) {
+            null
+        }
+    }
 
     /* ---- the uploads playlist page ---- */
 
@@ -182,28 +208,40 @@ object Feed {
        came from. The Atom feed was small enough to keep whole; a playlist page
        is two megabytes per channel, and re-running these regexes over it on
        every cold start to recover a hundred short strings is work nobody
-       needs. One line per video, id and title separated by a tab.
+       needs. One line per video: id, published-at, title, tab separated.
+     *
+     * The timestamp is stored because it is what the grid sorts on, and it is
+     * only partly recoverable — the feed dates the newest fifteen and the rest
+     * are placed relative to those. Recomputing that from scratch on a cold
+     * start with no network would reorder a grid the child was looking at.
      *
      * Tabs and newlines are stripped from the title rather than escaped: they
-     * are the only two characters this format cannot carry, neither belongs in
-     * a video title, and a format with no escapes has no escaping bugs. */
+     * are the only characters this format cannot carry, neither belongs in a
+     * video title, and a format with no escapes has no escaping bugs. The
+     * title goes last so it is the only field that can contain anything. */
     fun encode(videos: List<Video>): String =
         videos.joinToString("\n") { v ->
-            v.id + "\t" + v.title.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
+            v.id + "\t" + (v.publishedAt?.toString() ?: "") + "\t" +
+                v.title.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
         }
 
     /* And back. Every id is revalidated on the way in: the cache is a file on
-       a device, and a file can be edited. */
+       a device, and a file can be edited.
+     *
+     * A two-field line is read as id and title with no date, which is what the
+     * build before this one wrote. It costs one refresh to get the dates back
+     * and saves showing an empty grid on the first launch after an update. */
     fun decode(text: String): List<Video> {
         val out = mutableListOf<Video>()
         val seen = mutableSetOf<String>()
         for (line in text.lineSequence()) {
-            val tab = line.indexOf('\t')
-            if (tab <= 0) continue
-            val id = line.substring(0, tab)
+            val parts = line.split('\t')
+            if (parts.size < 2) continue
+            val id = parts[0]
             if (!VideoId.isValid(id) || !seen.add(id)) continue
-            val title = line.substring(tab + 1).trim()
-            out.add(Video(id = id, title = title.ifEmpty { id }))
+            val published = if (parts.size >= 3) parts[1].trim().toLongOrNull() else null
+            val title = (if (parts.size >= 3) parts.drop(2).joinToString(" ") else parts[1]).trim()
+            out.add(Video(id = id, title = title.ifEmpty { id }, publishedAt = published))
         }
         return out
     }
