@@ -144,9 +144,27 @@ brew install xcodegen && (cd ios && xcodegen generate)   # writes TinyTube.xcode
 
 ## Workflow
 
-Finish each feature: commit it, push the branch, open the pull request, and
-merge it once CI is green. Don't leave completed work sitting on a branch or a
-PR waiting to be asked about.
+Finish everything that was asked before opening a pull request. Commit as you
+go and push the branch — that part is free — but open the PR only once every
+feature in the request is implemented on both platforms. Then let it merge.
+
+Free because a push to a branch with NO OPEN PULL REQUEST triggers nothing:
+`android.yml` and `ios.yml` both filter their `push` trigger to `main`, so the
+only thing that builds a branch is the `pull_request` event. Open the PR early
+and every subsequent push is a full run of both platforms; open it at the end
+and the whole change costs one. That is the entire reason for this rule — the
+minutes are a real budget, and macOS runners bill at ten times the rate.
+
+A DRAFT pull request does not help. Drafts still fire `pull_request` events and
+still build; the only thing draft status changes is that auto-merge leaves them
+alone. Don't open one as a way of "saving" runs.
+
+The cost of batching is that nothing is checked until the end, so check it here
+instead. Run the three suites locally before opening anything — see Commands —
+and treat a red one exactly as you would a red CI run.
+
+Don't leave finished work sitting on a branch with no PR either. "Everything
+that was asked" is the trigger, not "everything I can think of".
 
 Green CI is part of "finished", not a separate step to skip — the unit tests are
 what stand between a bad video id and the player, and merging past a red run
@@ -163,6 +181,11 @@ BOTH `android` and `ios` pass and nothing else on the commit has failed. Label a
 
 - It runs the copy of itself on `main`, so changes to it only take effect after
   they land, and the PR that changes it must be merged by hand.
+- Once a PR merges, its branch is done. Further pushes to it produce NO CI at
+  all — there is no open PR to raise a `pull_request` event, and the `push`
+  trigger only watches `main` — so the commits sit there looking pushed and
+  never get built. Start a fresh branch from `main` and open a new PR. This has
+  already stranded four commits once.
 - It requires the check runs `build` (android.yml's job), `ios-core` and
   `ios-app` (both ios.yml's) BY NAME. Renaming any of them silently stops it
   waiting for that platform. A required check that hasn't reported counts as
