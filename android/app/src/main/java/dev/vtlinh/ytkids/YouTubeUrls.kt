@@ -156,10 +156,39 @@ object YouTubeUrls {
 
     /* The channel's public feed of recent uploads. No API key and no quota —
        which is the whole reason channel approval is workable here at all. It
-       returns roughly the latest 15 uploads and nothing older. */
+       returns roughly the latest 15 uploads and nothing older, and there is no
+       parameter that raises that; see uploadsUrl for where the other 85 come
+       from. */
     fun feedUrl(channelId: String): String? {
         if (!isValidChannelId(channelId)) return null
         return "https://www.youtube.com/feeds/videos.xml?channel_id=$channelId"
+    }
+
+    /* Every channel has an "uploads" playlist holding everything it has ever
+       posted, and its id is the channel's own with UU in place of UC. That is
+       a YouTube convention rather than something derived, but it has held for
+       the life of the product and it is the only way to name the playlist
+       without asking an API for it. */
+    fun uploadsPlaylistId(channelId: String): String? {
+        if (!isValidChannelId(channelId)) return null
+        return "UU" + channelId.substring(2)
+    }
+
+    /* The uploads playlist's page, which lists a hundred videos in its first
+       payload where the Atom feed lists fifteen.
+     *
+     * hl=en pins the language: the page is a rendering, and the state embedded
+     * in it is shaped by locale. It costs nothing and removes a class of "works
+     * for me" that would only ever appear on somebody else's phone.
+     *
+     * Fetched with a DESKTOP user agent, by the caller. A mobile one is
+     * redirected to m.youtube.com, whose page carries twenty videos and hides
+     * the rest behind a continuation — the exact thing this is here to avoid.
+     * (Unrelated to the player's user agent, which is deliberately left alone;
+     * see PlayerActivity.) */
+    fun uploadsUrl(channelId: String): String? {
+        val playlist = uploadsPlaylistId(channelId) ?: return null
+        return "https://www.youtube.com/playlist?list=$playlist&hl=en"
     }
 
     const val PARENT_START = "https://m.youtube.com/"
