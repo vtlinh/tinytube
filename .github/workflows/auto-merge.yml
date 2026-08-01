@@ -205,25 +205,62 @@ jobs:
           # Failing to read the file list means publishing anyway. The wrong
           # direction to be wrong in is the one where an app change quietly
           # never ships.
-          PUBLISH=yes
+          # BOTH platforms publish now, each filtered to its own half. iOS
+          # publishes an IPA to ios-latest for the same reason Android
+          # publishes an APK to android-latest: the repository is private, so a
+          # release asset is the only thing the Worker can re-serve at a fixed
+          # URL. What differs is who reads it — an installed Android app polls
+          # for its update, while the iOS link is for a person with a browser.
+          PUB_ANDROID=yes
+          PUB_IOS=yes
           if FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
-            PUBLISH=no
+            PUB_ANDROID=no
+            PUB_IOS=no
             for f in $FILES; do
               case "$f" in
-                android/*|.github/workflows/android.yml) PUBLISH=yes ;;
+                android/*|.github/workflows/android.yml) PUB_ANDROID=yes ;;
+              esac
+              case "$f" in
+                ios/*|.github/workflows/ios.yml) PUB_IOS=yes ;;
               esac
             done
           else
-            echo "Could not list PR #$PR's files; publishing rather than risk not shipping."
+            echo "Could not list PR #$PR's files; publishing both rather than risk not shipping."
           fi
 
-          if [ "$PUBLISH" = "yes" ]; then
-            # Offer this run's build to the publish. It is only taken if main's
+          # WHICH run built what has to be looked up by workflow NAME, not
+          # taken from the event. `github.event.workflow_run.id` is whichever
+          # workflow finished last and tripped this job — android's run half
+          # the time — and handing android's run id to the iOS publish offers
+          # it an artifact that isn't there. The reuse check would refuse it and
+          # fall through to a full macOS build: correct output, ten minutes of
+          # a 200-minute budget spent for nothing, on every iOS merge.
+          #
+          # Empty is a fine answer. It means "nothing offered", and the publish
+          # simply builds — which is the same thing an unusable offer produces,
+          # just without the detour.
+          run_for() {
+            gh api "repos/$REPO/actions/runs?head_sha=$SHA&event=pull_request" \
+              --jq "[.workflow_runs[] | select(.name == \"$1\") | select(.conclusion == \"success\")]
+                    | max_by(.run_number) | .id // empty" 2>/dev/null || true
+          }
+
+          if [ "$PUB_ANDROID" = "yes" ]; then
+            # Offer that run's build to the publish. It is only taken if main's
             # tree turns out to be the tree that run built — i.e. if nothing
             # else merged in between — so passing it is never wrong, only
             # sometimes ignored.
-            echo "Dispatching the publish build on main, offering run $RUN_ID's APK"
-            gh workflow run android.yml --repo "$REPO" --ref main -f reuse_run_id="$RUN_ID"
+            OFFER=$(run_for android); OFFER=${OFFER:-$RUN_ID}
+            echo "Dispatching the android publish on main, offering run $OFFER's APK"
+            gh workflow run android.yml --repo "$REPO" --ref main -f reuse_run_id="$OFFER"
           else
-            echo "PR #$PR touched nothing under android/ — not publishing a build."
+            echo "PR #$PR touched nothing under android/ — not publishing an APK."
+          fi
+
+          if [ "$PUB_IOS" = "yes" ]; then
+            OFFER=$(run_for ios)
+            echo "Dispatching the ios publish on main, offering run ${OFFER:-<none>}'s IPA"
+            gh workflow run ios.yml --repo "$REPO" --ref main -f reuse_run_id="$OFFER"
+          else
+            echo "PR #$PR touched nothing under ios/ — not publishing an IPA."
           fi

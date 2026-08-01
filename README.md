@@ -26,7 +26,8 @@ approved channels        Cloudflare Worker        the grid
                             └─► YouTube
 
 GitHub release             Cloudflare Worker
-  android-latest    ────►   (tinytube.*.workers.dev) ────► self-update
+  android-latest    ────►   (tinytube.*.workers.dev) ────► /app  ──► self-update
+  ios-latest        ────►                                  /ios  ──► sideload by hand
 ```
 
 | Piece | What it does |
@@ -577,10 +578,28 @@ fallback, and it needs no code.
 Android publishes itself. iOS cannot, and the free Apple ID tier is what the
 owner has chosen for now, so the chore is real and worth stating plainly.
 
-CI builds an **unsigned** `.ipa` and attaches it to the run. It cannot sign:
-free provisioning is interactive-Xcode-only, so there is no credential a
-workflow could hold even in principle. The owner sideloads that artifact with
-**AltStore** or **Sideloadly**, from a Windows PC or a Mac.
+CI builds an **unsigned** `.ipa`. It cannot sign: free provisioning is
+interactive-Xcode-only, so there is no credential a workflow could hold even in
+principle. The owner sideloads it with **AltStore** or **Sideloadly**, from a
+Windows PC or a Mac.
+
+### The two download links
+
+Both platforms have one fixed URL that always serves the newest build, so
+neither needs anyone to go hunting through Actions runs:
+
+- **Android** — https://tinytube.vtlinh87.workers.dev/app/app-release.apk
+- **iOS** — https://tinytube.vtlinh87.workers.dev/ios/TinyTube.ipa
+
+They exist for different reasons, which is worth keeping straight. The Android
+one is what the **app itself** polls to update; the iOS one is for a **person
+with a browser**, because nothing on iOS self-updates. What they share is why
+they go through the Worker at all: the repository is private, so its release
+assets answer 404 to anyone without a credential, and the Worker holds a
+read-only one.
+
+`/ios/version.json` says which build the iOS link is currently serving. Nothing
+reads it — it is there to answer "is this the one I already installed?".
 
 **Weekly**, because free-tier profiles expire after seven days and the app then
 refuses to launch until it is re-signed. Three sideloaded apps is the ceiling on
@@ -624,9 +643,17 @@ for; see **Distribution**.
 Local builds get `versionCode 1` and `versionName "dev"`, since both come from
 CI environment variables.
 
-Merging is automated: `auto-merge.yml` merges a pull request once `android`
-passes and nothing else on the commit has failed. Label a PR `no-auto-merge` to
-hold it open.
+Merging is automated: `auto-merge.yml` merges a pull request once `build`,
+`worker`, `ios-core` and `ios-app` have all passed and nothing else on the
+commit has failed. Label a PR `no-auto-merge` to hold it open.
+
+It then dispatches the publish for whichever platform the PR actually touched —
+a merge with no `ios/**` in it publishes no IPA, and one with no `android/**`
+ships no `versionCode`. Each publish re-serves the artifact the pull request
+already built when the tree has not moved since, so an ordinary merge costs a
+release upload rather than a second build. On iOS that check happens on an
+ubuntu runner **before** the macOS one starts, because a macOS minute bills at
+ten.
 
 ## Pull requests that fix themselves
 

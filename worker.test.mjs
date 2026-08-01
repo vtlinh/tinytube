@@ -31,6 +31,8 @@ import {
   parseChannelTitle,
   parseChannelAvatar,
   channelTargetFromUrl,
+  RELEASE_ASSETS,
+  contentType,
 } from "./worker.js";
 
 const OK_CHANNEL = "UC" + "a".repeat(22);
@@ -380,4 +382,41 @@ test("handles are a fixed pattern, not a path", () => {
   ]) {
     assert.ok(!HANDLE.test(bad), `should have refused: ${JSON.stringify(bad)}`);
   }
+});
+
+/* ---- the release routes ---- */
+
+/* THE /app PATHS ARE COMPILED INTO INSTALLED ANDROID APPS. An app that cannot
+   find its update cannot be told where the update went — the update mechanism
+   being the thing that broke — so these two strings are as good as permanent.
+   This is here because the table grew a second release under it and changed
+   shape to do so; renaming a key would be silent otherwise. */
+test("the paths installed apps ask for are exactly these", () => {
+  assert.deepEqual(
+    Object.keys(RELEASE_ASSETS).filter(p => p.startsWith("/app/")).sort(),
+    ["/app/app-release.apk", "/app/version.json"],
+  );
+  assert.deepEqual(RELEASE_ASSETS["/app/app-release.apk"],
+    { tag: "android-latest", name: "app-release.apk" });
+  assert.deepEqual(RELEASE_ASSETS["/app/version.json"],
+    { tag: "android-latest", name: "version.json" });
+});
+
+/* Each platform reads its own release. Pointing an iOS path at android-latest
+   would serve an APK to someone trying to sideload, and pointing an Android
+   path at ios-latest would strand every installed phone. */
+test("every release path names its own platform's release", () => {
+  for (const [path, { tag, name }] of Object.entries(RELEASE_ASSETS)) {
+    assert.ok(name, `${path} names no asset`);
+    assert.equal(tag, path.startsWith("/ios/") ? "ios-latest" : "android-latest");
+  }
+});
+
+/* Decided by the fixed table's own extension, never by anything a caller
+   sends — an IPA served as an APK is a download Windows and iOS both refuse to
+   do anything useful with. */
+test("content types come off the asset name", () => {
+  assert.equal(contentType("version.json"), "application/json; charset=utf-8");
+  assert.equal(contentType("TinyTube-unsigned.ipa"), "application/octet-stream");
+  assert.equal(contentType("app-release.apk"), "application/vnd.android.package-archive");
 });
