@@ -89,14 +89,25 @@ jobs:
       # the project per invocation, and doing that twice was costing most of a
       # minute for nothing.
       #
-      # The tests still gate the publish, which is the property that matters:
-      # the publish steps below run only if THIS step succeeded, so a failing
-      # test means nothing reaches a device. What is lost is only the ordering
-      # — with parallel execution the APK may be assembled alongside the tests
-      # rather than after them — and an APK built during a run that then fails
-      # is simply thrown away.
+      # The publish run skips the tests, because they have already passed on
+      # this code: auto-merge only merges a PR whose android run was green, and
+      # then dispatches this. Running them again asks the same question twice.
+      #
+      # Only on the dispatch, though. A `push` to main reaches here having
+      # passed nothing — GITHUB_TOKEN pushes trigger no workflows, so the only
+      # thing that arrives by push is a person pushing to main by hand, which
+      # is exactly when the tests are the only check there is.
+      #
+      # What this gives up, and it is not nothing: the PR was tested against
+      # main as it stood WHEN THE RUN STARTED. If another PR merges in between,
+      # what lands is a tree no run has tested. It cannot conflict — git would
+      # have refused the merge — but two independently correct changes can
+      # still disagree. One branch at a time makes that unlikely rather than
+      # impossible. If it ever bites, dropping the condition below is the fix.
       - name: Unit tests and release APK
-        run: gradle -p android testReleaseUnitTest assembleRelease
+        env:
+          TASKS: ${{ github.event_name == 'workflow_dispatch' && 'assembleRelease' || 'testReleaseUnitTest assembleRelease' }}
+        run: gradle -p android $TASKS
 
       - uses: actions/upload-artifact@v4
         with:
