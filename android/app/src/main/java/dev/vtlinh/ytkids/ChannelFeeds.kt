@@ -33,12 +33,21 @@ object ChannelFeeds {
        The cache is not an optimisation. A child opening the app on dropped
        wifi should still get the channels their parent approved, rather than an
        empty screen they have no way to interpret or fix. */
-    fun cached(context: Context): List<Video> {
-        val out = mutableListOf<Video>()
+    fun cached(context: Context): List<Video> = Library.flatten(cachedByChannel(context))
+
+    /* The same, but keeping which channel each video came from.
+     *
+     * A feed entry carries no channel id of its own — the id is the feed's,
+     * not the video's — so the only place that association exists is here,
+     * where the feed was fetched. The Channels tab needs it to show one
+     * channel's uploads. Ordered like ChannelStore's list, newest-approved
+     * first, which is what gives the grid its order. */
+    fun cachedByChannel(context: Context): Map<String, List<Video>> {
+        val out = LinkedHashMap<String, List<Video>>()
         for (channel in ChannelStore.get(context).all()) {
             val f = cacheFile(context, channel.id)
             if (!f.exists()) continue
-            try { out += Feed.parse(f.readText()) } catch (e: Exception) {}
+            try { out[channel.id] = Feed.parse(f.readText()) } catch (e: Exception) {}
         }
         return out
     }
@@ -46,31 +55,34 @@ object ChannelFeeds {
     /* Refresh every approved channel. Returns what we have afterwards —
        a channel whose fetch failed contributes its cached copy, so one dead
        feed doesn't empty the grid. */
-    suspend fun refresh(context: Context): List<Video> = withContext(Dispatchers.IO) {
-        val out = mutableListOf<Video>()
-        for (channel in ChannelStore.get(context).all()) {
-            val url = YouTubeUrls.feedUrl(channel.id) ?: continue
-            val body = try {
-                client.newCall(Request.Builder().url(url).build()).execute().use { r ->
-                    if (r.isSuccessful) r.body?.string() else null
+    suspend fun refresh(context: Context): List<Video> = Library.flatten(refreshByChannel(context))
+
+    suspend fun refreshByChannel(context: Context): Map<String, List<Video>> =
+        withContext(Dispatchers.IO) {
+            val out = LinkedHashMap<String, List<Video>>()
+            for (channel in ChannelStore.get(context).all()) {
+                val url = YouTubeUrls.feedUrl(channel.id) ?: continue
+                val body = try {
+                    client.newCall(Request.Builder().url(url).build()).execute().use { r ->
+                        if (r.isSuccessful) r.body?.string() else null
+                    }
+                } catch (e: Exception) {
+                    null
                 }
-            } catch (e: Exception) {
-                null
-            }
-            val parsed = body?.let { Feed.parse(it) }
-            if (parsed != null && parsed.isNotEmpty()) {
-                /* only overwrite the cache once the bytes are known to parse */
-                try { cacheFile(context, channel.id).writeText(body) } catch (e: Exception) {}
-                out += parsed
-            } else {
-                val f = cacheFile(context, channel.id)
-                if (f.exists()) {
-                    try { out += Feed.parse(f.readText()) } catch (e: Exception) {}
+                val parsed = body?.let { Feed.parse(it) }
+                if (parsed != null && parsed.isNotEmpty()) {
+                    /* only overwrite the cache once the bytes are known to parse */
+                    try { cacheFile(context, channel.id).writeText(body) } catch (e: Exception) {}
+                    out[channel.id] = parsed
+                } else {
+                    val f = cacheFile(context, channel.id)
+                    if (f.exists()) {
+                        try { out[channel.id] = Feed.parse(f.readText()) } catch (e: Exception) {}
+                    }
                 }
             }
+            out
         }
-        out
-    }
 
     /* Drop the cache for a channel that is no longer approved, so its videos
        stop appearing immediately rather than lingering until something else

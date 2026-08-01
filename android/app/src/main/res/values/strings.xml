@@ -8,6 +8,17 @@
          front of that button. -->
     <string name="empty_catalog">No videos yet.\n\nA grown-up can add channels with the Parent button.</string>
 
+    <!-- The bottom bar. Two words, both nouns a child who cannot read still
+         learns by position. -->
+    <string name="tab_videos">Videos</string>
+    <string name="tab_channels">Channels</string>
+    <string name="channels_title">Channels</string>
+    <string name="channels_empty">No channels yet.\n\nA grown-up can add them with the Parent button.</string>
+    <!-- Shown as the grid's heading while one channel's videos are on screen,
+         so it is obvious this is not everything. -->
+    <string name="showing_channel">%1$s</string>
+    <string name="show_all_videos">All videos</string>
+
     <!-- parent mode and its gate -->
     <string name="parent_mode">Parent</string>
     <string name="kids_mode">← Kids mode</string>
