@@ -114,6 +114,15 @@ async function releaseAsset(env, { tag, name }) {
     `https://api.github.com/repos/${RELEASE_REPO}/releases/tags/${tag}`,
     { headers: { ...api, Accept: "application/vnd.github+json" } },
   );
+  /* No such release is a 404, not a 502. They are different facts and only one
+   * of them is our fault: "nothing has been published to ios-latest yet" is the
+   * answer somebody gets for clicking the iOS link before the first build, and
+   * a Bad Gateway sends them looking for an outage that isn't there. Anything
+   * else from GitHub — rate limit, a dead token, an actual outage — stays a 502,
+   * because then something IS wrong at this end. */
+  if (rel.status === 404) {
+    return new Response(`nothing published to ${tag} yet\n`, { status: 404 });
+  }
   if (!rel.ok) return new Response(`release lookup failed: ${rel.status}\n`, { status: 502 });
   const asset = ((await rel.json()).assets || []).find(a => a.name === name);
   if (!asset) return new Response(`no asset named ${name}\n`, { status: 404 });
