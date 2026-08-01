@@ -18,9 +18,11 @@ Three things it does that a plain resize would not:
   - CROPS THE WHITE MARGIN. The master has ~16px of white around the artwork.
     Left in, iOS would show white slivers wherever its superellipse mask is
     less round than the artwork's own corners.
-  - FILLS THE CORNERS WITH THE ARTWORK'S OWN GRADIENT. Even cropped, the
-    rounded corners are white. They are painted with the background gradient
-    instead, sampled from the artwork's edges, so no mask can reveal white.
+  - MAKES THE WHITE TRANSPARENT. Even cropped, the rounded corners are white.
+    They become alpha 0, which is the answer that needs no gradient model: on
+    Android the background layer shows through them, and on iOS — which
+    refuses an icon with an alpha channel — they are flattened onto a gradient
+    at the very end, in a region iOS's own mask mostly crops anyway.
   - PADS THE ANDROID FOREGROUND TO THE SAFE ZONE. An adaptive icon is a 108dp
     layer of which only the middle 72dp survives masking, so the artwork is
     scaled to two thirds and centred. Full-bleed would put the TV's frame,
@@ -48,7 +50,11 @@ BOTTOM = (0, 0, 0)
 
 
 def artwork() -> Image.Image:
-    """The master, cropped to the art and with no white left anywhere."""
+    """The master, cropped to the art, with the white around it knocked out.
+
+    Returns RGBA. The transparency is the point: Android's background layer
+    shows through it, and iOS flattens it in main() because it has to.
+    """
     im = Image.open(MASTER).convert("RGB")
     w, h = im.size
     px = im.load()
@@ -64,7 +70,7 @@ def artwork() -> Image.Image:
                 box[1] = min(box[1], y)
                 box[2] = max(box[2], x)
                 box[3] = max(box[3], y)
-    im = im.crop((box[0], box[1], box[2] + 1, box[3] + 1))
+    im = im.crop((box[0], box[1], box[2] + 1, box[3] + 1)).convert("RGBA")
 
     # The background gradient, from two points well inside the rounded corners,
     # extrapolated to the top and bottom edges. Vertical is a good enough model
@@ -116,7 +122,7 @@ def artwork() -> Image.Image:
     filled = 0
     while queue:
         x, y = queue.pop()
-        px[x, y] = band(y)
+        px[x, y] = (0, 0, 0, 0)
         filled += 1
         for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
             if 0 <= nx < w and 0 <= ny < h and not seen[ny * w + nx] and light(px[nx, ny]):
@@ -149,18 +155,18 @@ def artwork() -> Image.Image:
                         frontier.append((nx, ny, band(ny)))
         if not frontier:
             break
-        for x, y, colour in frontier:
+        for x, y, _ in frontier:
             seen[y * w + x] = 1
-            px[x, y] = colour
+            px[x, y] = (0, 0, 0, 0)
             rim += 1
-    print(f"filled {filled} background pixels and {rim} rim pixels; "
+    print(f"knocked out {filled} background pixels and {rim} rim pixels; "
           f"interior highlights untouched")
 
     # Square it. The crop comes out a pixel off square, and resizing a
     # not-quite-square image into a square one stretches it by that pixel.
     side = max(w, h)
     if (w, h) != (side, side):
-        square = Image.new("RGB", (side, side), band(h // 2))
+        square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
         square.paste(im, ((side - w) // 2, (side - h) // 2))
         im = square
 
@@ -169,11 +175,25 @@ def artwork() -> Image.Image:
 
 def main() -> None:
     art = artwork()
-    print(f"artwork {art.size[0]}x{art.size[1]}, corners filled")
+    print(f"artwork {art.size[0]}x{art.size[1]}, background transparent")
 
-    # iOS: one 1024 square. No alpha — iOS rejects an icon that has one — and
-    # no rounded corners of our own, since iOS draws its own.
-    art.resize((1024, 1024), Image.LANCZOS).save(IOS, "PNG")
+    # iOS: one 1024 square, FLATTENED. An app icon with an alpha channel is
+    # rejected outright, so the transparent corners have to become something.
+    # They become the artwork's own gradient — a vertical approximation of it,
+    # which is close enough for four small wedges that iOS's superellipse mask
+    # crops most of anyway.
+    flat = Image.new("RGB", art.size)
+    px = flat.load()
+    for y in range(art.size[1]):
+        t = y / max(art.size[1] - 1, 1)
+        colour = tuple(
+            max(0, min(255, int(round(a + (b - a) * t))))
+            for a, b in zip(TOP, BOTTOM)
+        )
+        for x in range(art.size[0]):
+            px[x, y] = colour
+    flat.paste(art, (0, 0), art)
+    flat.resize((1024, 1024), Image.LANCZOS).save(IOS, "PNG")
     print(f"  {IOS}")
 
     for bucket, scale in DENSITIES.items():
@@ -194,26 +214,14 @@ def main() -> None:
         # mask the launcher applied — an icon inside an icon. Continuing the
         # gradient makes the seam disappear: the artwork's edges already carry
         # these colours, so there is nothing to line up.
-        # EDGE-REPLICATED, not modelled. Every pixel in the margin takes the
-        # colour of the nearest pixel on the artwork's border, so the seam
-        # matches by construction and there is nothing to line up.
-        #
-        # Two models were tried first and both drew a visible square outline
-        # around the artwork: a gradient over the whole layer (which put the
-        # artwork's top edge against someone else's colour), and the same
-        # gradient re-parameterised over the artwork's rows (better, but the
-        # real gradient runs DIAGONALLY, so the left and right edges still
-        # disagreed). Replication needs to know none of that.
+        # TRANSPARENT MARGIN, and transparent corners with it. The adaptive
+        # icon's background layer is a gradient matching the artwork, so it
+        # shows through both — which is what the two layers are for, and needs
+        # no gradient model here at all.
         offset = (layer - inner) // 2
+        canvas = Image.new("RGBA", (layer, layer), (0, 0, 0, 0))
         scaled = art.resize((inner, inner), Image.LANCZOS)
-        src = scaled.load()
-        canvas = Image.new("RGB", (layer, layer))
-        dst = canvas.load()
-        for y in range(layer):
-            sy = min(max(y - offset, 0), inner - 1)
-            for x in range(layer):
-                sx = min(max(x - offset, 0), inner - 1)
-                dst[x, y] = src[sx, sy]
+        canvas.paste(scaled, (offset, offset), scaled)
         canvas.save(f"{ANDROID_RES}/mipmap-{bucket}/ic_launcher_foreground.png", "PNG")
         print(f"  mipmap-{bucket}: {legacy}px legacy, {layer}px adaptive")
 
