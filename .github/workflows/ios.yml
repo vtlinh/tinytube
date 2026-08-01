@@ -120,6 +120,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
+      app: ${{ steps.filter.outputs.app }}
       reuse: ${{ steps.reuse.outputs.reuse }}
       reuse_run_id: ${{ steps.reuse.outputs.run_id }}
     steps:
@@ -140,6 +141,7 @@ jobs:
           if [ -z "${PR:-}" ]; then
             echo "Not a pull request — building."
             echo "ios=true" >> "$GITHUB_OUTPUT"
+            echo "app=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -150,21 +152,45 @@ jobs:
           if ! FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
             echo "Could not list PR #$PR's files — building rather than risk missing a break."
             echo "ios=true" >> "$GITHUB_OUTPUT"
+            echo "app=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # TWO ANSWERS, because the two jobs cost very different amounts.
+          #
+          # WANTED gates ios-core, which is ubuntu and cheap: anything under
+          # ios/ that a compiler or a test reads.
+          #
+          # APP gates ios-app, which is macOS and bills at 10x. It needs
+          # everything WANTED needs EXCEPT TinyTubeCore/Tests — those run under
+          # `swift test` on LINUX, in ios-core, and the simulator run never
+          # touches them. A pure-layer test edit therefore costs a Linux minute
+          # instead of ten macOS ones.
+          #
+          # Neither counts ios/AppIcon: that script only regenerates a PNG that
+          # is committed under TinyTube/, so editing it cannot change an IPA
+          # until somebody runs it and commits the result — at which point the
+          # PNG itself is what shows up here.
+          #
+          # NOT narrowed to TinyTube/ and Sources/ alone, which was asked for
+          # and would have gone too far: project.yml IS the Xcode project
+          # (deployment target, linked libraries, the icon), Package.swift
+          # defines the package, and TinyTubeTests is what ios-app actually
+          # runs. Dropping those would let a build-configuration change merge
+          # without ever being built, and a test change merge without ever
+          # running.
           WANTED=false
+          APP=false
           for f in $FILES; do
             case "$f" in
-              # ios/** ONLY, for the reasons written out in android.yml's
-              # copy of this filter: the reuse hash covers ios/ and nothing
-              # else, so a workflow edit cannot change the IPA, and treating it
-              # as one spent a macOS runner to rebuild something identical.
-              ios/*) WANTED=true ;;
+              ios/AppIcon/*) ;;                       # a dev script; changes no build
+              ios/TinyTubeCore/Tests/*) WANTED=true ;; # Linux only
+              ios/*) WANTED=true; APP=true ;;
             esac
           done
-          echo "Touches the iOS app: $WANTED"
+          echo "Touches the iOS sources: $WANTED (needs a Mac: $APP)"
           echo "ios=$WANTED" >> "$GITHUB_OUTPUT"
+          echo "app=$APP" >> "$GITHUB_OUTPUT"
 
       # Can this publish just re-serve the IPA the pull request already built?
       #
@@ -232,7 +258,7 @@ jobs:
   # a dispatched publish whose tree was already built.
   ios-app:
     needs: changes
-    if: needs.changes.outputs.ios == 'true' && needs.changes.outputs.reuse != 'true'
+    if: needs.changes.outputs.app == 'true' && needs.changes.outputs.reuse != 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
