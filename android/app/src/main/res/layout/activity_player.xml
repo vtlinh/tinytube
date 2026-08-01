@@ -123,4 +123,28 @@
         android:clickable="true"
         android:focusable="false" />
 
+    <!-- The way out, and ONLY while the overlay is lifted.
+         PlayerActivity ties its visibility to `revealed`.
+
+         Back already worked here — the system button finishes the activity —
+         but nothing on screen said so, and on iOS there is no system button at
+         all. So both platforms get the same visible control, appearing at the
+         same moment: it is an adult's control, and it arrives with the rest of
+         them rather than sitting over every video a child watches.
+
+         A sibling of the overlay, like the blocker, so it is not hidden by the
+         thing whose absence reveals it. Top-left, clear of the reveal corner
+         at top-right. -->
+    <ImageButton
+        android:id="@+id/player_back"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="top|start"
+        android:layout_margin="8dp"
+        android:background="@drawable/bg_player_back"
+        android:contentDescription="@string/player_back"
+        android:padding="10dp"
+        android:src="@drawable/ic_player_back"
+        android:visibility="gone" />
+
 </FrameLayout>

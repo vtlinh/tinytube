@@ -14,6 +14,7 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -36,6 +37,9 @@ class PlayerActivity : AppCompatActivity() {
     private var overlay: android.widget.FrameLayout? = null
     private var pausedScrim: View? = null
     private var holdProgress: ProgressBar? = null
+
+    /* The way out, shown only while the overlay is lifted. See setRevealed. */
+    private var backButton: View? = null
 
     /* Best-effort, from the page. While it is true the overlay stops taking
        touches — an ad has to remain interactive, and being wrong here costs a
@@ -193,6 +197,31 @@ class PlayerActivity : AppCompatActivity() {
         val w = findViewById<WebView>(R.id.web)
         web = w
 
+        /* The signed-in session, so a Premium account plays without ads.
+         *
+         * WebViews share one process-wide cookie store, so the session parent
+         * mode established is already here — what was missing is that the
+         * player never opted in to using it, and that its document ran on
+         * youtube-nocookie.com, which carries no session by design. Player.ORIGIN
+         * is youtube.com now; this is the other half.
+         *
+         * Third-party cookies as well as first: the player document is
+         * youtube.com and so is the iframe inside it, but the media and API
+         * traffic underneath is spread across googlevideo and ytimg, and a
+         * partitioned store is how a "signed in" embed still plays ads.
+         *
+         * This is the child's screen, so be exact about what it does and does
+         * not open. It lets the player authenticate. It does not let the player
+         * NAVIGATE anywhere new — Player.isPlayerUrl is unchanged and
+         * www.youtube.com was always on it — and every control YouTube draws is
+         * still under the overlay. What it does mean is that a navigation that
+         * did get through would now show a signed-in page rather than a signed-
+         * out one, which is the cost written up in README. */
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(w, true)
+        }
+
         w.settings.apply {
             javaScriptEnabled = true               // the IFrame API is javascript
             domStorageEnabled = true               // the player stores its state
@@ -259,6 +288,9 @@ class PlayerActivity : AppCompatActivity() {
         holdProgress = findViewById(R.id.reveal_progress)
         corner = findViewById(R.id.reveal_corner)
         bottomBlocker = findViewById(R.id.bottom_blocker)
+        backButton = findViewById<View>(R.id.player_back).also {
+            it.setOnClickListener { finish() }
+        }
 
         /* Measured before — on an earlier video, or in an earlier run of the
            app entirely — so apply it now rather than waiting for this video to
@@ -389,6 +421,14 @@ class PlayerActivity : AppCompatActivity() {
     private fun setRevealed(value: Boolean) {
         revealed = value
         overlay?.visibility = if (value) View.GONE else View.VISIBLE
+        /* The exit appears with the rest of the adult's controls and goes with
+           them. Back already worked — the system button finishes this activity
+           — but nothing on screen said so, and iOS has no system button at all.
+           Both platforms now show the same control at the same moment, rather
+           than one sitting over every video a child watches. */
+        backButton?.visibility = if (value) View.VISIBLE else View.GONE
+        /* Locking takes Android's own bars with it; lifting gives them back. */
+        goFullscreen()
         /* The ring has done its job either way: the hold completed, or the
            overlay came back and there is no hold in progress to show. */
         stopHoldProgress()
@@ -743,19 +783,51 @@ class PlayerActivity : AppCompatActivity() {
         fun onAd(isAd: Boolean) = runOnUiThread { setShowingAd(isAd) }
     }
 
-    private fun goFullscreen() {
+    /* The status bar and the navigation bar, gone while the overlay is locked.
+     *
+     * They are the child's other way out of the player — a clock, notifications
+     * on the shade, a home button — and the overlay covering YouTube's controls
+     * means little with Android's own sitting on top of the same screen.
+     *
+     * BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE is the whole fix on API 30+ and its
+     * absence was the bug. hide() alone leaves the default behaviour, which
+     * brings the bars back on ANY TOUCH and leaves them there — so the first
+     * tap on the overlay restored them for the rest of the video. The pre-30
+     * path had this right all along with IMMERSIVE_STICKY; the modern path lost
+     * it in translation. Now a swipe still summons them briefly, which is the
+     * most Android will allow an app to refuse, and they leave again on their
+     * own.
+     *
+     * Called on every state change rather than once, because a focus change,
+     * a rotation or a resume all put them back. */
+    private fun applySystemBars(hidden: Boolean) {
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
-            window.insetsController?.hide(android.view.WindowInsets.Type.systemBars())
+            val controller = window.insetsController ?: return
+            if (hidden) {
+                controller.systemBarsBehavior =
+                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(android.view.WindowInsets.Type.systemBars())
+            } else {
+                controller.show(android.view.WindowInsets.Type.systemBars())
+            }
         } else {
             @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility =
+            window.decorView.systemUiVisibility = if (hidden) {
                 View.SYSTEM_UI_FLAG_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            } else {
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            }
         }
     }
+
+    /* Hidden unless the overlay is lifted. Lifting it is what hands the player
+       to an adult, and an adult reaching for the system back or the shade is
+       not the case this is defending against. */
+    private fun goFullscreen() = applySystemBars(hidden = !revealed)
 
     /* Back returns to the grid. It never navigates within the WebView — going
        "back" inside the player would land on a previous YouTube page rather
@@ -791,6 +863,14 @@ class PlayerActivity : AppCompatActivity() {
         super.onResume()
         web?.onResume()
         goFullscreen()
+    }
+
+    /* A dialog, the shade, a rotation — each returns focus with the bars back
+       on. Re-hiding here is what makes "gone" mean gone rather than "gone until
+       something happens". */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) goFullscreen()
     }
 
     override fun onDestroy() {

@@ -32,6 +32,18 @@ object Thumbnails {
 
     fun cached(url: String): Bitmap? = memory.get(url)
 
+    /* Drop these from the cache, because the channel they belong to is no
+       longer approved.
+     *
+     * Memory only — this loader never writes to disk, so there is nothing else
+     * of theirs on the device. Evicting anyway rather than waiting for the LRU
+     * to age them out: "removed" should mean removed, and a poster from a
+     * channel a parent has just taken away should not be sitting in the cache
+     * ready to be drawn if some list asks for it again. */
+    fun forget(urls: Collection<String>) {
+        for (url in urls) if (url.isNotEmpty()) memory.remove(url)
+    }
+
     suspend fun load(url: String): Bitmap? {
         memory.get(url)?.let { return it }
         return withContext(Dispatchers.IO) {

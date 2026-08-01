@@ -246,6 +246,20 @@ without a coloured wedge sitting over the picture while a video plays.
 The first glow waits for playback rather than firing when the screen opens: a
 web view shows a black rectangle while it loads, and a glow spent against that
 is one nobody sees.
+
+Lifting the overlay also reveals the **way out** — a back control, top-left,
+clear of the corner that summoned it. It is an adult's control and it appears
+with the other adult controls rather than sitting over every video a child
+watches. On Android the system back button has always done this; what is new is
+that something on screen says so, and that iOS has it at all, having had no
+system back to fall back on.
+
+**The overlay does not drop back while a video is paused.** Pausing is what an
+adult does to read something on screen, to look at where the scrubber is, or to
+hand the phone over — none of which produce touches, and all of which would
+otherwise end with the overlay returning mid-sentence. So the countdown follows
+playback: it runs while the video does, and every touch restarts it. A player
+left paused and revealed stays that way until the screen is left.
 A strip along the bottom stays blocked even then, so a scrub that slides off the
 seek bar lands on nothing. Knowing how tall that strip should be means knowing
 where the seek bar is — and the player is a cross-origin iframe, so it cannot be
@@ -283,7 +297,36 @@ happens once per process, and every failure falls back to the compiled-in
 constant.
 
 This is a lock on the front door, not a guarantee about YouTube itself. The
-videos are served by YouTube and carry YouTube's ads.
+videos are served by YouTube.
+
+### Signed in, and what that costs
+
+The player runs on `www.youtube.com` and shares the app's cookie store, so
+**whatever account you signed in with in parent mode is the account the player
+uses** — and a YouTube Premium subscription therefore plays without ads. For a
+child that is the difference between a video and a video with an advert in
+front of it, which is why it works this way.
+
+It did not always. The player used to run on `www.youtube-nocookie.com`,
+YouTube's privacy-enhanced embed domain, which is *deliberately
+unauthenticated*: it carries no Google session at all, so the player was signed
+out and ad-supported no matter what. Premium is a property of the account, so
+nothing short of moving off that domain could have applied it.
+
+Two things follow, and both are the price rather than a side effect:
+
+- **YouTube sees what your child watches**, under your account, and it shapes
+  that account's recommendations. The app's own watch history is still
+  device-only and still never uploaded — but "the Worker is never told" was
+  never the same as "nobody knows", and now it is plainly not.
+- **A navigation that got past the overlay would land on a signed-in page**
+  rather than a signed-out one. Nothing about *where* the player may navigate
+  changed — `www.youtube.com` was always on its allowlist, because the IFrame
+  API is served from it — but what such a page would show is different, so the
+  overlay and the allowlist carry more weight than before.
+
+If you would rather have the ads than the account, one constant reverses it:
+`Player.ORIGIN` back to `https://www.youtube-nocookie.com` on both platforms.
 
 ## Automated, signed updates
 
@@ -425,6 +468,7 @@ match, so anything that can only exist on one platform belongs in it.
 | **Approving from your own subscriptions** | Yes — sign in to Google inside parent mode | **Best-effort, and expected to break** | Google blocks account sign-in from embedded webviews. Android evades the check by dropping one user-agent token; the iOS equivalent is adding two. Same workaround, same fragility, and no sanctioned replacement — see the spike below. |
 | **App lifetime before it stops launching** | Indefinite | **7 days** | Free-tier provisioning profiles expire after a week. Re-sideload to reset it. |
 | **How many can be installed** | No limit | **3 sideloaded apps** at once, across all apps | A free Apple ID limit, not something this app can spend. |
+| **Where poster frames live** | Memory only, re-fetched each launch | Memory **and disk**, in the app's Caches directory | Fell out of the platforms' defaults rather than a decision: Android's loader is a hand-written `LruCache` over an uncached HTTP client, iOS's `AsyncImage` uses the shared `URLCache`. Removing a channel clears its pictures on both. |
 
 ### The two spikes that shaped the iOS app
 

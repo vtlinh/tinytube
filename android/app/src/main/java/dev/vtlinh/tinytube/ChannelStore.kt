@@ -15,8 +15,8 @@ import android.database.sqlite.SQLiteOpenHelper
 
    The SQL lives in Schema.kt so it can be run against a real engine in a test;
    this file is only the Android plumbing around it. */
-class ChannelStore private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, Schema.DATABASE, null, Schema.VERSION) {
+class ChannelStore private constructor(private val app: Context) :
+    SQLiteOpenHelper(app, Schema.DATABASE, null, Schema.VERSION) {
 
     override fun onCreate(db: SQLiteDatabase) {
         for (sql in Schema.statementsFor(0, Schema.VERSION)) db.execSQL(sql)
@@ -89,8 +89,32 @@ class ChannelStore private constructor(context: Context) :
         )
     }
 
+    /* Removing a channel removes EVERYTHING that came with it, here, in one
+       place.
+     *
+     * This used to be three calls that every caller had to remember to make in
+     * the right order — the channel row, then its videos, then its watch rows —
+     * duplicated at each of the two places that remove one. That is how a
+     * fourth thing gets forgotten, and a fourth thing had been: the poster
+     * frames and the channel's avatar stayed in the image cache afterwards.
+     *
+     * The image URLs are read BEFORE the rows go, because reading them
+     * afterwards finds nothing. */
     fun remove(channelId: String) {
+        val images = imageUrlsFor(channelId)
         writableDatabase.delete(Schema.CHANNELS, "channel_id = ?", arrayOf(channelId))
+        VideoStore.forget(app, channelId)
+        WatchStore.forget(app, channelId)
+        Thumbnails.forget(images)
+    }
+
+    /* Every picture this channel put on the device: its avatar, and a poster
+       for each of its videos. */
+    private fun imageUrlsFor(channelId: String): List<String> {
+        val out = mutableListOf<String>()
+        findByChannelId(channelId)?.avatarUrl?.let { out.add(it) }
+        out += VideoStore.forChannel(app, channelId).map { it.thumbnailUrl }
+        return out
     }
 
     fun contains(channelId: String): Boolean = findByChannelId(channelId) != null
@@ -142,7 +166,13 @@ class ChannelStore private constructor(context: Context) :
            empty approved list, which was the accepted cost of the rename. */
         fun get(context: Context): ChannelStore =
             instance ?: synchronized(this) {
-                instance ?: ChannelStore(context).also { instance = it }
+                /* applicationContext HERE, because the instance is held for the
+                   life of the process — handing it an Activity would keep that
+                   Activity alive for just as long. It used to be unwrapped
+                   inside the constructor; the store now keeps the context to
+                   reach VideoStore and WatchStore on removal, so the unwrapping
+                   has to happen before it is kept, not on the way past. */
+                instance ?: ChannelStore(context.applicationContext).also { instance = it }
             }
     }
 }

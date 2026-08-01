@@ -385,10 +385,25 @@ stops, green publishes.
   the lock screen, where a child can reach it, so `Updater`'s content intent
   opens the grid rather than Settings — where the hold duration now lives. The
   Install action still does the useful thing in one tap.
-- **Watch history never leaves the device, and stays small.** It exists for one
-  feature — ordering the approved list by what is actually being watched — and
-  is one row per play in the same SQLite file. Nothing uploads it, the Worker is
-  never told what was played, removing a channel removes its rows, and
+- **Removing a channel removes everything it put on the device**, and that is
+  one call on each platform rather than a checklist at every call site. Its
+  row, its videos, its watch history AND its cached pictures — the last of
+  which is the one that gets forgotten, because it is not in the database: the
+  database holds the URLs, and the images live in an image cache. On iOS that
+  cache is disk-backed (`AsyncImage` uses the shared `URLCache`), on Android it
+  is memory only. Read the URLs BEFORE deleting the rows; afterwards there is
+  nothing left to read and every picture stays.
+- **The app's watch history never leaves the device, and stays small.** It
+  exists for one feature — ordering the approved list by what is actually being
+  watched — and is one row per play in the same SQLite file. Nothing in this app
+  uploads it and the Worker is never told what was played.
+
+  Be precise about what that does and does not promise now. Since the player
+  signs in for Premium, **YouTube itself sees what is played**, the same as it
+  would in any signed-in browser. This rule is about THIS APP's history table,
+  which is still device-only; it is not, and can no longer be, a claim that
+  nobody knows what the child watched. Don't let the two blur together.
+  Nothing uploads the table, removing a channel removes its rows, and
   `WatchStore` prunes past the widest rung of `ChannelSort`'s ladder. Don't grow
   it into analytics, and don't send it anywhere.
 - **"Most watched" is a ladder, not a window.** 7 days, then 30, then 365, then
@@ -396,8 +411,11 @@ stops, green publishes.
   window of zeroes counts as empty; otherwise one stale row pins the ladder to
   its rung forever. The final fallback is A-Z rather than last-added on purpose:
   an absent answer must not masquerade as the default one having agreed with it.
-  And the list has to SAY which rung applied, or "most watched" over an empty
-  history is indistinguishable from a broken sort.
+  The list no longer names which rung applied — "Most watched · last 7 days"
+  was noise on the ordinary case — but it MUST still say when the ladder fell
+  all the way through, because "most watched" over an empty history quietly
+  means A-Z and a list that looks unsorted is indistinguishable from a broken
+  one. That one string is the part of this rule that survives.
 - **Nothing inside parent mode needs its own gate.** `ParentActivity` is only
   reachable through a `RESULT_OK` from `ChallengeActivity`, so the approved
   list and the settings open straight from its bar. Adding a second challenge
@@ -426,9 +444,23 @@ stops, green publishes.
   a device that has none. Don't reverse that: the arithmetic is beatable by any
   child who can do algebra, and it exists so parent mode still has a door on a
   phone with no screen lock.
-- **Sign-in hosts are parent-mode only.** `Player`'s allowlist is separate and
-  narrower on purpose; a signed-in Google page must never be reachable from the
-  child's screen.
+- **Sign-in HOSTS are parent-mode only; the SESSION is not.** `Player`'s
+  allowlist is separate and narrower on purpose — accounts.google.com and the
+  rest of the sign-in chain are not on it and must not be added.
+
+  What changed deliberately is the player's own origin. It runs on
+  `www.youtube.com` rather than `www.youtube-nocookie.com`, and shares the
+  cookie store, so a **YouTube Premium account plays without ads** — which is
+  the entire reason, and was asked for knowing the cost. The nocookie domain is
+  unauthenticated by design, so nothing short of this could have done it.
+
+  The consequences, stated rather than discovered later: what a child watches is
+  now recorded against that Google account and shapes its recommendations, and a
+  navigation that did get past the overlay would show a SIGNED-IN page rather
+  than a signed-out one. `www.youtube.com` was always in the player's allowlist
+  — the IFrame API is served from it — so nothing about where the player may go
+  changed. The overlay and the allowlist are what hold, and they matter more now
+  than they did.
 - **Approving a channel approves its future uploads**, which no adult has seen.
   That is the deal the app now makes, and it is the weakest point in it.
   Anything that widens it further — auto-approving related channels, following

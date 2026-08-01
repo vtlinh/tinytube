@@ -81,7 +81,7 @@ class ApprovedChannelsActivity : AppCompatActivity() {
             ChannelSort.Mode.MOST_WATCHED -> {
                 val window = ChannelSort.windowIndex(countsByWindow)
                 if (window == null) getString(R.string.parent_sort_watched_none)
-                else getString(R.string.parent_sort_watched_days, ChannelSort.WINDOWS_DAYS[window])
+                else getString(R.string.parent_sort_watched_days)
             }
         }
 
@@ -141,12 +141,12 @@ class ApprovedChannelsActivity : AppCompatActivity() {
             .setTitle(channel.title)
             .setMessage(getString(R.string.parent_remove_confirm, channel.title))
             .setPositiveButton(R.string.parent_remove) { _, _ ->
+                /* Everything goes together, inside remove(): the channel row,
+                   its videos, its watch history and its cached pictures. It
+                   was three calls duplicated here and in the other place that
+                   removes a channel, which is how the pictures came to be the
+                   one thing neither of them dropped. */
                 ChannelStore.get(this).remove(channel.id)
-                /* drop the cached feed too, or its videos keep showing in the
-                   grid after the channel is gone — and the watch history with
-                   it, so an unapproved channel leaves nothing behind */
-                ChannelFeeds.forget(this, channel.id)
-                WatchStore.forget(this, channel.id)
                 reload()
             }
             .setNegativeButton(android.R.string.cancel, null)

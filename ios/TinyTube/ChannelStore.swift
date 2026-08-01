@@ -101,15 +101,36 @@ enum ChannelStore {
         find(channelId: channelId) != nil
     }
 
-    /* Removing a channel takes its videos and its watch history with it, at
-       once. A tile that plays nothing and history for something no longer
-       approved are both worse than the row being gone. */
+    /* Removing a channel removes EVERYTHING it put on this device: its row, its
+       videos, its watch history, and its pictures.
+     *
+     * The pictures are the half that is easy to miss, because they are not in
+     * the database — the database holds their URLs. `AsyncImage` loads through
+     * `URLSession.shared`, whose cache is disk-backed, so every poster and the
+     * avatar are files in the Caches directory until something removes them.
+     * Android has no equivalent to clear, its loader being memory-only; see
+     * ImageCache.
+     *
+     * The URLs are read BEFORE the rows go. Reading them afterwards finds
+     * nothing, which is a way of quietly leaving every picture behind. */
     static func remove(channelId: String) {
+        let images = imageURLs(channelId: channelId)
+
         try? Database.shared.write(
             "DELETE FROM channels WHERE channel_id = ?", [.text(channelId)]
         )
         VideoStore.forget(channelId: channelId)
         WatchStore.forget(channelId: channelId)
+        ImageCache.forget(images)
+    }
+
+    /* Every picture this channel put on the device: its avatar, and a poster
+       for each of its videos. */
+    private static func imageURLs(channelId: String) -> [String] {
+        var out: [String] = []
+        if let avatar = find(channelId: channelId)?.avatarURL { out.append(avatar) }
+        out += VideoStore.forChannel(channelId).map(\.thumbnailURL)
+        return out
     }
 
     /* When this channel's uploads were last fetched, or nil for never.

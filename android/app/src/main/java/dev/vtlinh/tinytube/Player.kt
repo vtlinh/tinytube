@@ -10,9 +10,11 @@ package dev.vtlinh.tinytube
    leave untested. */
 object Player {
 
-    /* Hosts the player frame itself is served from. youtube-nocookie.com is the
-       privacy-preserving embed origin; the others carry the player's own assets
-       and API traffic. Nothing else loads, at all. */
+    /* Hosts the player frame itself is served from. youtube.com is the embed
+       origin (see ORIGIN); the others carry the player's own assets and API
+       traffic. youtube-nocookie.com stays allowed because it was the origin
+       until recently and an installed app mid-update can still be showing it.
+       Nothing else loads, at all. */
     private val ALLOWED_HOSTS = setOf(
         "www.youtube-nocookie.com",
         "youtube-nocookie.com",
@@ -55,7 +57,26 @@ object Player {
         return host.ifEmpty { null }
     }
 
-    const val ORIGIN = "https://www.youtube-nocookie.com"
+    /* The origin the player document runs on — and the reason a YouTube
+       Premium account sees no ads here.
+     *
+     * It was www.youtube-nocookie.com, YouTube's privacy-enhanced embed domain,
+     * which is DELIBERATELY UNAUTHENTICATED: it carries no Google session, so
+     * the player was always signed out and always ad-supported no matter who
+     * had signed in to parent mode. Premium is a property of the signed-in
+     * account, so it could never apply.
+     *
+     * On youtube.com the player document is same-origin with the session parent
+     * mode established, so a Premium account plays without ads. That was asked
+     * for explicitly, and it is a trade rather than a free win — what it costs
+     * is written up in README under "Signed in, and what that costs".
+     *
+     * This does NOT widen where the player may navigate: www.youtube.com was
+     * already in ALLOWED_HOSTS above, because the IFrame API script is served
+     * from it. What changed is what a navigation would SHOW — signed in rather
+     * than signed out — which is why the overlay and the allowlist matter more
+     * now, not less. */
+    const val ORIGIN = "https://www.youtube.com"
 
     /* The document loaded into the WebView, built around one approved id.
 

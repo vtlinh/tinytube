@@ -55,6 +55,25 @@ struct PlayerWebView: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
 
+        /* The signed-in session, so a Premium account plays without ads.
+         *
+         * `.default()` is a PERSISTENT store shared by every WKWebView that
+         * asks for it, which is how the session parent mode established reaches
+         * the player. That is already what an unconfigured
+         * WKWebViewConfiguration gives you — this says it out loud because the
+         * player now DEPENDS on it. Someone setting `.nonPersistent()` here for
+         * tidiness would silently take Premium away again, and the symptom
+         * would be ads in front of a child rather than an error.
+         *
+         * The other half is Player.origin, which is youtube.com rather than
+         * youtube-nocookie.com — the nocookie domain carries no session by
+         * design, so cookies alone would have changed nothing.
+         *
+         * This lets the player AUTHENTICATE. It does not let it NAVIGATE
+         * anywhere new: Player.isPlayerURL is unchanged and www.youtube.com was
+         * always on it. */
+        config.websiteDataStore = .default()
+
         let controller = WKUserContentController()
         controller.addUserScript(WKUserScript(
             source: Self.bridgeShim,

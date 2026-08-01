@@ -180,15 +180,37 @@ struct MainView: View {
         .padding(.horizontal, 32)
     }
 
+    /* The poster, 16:9, holding its shape before it has loaded.
+     *
+     * The BOX is 16:9 and the IMAGE keeps its own ratio inside it — the
+     * counterpart of RatioImageView plus scaleType="centerCrop" on Android, and
+     * the two halves have to be separate or the picture is distorted rather
+     * than cropped.
+     *
+     * That matters because YouTube's hqdefault.jpg is 480x360 — FOUR-THREE,
+     * with black letterbox bars above and below the actual frame. Cropping it
+     * to 16:9 removes exactly those bars. Forcing the image itself to 16:9
+     * instead squashes the picture, which is what this did at first: an
+     * explicit `.aspectRatio(16/9, contentMode: .fill)` on a `resizable()`
+     * image sets the IMAGE's ratio, not the box's.
+     *
+     * `Color.clear` gives the tile its shape immediately, so the grid does not
+     * reflow as posters arrive under a child's finger — a tap landing on a
+     * different video than the one that was there when it started. Same reason
+     * RatioImageView exists rather than adjustViewBounds. */
     private func tile(_ video: Video) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            AsyncImage(url: URL(string: video.thumbnailURL)) { image in
-                image.resizable().aspectRatio(16.0 / 9.0, contentMode: .fill)
-            } placeholder: {
-                Rectangle().fill(Color.white.opacity(0.06))
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            Color.clear
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .overlay {
+                    AsyncImage(url: URL(string: video.thumbnailURL)) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Rectangle().fill(Color.white.opacity(0.06))
+                    }
+                }
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 10))
 
             Text(video.title)
                 .font(.footnote)
@@ -241,13 +263,16 @@ struct MainView: View {
         guard let sortWindow, ChannelSort.windowsInDays.indices.contains(sortWindow) else {
             return "Most watched — no history yet, showing A–Z"
         }
-        return "Most watched — last \(ChannelSort.windowsInDays[sortWindow]) days"
+        return "Most watched"
     }
 
     private func channelRow(_ channel: Channel) -> some View {
         HStack(spacing: 12) {
+            /* scaledToFill, not a bare resizable: an avatar that is not
+               square would otherwise be stretched into the circle rather than
+               cropped to it. Same bug the posters had. */
             AsyncImage(url: channel.avatarURL.flatMap(URL.init(string:))) { image in
-                image.resizable()
+                image.resizable().scaledToFill()
             } placeholder: {
                 Circle().fill(Color.white.opacity(0.08))
             }

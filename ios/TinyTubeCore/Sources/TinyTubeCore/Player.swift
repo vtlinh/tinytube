@@ -11,7 +11,8 @@ import Foundation
    it has to be added on the other, with the same lookalike cases. */
 public enum Player {
 
-    /* youtube-nocookie is the privacy-preserving embed origin; the others carry
+    /* youtube.com is the embed origin (see `origin`); youtube-nocookie stays
+       allowed because it was the origin until recently. The others carry
        the player's own assets and API traffic. Nothing else loads, at all. */
     static let allowedHosts: Set<String> = [
         "www.youtube-nocookie.com",
@@ -75,7 +76,15 @@ public enum Player {
         return host.isEmpty ? nil : host
     }
 
-    public static let origin = "https://www.youtube-nocookie.com"
+    /* The origin the player document runs on — and the reason a YouTube
+       Premium account sees no ads here. Ported from Player.kt, where the whole
+       reasoning is written out; the short version is that
+       www.youtube-nocookie.com is deliberately unauthenticated, so the player
+       was always signed out and always ad-supported.
+
+       www.youtube.com was already in `allowedHosts`, so this does not widen
+       where the player may navigate — only what a navigation would show. */
+    public static let origin = "https://www.youtube.com"
 
     /* The page loaded into the player's web view.
      *
