@@ -66,7 +66,7 @@ class SchemaTest {
            than a hand-written chain. The hand-written one silently stopped
            checking the newest migration every time somebody added one — which
            is precisely the migration nobody has run on a real device yet. */
-        for (table in listOf(Schema.CHANNELS, Schema.VIDEOS)) {
+        for (table in listOf(Schema.CHANNELS, Schema.VIDEOS, Schema.WATCHES)) {
             val fresh = onDb { c -> apply(c, 0, Schema.VERSION); columnsOf(c, table) }
             val upgraded = onDb { c ->
                 for (v in 1..Schema.VERSION) apply(c, v - 1, v)
@@ -200,6 +200,73 @@ class SchemaTest {
             }
         }
     }
+
+    /* ---- watch history ---- */
+
+    /* The query the approved list is sorted by: how many plays each channel
+       has had since a moment. */
+    @Test fun `watches count per channel within a window`() = onDb { c ->
+        apply(c, 0, Schema.VERSION)
+        c.createStatement().use { st ->
+            st.executeUpdate(watch("UC1", "aaaaaaaaaaa", 100))
+            st.executeUpdate(watch("UC1", "bbbbbbbbbbb", 200))
+            st.executeUpdate(watch("UC2", "ccccccccccc", 150))
+            st.executeUpdate(watch("UC1", "ddddddddddd", 50))
+            val rs = st.executeQuery(
+                "SELECT channel_id, COUNT(*) FROM watches WHERE watched_at >= 100 " +
+                    "GROUP BY channel_id ORDER BY channel_id",
+            )
+            rs.next(); assertEquals("UC1", rs.getString(1)); assertEquals(2, rs.getInt(2))
+            rs.next(); assertEquals("UC2", rs.getString(1)); assertEquals(1, rs.getInt(2))
+            assertTrue(!rs.next())
+        }
+    }
+
+    /* The same video watched twice is two rows. A counter per channel could
+       not answer "in the last seven days" at all, which is the whole point. */
+    @Test fun `the same video can be watched more than once`() = onDb { c ->
+        apply(c, 0, Schema.VERSION)
+        c.createStatement().use { st ->
+            st.executeUpdate(watch("UC1", "aaaaaaaaaaa", 100))
+            st.executeUpdate(watch("UC1", "aaaaaaaaaaa", 200))
+            val rs = st.executeQuery("SELECT COUNT(*) FROM watches")
+            rs.next()
+            assertEquals(2, rs.getInt(1))
+        }
+    }
+
+    /* Rows outlive the videos they name — a refresh replaces a channel's list
+       and an uploader can delete one — which is why the channel is stored
+       alongside rather than joined for. The oldest history is exactly what the
+       365-day rung is for, and it is the history a join would drop. */
+    @Test fun `a watch survives its video being replaced`() = onDb { c ->
+        apply(c, 0, Schema.VERSION)
+        c.createStatement().use { st ->
+            st.executeUpdate(insertVideo("aaaaaaaaaaa", "UC1", "Was here", 0))
+            st.executeUpdate(watch("UC1", "aaaaaaaaaaa", 100))
+            st.executeUpdate("DELETE FROM videos WHERE channel_id = 'UC1'")
+            val rs = st.executeQuery("SELECT channel_id FROM watches")
+            rs.next()
+            assertEquals("UC1", rs.getString(1))
+        }
+    }
+
+    @Test fun `pruning by age leaves the rows inside the window`() = onDb { c ->
+        apply(c, 0, Schema.VERSION)
+        c.createStatement().use { st ->
+            st.executeUpdate(watch("UC1", "aaaaaaaaaaa", 10))
+            st.executeUpdate(watch("UC1", "bbbbbbbbbbb", 500))
+            st.executeUpdate("DELETE FROM watches WHERE watched_at < 100")
+            val rs = st.executeQuery("SELECT COUNT(*), MIN(watched_at) FROM watches")
+            rs.next()
+            assertEquals(1, rs.getInt(1))
+            assertEquals(500L, rs.getLong(2))
+        }
+    }
+
+    private fun watch(channel: String, video: String, at: Long) =
+        "INSERT INTO watches (channel_id, video_id, watched_at) " +
+            "VALUES ('$channel', '$video', $at)"
 
     private fun insertVideo(id: String, channel: String, title: String, position: Int) =
         "INSERT OR REPLACE INTO videos " +

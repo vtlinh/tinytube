@@ -150,6 +150,11 @@ class PlayerActivity : AppCompatActivity() {
        counts a run of dead entries rather than a total. */
     private var failures = 0
 
+    /* Whether this video has already been counted as watched. Playback reports
+       PLAYING again after every pause and every buffering stall, and a video
+       paused six times is not six views. */
+    private var counted = false
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -414,7 +419,7 @@ class PlayerActivity : AppCompatActivity() {
            countdown every time the network hiccuped. */
         val resumed = state == STATE_PLAYING && !playing
         when (state) {
-            STATE_PLAYING -> { playing = true; failures = 0 }
+            STATE_PLAYING -> { playing = true; failures = 0; noteWatched() }
             STATE_PAUSED -> playing = false
         }
         /* Pause to play is somebody pressing play, and that is the clearest
@@ -612,6 +617,23 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    /* Count this video once, when it actually starts.
+     *
+     * On PLAYING rather than on the tap that opened it: a video abandoned
+     * before its first frame is not something anybody watched, and the list
+     * this feeds is meant to say what is actually being watched. Once per
+     * video, because pausing is not a second view.
+     *
+     * Off the main thread — it is a database write in the middle of playback
+     * starting, and nothing waits for the answer. */
+    private fun noteWatched() {
+        if (counted) return
+        counted = true
+        val id = ids.getOrNull(index) ?: return
+        val now = System.currentTimeMillis()
+        Thread { WatchStore.record(applicationContext, id, now) }.start()
+    }
+
     /* The video finished: play the next one from the same list, or leave.
      *
      * Either way this happens AT ONCE, before YouTube's end-screen grid of
@@ -638,6 +660,7 @@ class PlayerActivity : AppCompatActivity() {
            next one to arrive unprotected. */
         if (revealed) setRevealed(false)
         playing = false
+        counted = false
         web?.loadDataWithBaseURL(Player.ORIGIN, page, "text/html", "utf-8", null)
     }
 
