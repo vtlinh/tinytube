@@ -34,8 +34,12 @@ object BlockHeightStore {
     private const val KEY_VERSION = "block_version"
 
     /* 1 was never written — the original store had no version key, so anything
-       without one came from the build that could persist a failure. */
-    private const val VERSION = 2
+       without one came from the build that could persist a failure. 2 was
+       written by the builds that measured the RED, which read the scrubber
+       knob as the bar's thickness and left the strip a fraction of its proper
+       size; 3 measures the track instead and leaves a smaller margin, so
+       nothing written before it describes what this build would measure. */
+    private const val VERSION = 3
 
     /* What the display is, as a string to compare against later. */
     fun displayKey(context: Context): String {

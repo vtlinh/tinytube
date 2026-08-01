@@ -65,15 +65,13 @@ class PlayerActivity : AppCompatActivity() {
     private val measureRunnable = Runnable { measureBlockHeight() }
     private var measureAttempts = 0
 
-    /* The measured blocker height in pixels, or -1 for "not measured yet".
+    /* The blocker height in pixels, or -1 for "not measured yet".
      *
-     * Per video, not per process. It was a companion field, measured once and
-     * reused, which is efficient and was a bad idea while any of this is still
-     * being worked out: the first video's answer — right or wrong — became
-     * every later video's, and the later ones reported "0 tries, not tried"
-     * beside a number they had never computed. Every cached copy of this has
-     * now cost a round of debugging. A capture is cheap; certainty about where
-     * a number came from is not. */
+     * An instance field rather than a companion one, so a video that has to
+     * measure does its own work. Once a measurement lands it goes to
+     * BlockHeightStore and every later video reads it from there instead —
+     * which is the same "measure once" the companion field gave, minus the
+     * part where one video's answer became another's without either knowing. */
     private var measuredBlockPx: Int = -1
 
     companion object {
@@ -208,15 +206,14 @@ class PlayerActivity : AppCompatActivity() {
         /* Measured before — on an earlier video, or in an earlier run of the
            app entirely — so apply it now rather than waiting for this video to
            be paused too. */
-        /* Deliberately NOT read back from BlockHeightStore for now.
-         *
-         * It is still written, so About can show what was last measured — but
-         * nothing acts on it. Persisted state is what made this hard to
-         * reason about: a stale entry, a poisoned one, or a correct one all
-         * produced the same screen, and every fix to the measurement had to
-         * get past whatever was already on disk before it could be seen at
-         * all. Measuring afresh each run costs one capture and makes what is
-         * on screen a consequence of the code that is running. */
+        /* Measured once per device and read back for every video after that,
+           including after a reboot. This was off while the measurement was
+           being worked out — a stale entry, a wrong one and a correct one all
+           produce the same screen, so every fix had to get past whatever was
+           already on disk before it could be seen. That is what
+           BlockHeightStore.VERSION is for: bump it and old entries are
+           ignored rather than trusted. */
+        if (measuredBlockPx < 0) measuredBlockPx = BlockHeightStore.get(this) ?: -1
         if (measuredBlockPx >= 0) applyBlockHeight(measuredBlockPx)
 
         /* A tap anywhere shows the corner. Nothing else: the overlay has no
@@ -307,15 +304,6 @@ class PlayerActivity : AppCompatActivity() {
     private fun setRevealed(value: Boolean) {
         revealed = value
         overlay?.visibility = if (value) View.GONE else View.VISIBLE
-        /* Show the dead strip while the controls are reachable. It is the only
-           part of the screen that stays blocked, and without this an adult who
-           lifted the overlay just finds the bottom of the player not
-           responding. */
-        bottomBlocker?.animate()?.cancel()
-        bottomBlocker?.animate()
-            ?.alpha(if (value) 1f else 0f)
-            ?.setDuration(if (value) TINT_IN_MILLIS else TINT_OUT_MILLIS)
-            ?.start()
         /* The ring has done its job either way: the hold completed, or the
            overlay came back and there is no hold in progress to show. */
         stopHoldProgress()
@@ -637,7 +625,6 @@ class PlayerActivity : AppCompatActivity() {
         holdAnimator?.cancel()
         holdAnimator = null
         corner?.animate()?.cancel()
-        bottomBlocker?.animate()?.cancel()
         /* Detach before destroying: a WebView torn down while still attached
            leaks its window, and this activity is created and destroyed once per
            video watched. */
