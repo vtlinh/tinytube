@@ -14,7 +14,14 @@
      action, and an action belongs under the things it acts on.
 
      Cards on a plain background, so a setting reads as a thing you press
-     rather than as a line of prose. -->
+     rather than as a line of prose.
+
+     EVERY EXPLANATION IS BEHIND THE ? BESIDE ITS HEADING. They used to sit
+     under the headings in grey, permanently, and four of them was most of the
+     screen — a parent scrolling for the hold slider read three paragraphs about
+     things they already understood to reach it. The words are the same; they
+     are just no longer in the way of the controls they describe. See
+     Tooltip.kt. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -93,22 +100,30 @@
             android:background="@drawable/bg_tile"
             android:padding="20dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/settings_next_video"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textColor="@color/text" />
-
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="@string/settings_next_video_explain"
-                android:textSize="14sp"
-                android:textColor="@color/text_muted"
-                android:lineSpacingExtra="2dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_next_video"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text" />
+
+                <ImageButton
+                    android:id="@+id/help_next_video"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="2dp"
+                    android:padding="9dp"
+                    android:src="@drawable/ic_help"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:scaleType="fitCenter" />
+            </LinearLayout>
 
             <!-- A radio group rather than a switch: there are two named
                  choices and neither is an "off". -->
@@ -138,14 +153,6 @@
                     android:textColor="@color/text" />
             </RadioGroup>
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="@string/settings_next_scope_explain"
-                android:textSize="13sp"
-                android:textColor="@color/text_muted"
-                android:lineSpacingExtra="2dp" />
         </LinearLayout>
 
         <!-- How long the player's corner has to be held. -->
@@ -157,22 +164,30 @@
             android:background="@drawable/bg_tile"
             android:padding="20dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/settings_hold"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textColor="@color/text" />
-
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="@string/settings_hold_explain"
-                android:textSize="14sp"
-                android:textColor="@color/text_muted"
-                android:lineSpacingExtra="2dp" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_hold"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text" />
+
+                <ImageButton
+                    android:id="@+id/help_hold"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="2dp"
+                    android:padding="9dp"
+                    android:src="@drawable/ic_help"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:scaleType="fitCenter" />
+            </LinearLayout>
 
             <!-- The current value in words above the slider, because a bare
                  track says nothing about what it is counting. -->
@@ -204,15 +219,32 @@
             android:background="@drawable/bg_tile"
             android:padding="20dp">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/about_updates"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.08"
-                android:textAllCaps="true"
-                android:textColor="@color/text_muted" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/about_updates"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.08"
+                    android:textAllCaps="true"
+                    android:textColor="@color/text_muted" />
+
+                <ImageButton
+                    android:id="@+id/help_updates"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="2dp"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_help"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:scaleType="fitCenter" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/status"
@@ -268,52 +300,120 @@
 
         </LinearLayout>
 
-        <!-- The approved list. It used to be an icon on the browser's bar and
-             lives here now, with every other parent control — which also leaves
-             that bar holding only the two things used while browsing.
+        <!-- The approved list. It used to be an icon on the browser's bar, then
+             a button here that opened a screen of its own, and it is the list
+             ITSELF now.
 
-             Last on the page deliberately: it opens a screen of its own, and a
-             control that leaves is a poor thing to meet before the ones that
-             just toggle something. -->
+             A screen behind a button was one tap and one animation to reach
+             something with three or four rows in it — and, being a screen, it
+             had to carry a toolbar, an up arrow and a menu to say what a
+             heading and two controls say here. What a parent came to settings
+             to check is usually just "what IS approved", and that question is
+             now answered by looking.
+
+             Still last on the page: it is the longest thing here, and the
+             controls above it are the ones somebody scrolls to. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:orientation="vertical"
             android:background="@drawable/bg_tile"
-            android:padding="20dp">
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="20dp"
+            android:paddingBottom="14dp">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/settings_channels"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:textColor="@color/text" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_channels"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text" />
+
+                <ImageButton
+                    android:id="@+id/help_channels"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="2dp"
+                    android:padding="9dp"
+                    android:src="@drawable/ic_help"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:scaleType="fitCenter" />
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <!-- Cycles the three orders. The label beside it is what makes
+                     cycling legible: without it the list silently rearranges
+                     itself and nothing says why. It also has to name the case
+                     where "most watched" fell through to A-Z, or an empty
+                     history looks like a broken sort. -->
+                <TextView
+                    android:id="@+id/channels_order"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_muted"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <ImageButton
+                    android:id="@+id/channels_sort"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="2dp"
+                    android:padding="9dp"
+                    android:src="@drawable/ic_sort"
+                    android:tint="@color/text_muted"
+                    android:contentDescription="@string/parent_sort"
+                    android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:scaleType="fitCenter" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/channels_count"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="2dp"
                 android:textSize="14sp"
                 android:textColor="@color/accent" />
 
-            <TextView
+            <!-- Rows are inflated into here rather than into a RecyclerView: a
+                 recycler inside a ScrollView either fights it for scrolling or
+                 has to be told not to, and this list is a handful of rows that
+                 a parent added by hand. Negative margins let the rows span the
+                 card, so their own 20dp start padding lines their text up with
+                 the heading above. -->
+            <LinearLayout
+                android:id="@+id/channels_list"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="@string/settings_channels_explain"
+                android:layout_marginTop="10dp"
+                android:layout_marginStart="-20dp"
+                android:layout_marginEnd="-20dp"
+                android:orientation="vertical" />
+
+            <TextView
+                android:id="@+id/channels_empty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:layout_marginBottom="6dp"
+                android:text="@string/settings_channels_empty"
                 android:textSize="14sp"
                 android:textColor="@color/text_muted"
-                android:lineSpacingExtra="2dp" />
-
-            <Button
-                android:id="@+id/manage_channels"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:text="@string/settings_channels_manage" />
+                android:lineSpacingExtra="2dp"
+                android:visibility="gone" />
 
         </LinearLayout>
 

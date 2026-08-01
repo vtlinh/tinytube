@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 
    Note what the Channels tab deliberately does NOT do. It cannot remove a
    channel and it cannot open YouTube — the approved list is the parental
-   control, and editing it lives behind the gate in ApprovedChannelsActivity.
+   control, and editing it lives behind the gate, in SettingsActivity.
    This tab is a way to browse what is already allowed, nothing more. */
 class MainActivity : AppCompatActivity() {
 

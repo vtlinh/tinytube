@@ -69,12 +69,13 @@ that browser, so your own subscriptions are a place to approve from.
 The **+** is live only on an actual channel page — a URL starting `/@handle`
 or `/channel/`. On a channel you have already approved it becomes **−**, which
 removes it. Every approved channel is listed at the bottom of **Settings**,
-under **Channels**: tap one to go and look at it again, or **✕** to remove it.
+under **Channels** — the list itself, not a button that opens one: tap a row to
+go and look at that channel again, or **✕** to remove it.
 
 Removing a channel drops its videos from the grid immediately, its watch
 history with it, and its avatar and thumbnails off the disk.
 
-That list's **sort** control cycles three orders, and the toolbar says
+That list's **sort** control cycles three orders, and the label beside it says
 which one is in force:
 
 - **Recently added** — the default, and what the list always did.
@@ -84,8 +85,9 @@ which one is in force:
   has no history at all. Narrowing first is the point: a channel watched daily
   this week should lead one watched more often a year ago, and a list sorted
   over all time would freeze into whatever was popular when the phone was new.
-  Whichever window applied is named in the bar, so "most watched" over an empty
-  history says so rather than looking unsorted.
+  A "most watched" that found no history at all says so beside the control,
+  because otherwise it quietly means A–Z and a list that looks unsorted is
+  indistinguishable from a broken one.
 
 Which order you pick applies to the child's Channels tab too. It is one list.
 
@@ -159,10 +161,19 @@ that way, so a parent moving between the two apps finds the same screen; the
 bar itself is **← Kids mode**, then a gap, then **+/−**, then the gear, on
 both. (iOS has no update controls to place — see **Platform differences**.)
 
-The channel list sits inside settings rather than beside it because it is a
-screen of its own and everything above it just toggles something. It shows how
-many channels are approved, which is what makes an empty list readable as empty
-rather than broken.
+The channel list is inline, at the bottom. It was a button opening a screen of
+its own for one build, and a whole screen — toolbar, up arrow, overflow menu —
+to show three or four rows was more furniture than list. What a parent opens
+settings to check is usually just *what is approved*, and that is now answered
+by looking.
+
+**Every explanation is behind the ? beside its heading.** They used to sit under
+the headings in grey, permanently, which meant a parent scrolling for the hold
+slider read three paragraphs about things they already understood to reach it.
+The words are unchanged — they are just no longer between you and the controls.
+Android shows a small popup anchored to the **?**; iOS shows an alert, because
+SwiftUI keeps a popover a popover on an iPhone only from 16.4 and the app
+targets 16.0.
 
 **When a video ends** — what plays next.
 

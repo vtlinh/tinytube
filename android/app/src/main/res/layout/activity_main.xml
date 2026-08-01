@@ -103,7 +103,7 @@
              of the app, and the approved list is the parental control. Tapping
              a row filters the grid to that channel; it cannot remove one and
              it cannot open YouTube. Both of those live behind the gate, in
-             ApprovedChannelsActivity. -->
+             SettingsActivity. -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/channels"
             android:layout_width="match_parent"
