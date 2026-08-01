@@ -35,11 +35,18 @@ enum BlockHeightStore {
     private static let keyVersion = "block_version"
     private static let keySessions = "block_sessions"
 
-    /* iOS's own ladder, starting at 1 — no earlier iOS build ever persisted
-       anything, so there is nothing here to distrust yet. The NUMBER does not
-       have to agree with Android's; the RULE does. Bump it whenever what the
-       measurement would return changes. */
-    static let version = 1
+    /* iOS's own ladder. The NUMBER does not have to agree with Android's; the
+       RULE does — bump it whenever what the measurement would return changes.
+
+       2: the capture read the bottom rows of ReplayKit's BUFFER as though they
+       were the bottom of the screen. In portrait that is the same thing; the
+       player forces landscape, where it is a band down one side, so `Chrome`
+       never found a seek bar and nothing was ever stored. The bump matters
+       more than usual here: the three attempts are spent per launch whether or
+       not the analysis works, so every device that ran the broken build has
+       given up permanently. Without a new version a fixed build would never
+       ask again. See ScreenMeasurement.bufferCoord. */
+    static let version = 2
 
     /* How many launches may fail before this stops asking. Three is enough to
        ride out a device that was mirroring to a TV or had the app backgrounded

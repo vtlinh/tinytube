@@ -202,6 +202,13 @@ jobs:
           # fresh versionCode to every installed device, an update with nothing
           # in it. This applies the same filter the push trigger uses.
           #
+          # The workflow files are NOT in that filter, deliberately. Editing
+          # android.yml cannot change the APK — the reuse hash covers android/
+          # and nothing else — so publishing for one shipped a new build number
+          # and no new code. Same on the iOS side. If you change how a build is
+          # actually made, touch that platform's directory too, or dispatch the
+          # publish by hand.
+          #
           # Failing to read the file list means publishing anyway. The wrong
           # direction to be wrong in is the one where an app change quietly
           # never ships.
@@ -218,10 +225,10 @@ jobs:
             PUB_IOS=no
             for f in $FILES; do
               case "$f" in
-                android/*|.github/workflows/android.yml) PUB_ANDROID=yes ;;
+                android/*) PUB_ANDROID=yes ;;
               esac
               case "$f" in
-                ios/*|.github/workflows/ios.yml) PUB_IOS=yes ;;
+                ios/*) PUB_IOS=yes ;;
               esac
             done
           else

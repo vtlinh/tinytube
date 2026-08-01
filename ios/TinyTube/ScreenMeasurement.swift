@@ -102,12 +102,84 @@ final class ScreenMeasurement {
         recorder.stopCapture(handler: nil)
     }
 
+    /* HOW THE BUFFER'S ROWS RELATE TO WHAT THE USER IS LOOKING AT.
+     *
+     * This is the bug that made the whole measurement do nothing on iOS. The
+     * player forces LANDSCAPE, and ReplayKit does not rotate its buffers to
+     * match: it hands over frames in the device's own orientation and attaches
+     * `RPVideoSampleOrientationKey` to say how they should be read. Ignoring it
+     * and taking "the last rows of the buffer" as "the bottom of the screen" is
+     * correct only in portrait. In landscape those rows are a band down one
+     * SIDE of the screen — so `Chrome` went looking for a full-width horizontal
+     * track in a strip that could never contain one, found nothing on every
+     * frame, and the blocker sat on its 16-point fallback for good.
+     *
+     * The cases are Apple's CGImagePropertyOrientation, whose names describe
+     * where the stored image's first row and column END UP on screen. */
+    enum FrameOrientation: UInt32 {
+        case up = 1       // 0th row at top,    0th column on left
+        case down = 3     // 0th row at bottom, 0th column on right
+        case right = 6    // 0th row on right,  0th column on top
+        case left = 8     // 0th row on left,   0th column on bottom
+
+        /* Whether reading it swaps width and height. */
+        var swapsAxes: Bool { self == .right || self == .left }
+    }
+
+    /* Display coordinates to buffer coordinates.
+     *
+     * Pure integer arithmetic and deliberately separable, because it is the one
+     * part of this file a test can reach: TinyTubeTests pins all four cases on
+     * a simulator. Nothing else here can be tested without a device and a
+     * consent alert.
+     *
+     * `display` is what the user sees — origin top-left, +y downwards, which is
+     * the space `Chrome` works in. */
+    static func bufferCoord(
+        displayX dx: Int, displayY dy: Int,
+        bufferWidth bw: Int, bufferHeight bh: Int,
+        orientation: FrameOrientation
+    ) -> (x: Int, y: Int) {
+        switch orientation {
+        case .up:    return (dx, dy)
+        case .down:  return (bw - 1 - dx, bh - 1 - dy)
+        /* 0th row on the right means buffer row `by` lands at display column
+           bh-1-by; 0th column on top means buffer column `bx` lands at display
+           row bx. Inverted here, because we walk display space. */
+        case .right: return (dy, bh - 1 - dx)
+        case .left:  return (bw - 1 - dy, dx)
+        }
+    }
+
+    /* Display size, given the buffer's. */
+    static func displaySize(bufferWidth bw: Int, bufferHeight bh: Int,
+                            orientation: FrameOrientation) -> (width: Int, height: Int) {
+        orientation.swapsAxes ? (bh, bw) : (bw, bh)
+    }
+
+    /* What ReplayKit says about this frame; `.up` if it says nothing, which is
+       what portrait capture looks like. */
+    static func orientation(of sample: CMSampleBuffer) -> FrameOrientation {
+        guard let raw = CMGetAttachment(
+                sample,
+                key: RPVideoSampleOrientationKey as CFString,
+                attachmentModeOut: nil) as? NSNumber,
+              let parsed = FrameOrientation(rawValue: raw.uint32Value)
+        else { return .up }
+        return parsed
+    }
+
     /* The strip, out of one frame, as ARGB — and nothing above the strip.
      *
      * `Chrome` takes ARGB packed into UInt32 (unsigned on purpose: Kotlin's
      * signed Int sign-extends on `shr` over an alpha bit, and an unsigned type
      * means the question cannot arise). ReplayKit delivers BGRA, so the bytes
-     * are repacked rather than reinterpreted. */
+     * are repacked rather than reinterpreted.
+     *
+     * The rows read are the bottom `stripFraction` of the DISPLAY, worked out
+     * through the orientation above — not the bottom of the buffer. Nothing
+     * above that strip is copied into memory this code owns, in any
+     * orientation, which is the promise in the header. */
     static func measureStrip(in sample: CMSampleBuffer, scale: CGFloat) -> CGFloat? {
         guard let buffer = CMSampleBufferGetImageBuffer(sample) else { return nil }
         guard CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_32BGRA
@@ -116,30 +188,37 @@ final class ScreenMeasurement {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
 
-        let width = CVPixelBufferGetWidth(buffer)
-        let height = CVPixelBufferGetHeight(buffer)
+        let bw = CVPixelBufferGetWidth(buffer)
+        let bh = CVPixelBufferGetHeight(buffer)
         let stride = CVPixelBufferGetBytesPerRow(buffer)
-        guard width > 0, height > 0, let base = CVPixelBufferGetBaseAddress(buffer)
+        guard bw > 0, bh > 0, let base = CVPixelBufferGetBaseAddress(buffer)
         else { return nil }
 
-        let stripHeight = Int(Double(height) * stripFraction)
+        let facing = orientation(of: sample)
+        let (dw, dh) = displaySize(bufferWidth: bw, bufferHeight: bh, orientation: facing)
+
+        let stripHeight = Int(Double(dh) * stripFraction)
         guard stripHeight > 0 else { return nil }
-        let firstRow = height - stripHeight
+        let firstRow = dh - stripHeight
 
         let bytes = base.assumingMemoryBound(to: UInt8.self)
-        var pixels = [UInt32](repeating: 0, count: width * stripHeight)
+        var pixels = [UInt32](repeating: 0, count: dw * stripHeight)
         for y in 0..<stripHeight {
-            let row = bytes + (firstRow + y) * stride
-            for x in 0..<width {
-                let p = row + x * 4
+            for x in 0..<dw {
+                let (bx, by) = bufferCoord(
+                    displayX: x, displayY: firstRow + y,
+                    bufferWidth: bw, bufferHeight: bh,
+                    orientation: facing
+                )
+                let p = bytes + by * stride + bx * 4
                 /* BGRA in memory: 0=B, 1=G, 2=R. Alpha is dropped — Chrome only
                    ever reads the three colour channels. */
-                pixels[y * width + x] =
+                pixels[y * dw + x] =
                     (UInt32(p[2]) << 16) | (UInt32(p[1]) << 8) | UInt32(p[0])
             }
         }
 
-        guard let blockPx = Chrome.blockHeight(pixels, width: width, height: stripHeight)
+        guard let blockPx = Chrome.blockHeight(pixels, width: dw, height: stripHeight)
         else { return nil }
         return CGFloat(blockPx) / max(scale, 1)
     }

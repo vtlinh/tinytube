@@ -171,4 +171,94 @@ final class AppSurfaceTests: XCTestCase {
             BrowserUserAgent.looksLikeSafari(wkDefault + " " + BrowserUserAgent.safariSuffix)
         )
     }
+
+    // MARK: - Which pixels are the bottom of the screen
+
+    /* THE BUG THAT MADE THE MEASUREMENT DO NOTHING, pinned.
+     *
+     * ReplayKit hands over frames in the device's own orientation and says how
+     * to read them with RPVideoSampleOrientationKey. The capture ignored it and
+     * took the buffer's last rows as the screen's bottom — true in portrait,
+     * and wrong in the landscape the player forces, where those rows are a band
+     * down one side. Chrome then looked for a full-width horizontal seek bar in
+     * a strip that could not contain one.
+     *
+     * The capture itself needs a device and a consenting human, so this is the
+     * one part of it CI can reach: the arithmetic that decides which pixel is
+     * which. */
+    func testEveryOrientationMapsDisplayBackToTheRightBufferPixel() {
+        let bw = 7, bh = 11
+
+        /* The inverse of what ScreenMeasurement implements, written out from
+           Apple's own wording for each case — "0th row on right, 0th column on
+           top" and so on. If the two agree, the mapping is right. */
+        func displayFor(bufferX bx: Int, bufferY by: Int,
+                        _ o: ScreenMeasurement.FrameOrientation) -> (Int, Int) {
+            switch o {
+            case .up:    return (bx, by)
+            case .down:  return (bw - 1 - bx, bh - 1 - by)
+            case .right: return (bh - 1 - by, bx)
+            case .left:  return (by, bw - 1 - bx)
+            }
+        }
+
+        for o in [ScreenMeasurement.FrameOrientation.up, .down, .right, .left] {
+            let (dw, dh) = ScreenMeasurement.displaySize(
+                bufferWidth: bw, bufferHeight: bh, orientation: o)
+            XCTAssertEqual(dw * dh, bw * bh, "\(o) changed the pixel count")
+
+            var covered = Set<String>()
+            for by in 0..<bh {
+                for bx in 0..<bw {
+                    let (dx, dy) = displayFor(bufferX: bx, bufferY: by, o)
+                    XCTAssertTrue((0..<dw).contains(dx) && (0..<dh).contains(dy),
+                                  "\(o) put a pixel outside the display")
+                    covered.insert("\(dx),\(dy)")
+
+                    let back = ScreenMeasurement.bufferCoord(
+                        displayX: dx, displayY: dy,
+                        bufferWidth: bw, bufferHeight: bh, orientation: o)
+                    XCTAssertEqual(back.x, bx, "\(o) x round-trip")
+                    XCTAssertEqual(back.y, by, "\(o) y round-trip")
+                }
+            }
+            XCTAssertEqual(covered.count, bw * bh, "\(o) did not cover the display")
+        }
+    }
+
+    /* The landscape cases are the whole point: a rotated frame must read WIDER
+       than it is tall, or the strip is a side band and the seek bar is never in
+       it. */
+    func testARotatedFrameIsReadAsLandscape() {
+        let tall = (w: 9, h: 16)   // a portrait buffer, as the device stores it
+        for o in [ScreenMeasurement.FrameOrientation.right, .left] {
+            let size = ScreenMeasurement.displaySize(
+                bufferWidth: tall.w, bufferHeight: tall.h, orientation: o)
+            XCTAssertGreaterThan(size.width, size.height,
+                                 "\(o) should present a portrait buffer as landscape")
+        }
+        let upright = ScreenMeasurement.displaySize(
+            bufferWidth: tall.w, bufferHeight: tall.h, orientation: .up)
+        XCTAssertLessThan(upright.width, upright.height)
+    }
+
+    /* The bottom strip in display space must come from the correct EDGE of the
+       buffer. In .right the display's bottom row is the buffer's first column;
+       reading the buffer's last rows instead is exactly the old bug. */
+    func testTheDisplaysBottomRowIsNotTheBuffersLastRow() {
+        let bw = 8, bh = 20
+        let (dw, dh) = ScreenMeasurement.displaySize(
+            bufferWidth: bw, bufferHeight: bh, orientation: .right)
+
+        var rowsTouched = Set<Int>()
+        for dx in 0..<dw {
+            let p = ScreenMeasurement.bufferCoord(
+                displayX: dx, displayY: dh - 1,
+                bufferWidth: bw, bufferHeight: bh, orientation: .right)
+            rowsTouched.insert(p.y)
+            XCTAssertEqual(p.x, bw - 1, "the display's bottom row is the buffer's last COLUMN here")
+        }
+        XCTAssertEqual(rowsTouched.count, bh,
+                       "reading the display's bottom row should sweep every buffer row")
+    }
 }
