@@ -1,6 +1,6 @@
 name: auto-merge
 
-# Merges a pull request once the android workflow passes on it.
+# Merges a pull request once BOTH platform workflows pass on it.
 #
 # GitHub's own auto-merge needs "Allow auto-merge" plus a branch protection
 # rule naming a required check, and both are paid-plan features on a private
@@ -10,9 +10,15 @@ name: auto-merge
 # the one in the pull request. So edits here take effect only once merged —
 # including this one, which is why a change to this file has to be merged by
 # hand the first time.
+#
+# Both platform workflows trigger it. Whichever finishes LAST does the merge:
+# each run re-checks that every required check is green, and a run that finds
+# one still in progress simply exits — the other workflow's completion will
+# bring it back. Waiting by polling would be the alternative, and polling for
+# minutes on every PR is how a merge queue becomes the slowest part of the day.
 on:
   workflow_run:
-    workflows: ["android"]
+    workflows: ["android", "ios"]
     types: [completed]
 
 # A permissions block REPLACES the defaults rather than adding to them, so
@@ -87,8 +93,8 @@ jobs:
 
           # Each guard below is skipped rather than fatal when the lookup
           # itself fails: a job that can read enough to merge but not enough to
-          # check a label should still merge, and the android run — the check
-          # that actually gates what reaches a device — has already passed.
+          # check a label should still merge, and the platform runs — the checks
+          # that actually gate what reaches a device — have already passed.
           #
           # Skipping has to be driven by gh's EXIT STATUS, not by whether the
           # output is empty. On an error gh prints the API's JSON to stdout, so
@@ -115,10 +121,38 @@ jobs:
             fi
           done
 
-          # This job only knows that the android run passed. Anything else
-          # reporting on the commit — the Cloudflare Workers build, whatever
-          # gets added later — gets a say too. Checks still running are not
-          # counted: waiting on them would mean polling.
+          # Both platforms have to have reported, and reported green, before
+          # anything merges. A feature lands on Android AND iOS or it is not
+          # finished (see CLAUDE.md), and a merge gate that only ever asked one
+          # of them would make that rule advisory.
+          #
+          # By NAME, because these are the job names and therefore the check-run
+          # names: `build` in android.yml, `ios-core` in ios.yml. Renaming either
+          # job silently stops this waiting for it — which is why both files say
+          # so next to the job.
+          #
+          # Missing counts as not-yet, not as absent. A check that has not
+          # reported is one still queued, and merging past it is exactly the
+          # race this exists to lose.
+          REQUIRED="build ios-core"
+          if RUNS=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
+            --jq '[.check_runs[] | select(.status == "completed")
+                   | select([.conclusion] | inside(["success","neutral","skipped"]))
+                   | .name] | join(" ")' 2>/dev/null); then
+            for want in $REQUIRED; do
+              case " $RUNS " in
+                *" $want "*) ;;
+                *) echo "Waiting for $want to finish and pass — not merging yet."; exit 0 ;;
+              esac
+            done
+          else
+            echo "Could not read the commit's check runs; proceeding on this run's result alone."
+          fi
+
+          # And anything else reporting on the commit — the Cloudflare Workers
+          # build, whatever gets added later — gets a say too. Checks still
+          # running are not counted here: the required ones are handled above,
+          # and waiting on the rest would mean polling.
           FAILED=""
           if OUT=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
             --jq '[.check_runs[]

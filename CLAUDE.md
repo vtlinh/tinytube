@@ -26,6 +26,14 @@ channels. Don't do it again:
 
 ## Both platforms, always
 
+**A change to one platform must not publish the other.** `android.yml`'s push
+trigger and auto-merge's publish filter name `android/**` and
+`.github/workflows/android.yml` and nothing else, so an `ios/**` change ships no
+APK — and the Swift tests live in `ios.yml` rather than inside `android.yml` for
+exactly that reason: a CI tweak for iOS sitting in that file would have shipped
+a new `versionCode` to every Android device for a change that cannot affect
+them. When an iOS release pipeline exists it owes Android the same courtesy.
+
 A feature lands on Android AND iOS, or it is not finished. If something can
 only exist on one — self-update is the standing example, and there is no iOS
 equivalent — the difference goes in README's **Platform differences** table
@@ -109,11 +117,15 @@ it does build — because the code moved and the reuse was refused — it tests,
 because that is precisely the case where nothing has tested what is shipping.
 
 `auto-merge.yml` does the merging: a PR that isn't a draft merges itself once
-`android` passes and nothing else on the commit has failed. Label a PR
+BOTH `android` and `ios` pass and nothing else on the commit has failed. Label a PR
 `no-auto-merge` to hold it open. Two things follow from how it works:
 
 - It runs the copy of itself on `main`, so changes to it only take effect after
   they land, and the PR that changes it must be merged by hand.
+- It requires the check runs `build` (android.yml's job) and `ios-core`
+  (ios.yml's job) BY NAME. Renaming either job silently stops it waiting for
+  that platform. A required check that hasn't reported counts as not-yet rather
+  than as absent, so whichever workflow finishes last is the one that merges.
 - `android.yml`'s `pull_request` trigger is deliberately not path-filtered. A
   filtered run that doesn't match never reports at all, and auto-merge waits
   for it — a docs-only PR would never merge.
