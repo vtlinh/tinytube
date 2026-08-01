@@ -73,6 +73,12 @@ Two answers already bought with a spike, so don't re-derive them:
 ```
 worker.js / wrangler.toml        Cloudflare Worker: release assets + /uploads
 worker.test.mjs                  its parsers, under `node --test` (CI runs it)
+ios/project.yml                  the Xcode project, as a readable file; the
+                                 .xcodeproj is GENERATED, never committed
+ios/TinyTube/                    the app target
+  PlayerChrome.swift             the fixed bottom inset (the spike's answer)
+  BrowserUserAgent.swift         the Safari suffix that lets Google sign in
+ios/TinyTubeTests/               app-target tests; run on a simulator in CI
 ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
                                  Kotlin files; `swift test` runs it on Linux
   Sources/TinyTubeCore/          VideoId Player Uploads Library Playlist
@@ -80,7 +86,8 @@ ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
                                  Schema Chrome — the whole pure layer
   Tests/                         the Kotlin tests, ported alongside
 .github/workflows/android.yml    build, sign, publish to the android-latest release
-.github/workflows/auto-merge.yml merge a PR once android passes
+.github/workflows/ios.yml        ios-core on Linux; ios-app builds the IPA on macOS
+.github/workflows/auto-merge.yml merge a PR once both platforms pass
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
 android/                         the app
   signing.p12                    committed keystore; see README for why
@@ -124,11 +131,40 @@ npx wrangler deploy --dry-run           # validates the worker bundles
 An Android SDK (platform 34, build-tools 34.0.0) is required for both Gradle
 commands; CI provisions it.
 
+**The iOS APP cannot be built here, and saying otherwise is the failure mode to
+avoid.** `swift test` covers `TinyTubeCore` and nothing else — that package is
+Linux-buildable on purpose. Everything under `ios/TinyTube/` needs Xcode, so the
+`ios-app` job on a macOS runner is the first thing that ever compiles it. Don't
+claim a screen is verified because the core tests are green. If you need the
+project locally on a Mac:
+
+```bash
+brew install xcodegen && (cd ios && xcodegen generate)   # writes TinyTube.xcodeproj
+```
+
 ## Workflow
 
-Finish each feature: commit it, push the branch, open the pull request, and
-merge it once CI is green. Don't leave completed work sitting on a branch or a
-PR waiting to be asked about.
+Finish everything that was asked before opening a pull request. Commit as you
+go and push the branch — that part is free — but open the PR only once every
+feature in the request is implemented on both platforms. Then let it merge.
+
+Free because a push to a branch with NO OPEN PULL REQUEST triggers nothing:
+`android.yml` and `ios.yml` both filter their `push` trigger to `main`, so the
+only thing that builds a branch is the `pull_request` event. Open the PR early
+and every subsequent push is a full run of both platforms; open it at the end
+and the whole change costs one. That is the entire reason for this rule — the
+minutes are a real budget, and macOS runners bill at ten times the rate.
+
+A DRAFT pull request does not help. Drafts still fire `pull_request` events and
+still build; the only thing draft status changes is that auto-merge leaves them
+alone. Don't open one as a way of "saving" runs.
+
+The cost of batching is that nothing is checked until the end, so check it here
+instead. Run the three suites locally before opening anything — see Commands —
+and treat a red one exactly as you would a red CI run.
+
+Don't leave finished work sitting on a branch with no PR either. "Everything
+that was asked" is the trigger, not "everything I can think of".
 
 Green CI is part of "finished", not a separate step to skip — the unit tests are
 what stand between a bad video id and the player, and merging past a red run
@@ -145,10 +181,24 @@ BOTH `android` and `ios` pass and nothing else on the commit has failed. Label a
 
 - It runs the copy of itself on `main`, so changes to it only take effect after
   they land, and the PR that changes it must be merged by hand.
-- It requires the check runs `build` (android.yml's job) and `ios-core`
-  (ios.yml's job) BY NAME. Renaming either job silently stops it waiting for
-  that platform. A required check that hasn't reported counts as not-yet rather
-  than as absent, so whichever workflow finishes last is the one that merges.
+- Once a PR merges, its branch is done. Further pushes to it produce NO CI at
+  all — there is no open PR to raise a `pull_request` event, and the `push`
+  trigger only watches `main` — so the commits sit there looking pushed and
+  never get built. Start a fresh branch from `main` and open a new PR. This has
+  already stranded four commits once.
+- It requires the check runs `build` (android.yml's job), `ios-core` and
+  `ios-app` (both ios.yml's) BY NAME. Renaming any of them silently stops it
+  waiting for that platform. A required check that hasn't reported counts as
+  not-yet rather than as absent, so whichever workflow finishes last is the one
+  that merges.
+- `ios-app` is the macOS job, and it is required despite costing 10x minutes
+  because it is SLOW. Left merely informational it would report after the merge
+  every time rather than occasionally, which is not a gate at all. It pays for
+  itself by skipping: a job-level `if` turns it off on changes that don't touch
+  `ios/**`, and a check skipped that way still REPORTS, as `skipped`, which
+  counts as passing. That is the whole reason the filtering is a job `if` and
+  not a path filter on the workflow — see the next bullet for what a path
+  filter would do here.
 - `android.yml`'s `pull_request` trigger is deliberately not path-filtered. A
   filtered run that doesn't match never reports at all, and auto-merge waits
   for it — a docs-only PR would never merge.

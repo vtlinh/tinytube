@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read   # the `changes` job asks which files a PR touched
 
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('ios-pr-{0}', github.event.number) || 'ios-main' }}
@@ -62,3 +63,143 @@ jobs:
 
       - name: Core tests
         run: /opt/swift/usr/bin/swift test --package-path ios/TinyTubeCore
+
+  # Does this change touch the iOS app at all?
+  #
+  # A macOS runner bills at 10x, so a free-plan private repository gets about
+  # 200 macOS minutes a month. Building the app on every pull request would
+  # spend that on Android-only and docs-only changes. This job is seconds on
+  # ubuntu and decides whether the expensive one runs.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+
+          # Anything but a pull request builds: a push to main and a manual
+          # dispatch are both cases where somebody wants the artifact.
+          if [ -z "${PR:-}" ]; then
+            echo "Not a pull request — building."
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Failing to read the file list builds anyway. The costly direction to
+          # be wrong in is the one where a broken app merges unnoticed; the
+          # other direction costs a few minutes. Same reasoning as auto-merge's
+          # publish filter, pointed the same way.
+          if ! FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
+            echo "Could not list PR #$PR's files — building rather than risk missing a break."
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          WANTED=false
+          for f in $FILES; do
+            case "$f" in
+              ios/*|.github/workflows/ios.yml) WANTED=true ;;
+            esac
+          done
+          echo "Touches the iOS app: $WANTED"
+          echo "ios=$WANTED" >> "$GITHUB_OUTPUT"
+
+  # Builds the app and produces the IPA the owner sideloads.
+  #
+  # The job name is the check-run name and auto-merge.yml requires this exact
+  # string, exactly as with ios-core above. Renaming it silently stops the merge
+  # gate waiting for it.
+  #
+  # SKIPPED IS THE POINT of the `if` below, and it is why the filtering lives
+  # here rather than in this workflow's `on:` block. A job skipped by `if` still
+  # reports a check run, with conclusion `skipped`, which auto-merge accepts as
+  # passing. A workflow skipped by a PATH FILTER reports nothing at all, and
+  # auto-merge would wait for a check that is never coming — the trap already
+  # written up next to android.yml's deliberately unfiltered pull_request
+  # trigger. Same trap, avoided a different way, because this one has to be
+  # cheap as well as present.
+  ios-app:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # The .xcodeproj is generated rather than committed — see ios/project.yml
+      # for why.
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the project
+        working-directory: ios
+        run: xcodegen generate
+
+      # Tests first, so a failure costs the test run rather than the test run
+      # plus an archive. The pure logic is already green on Linux by this point;
+      # what runs here is only what needs a device to be true.
+      - name: Test on a simulator
+        working-directory: ios
+        run: |
+          set -euo pipefail
+
+          # Naming a simulator ("iPhone 16") breaks silently whenever the runner
+          # image rotates its device list, and a generic simulator destination
+          # is not reliably resolvable for `test`. So ask the image what it
+          # actually has and use that device's UDID. Sorted so the newest iOS
+          # runtime wins; within one, any iPhone will do.
+          xcrun simctl list devices available
+          UDID=$(xcrun simctl list devices available --json | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; c=sorted((r,v["udid"]) for r,vs in d.items() if "iOS" in r for v in vs if v.get("isAvailable") and v["name"].startswith("iPhone")); print(c[-1][1] if c else "")')
+          test -n "$UDID" || { echo "No available iPhone simulator on this image."; exit 1; }
+          echo "Testing on simulator $UDID"
+
+          xcodebuild test \
+            -project TinyTube.xcodeproj \
+            -scheme TinyTube \
+            -destination "id=$UDID" \
+            CODE_SIGNING_ALLOWED=NO
+
+      # Unsigned on purpose, and unsigned is not a degraded mode here: CI cannot
+      # sign for a free Apple ID at all, because free provisioning only happens
+      # inside Xcode with a human present. AltStore and Sideloadly re-sign on
+      # the way in, which is the supported path for that tier.
+      - name: Archive
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project TinyTube.xcodeproj \
+            -scheme TinyTube \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/TinyTube.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      # `xcodebuild -exportArchive` cannot help here: every export method it
+      # knows wants a signing identity. An IPA is a zip with the .app under
+      # Payload/, so build that directly — which is also exactly what the
+      # sideloaders expect to be handed.
+      - name: Package the IPA
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          APP="build/TinyTube.xcarchive/Products/Applications/TinyTube.app"
+          test -d "$APP" || { echo "No .app in the archive — nothing to package."; exit 1; }
+          rm -rf build/Payload && mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          (cd build && zip -qry TinyTube-unsigned.ipa Payload)
+          echo "Built $(du -h build/TinyTube-unsigned.ipa | cut -f1) unsigned IPA"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TinyTube-unsigned-ipa
+          path: ios/build/TinyTube-unsigned.ipa
+          # A sideloaded build is only good for 7 days on the free tier, so an
+          # artifact outliving that is storage spent on something nobody can
+          # install any more.
+          retention-days: 7

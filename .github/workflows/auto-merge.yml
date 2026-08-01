@@ -127,14 +127,25 @@ jobs:
           # of them would make that rule advisory.
           #
           # By NAME, because these are the job names and therefore the check-run
-          # names: `build` in android.yml, `ios-core` in ios.yml. Renaming either
-          # job silently stops this waiting for it — which is why both files say
-          # so next to the job.
+          # names: `build` in android.yml, `ios-core` and `ios-app` in ios.yml.
+          # Renaming any of them silently stops this waiting for it — which is
+          # why both files say so next to the job.
           #
           # Missing counts as not-yet, not as absent. A check that has not
           # reported is one still queued, and merging past it is exactly the
           # race this exists to lose.
-          REQUIRED="build ios-core"
+          #
+          # `ios-app` is here rather than left informational, and the reason is
+          # arithmetic: it runs on a macOS runner and takes minutes, while
+          # `build` and `ios-core` finish in one or two. Left out of this list
+          # it would essentially ALWAYS report after the merge had happened, so
+          # a broken iOS app would land on main every time rather than
+          # occasionally. It skips itself on changes that don't touch ios/**,
+          # and a skipped check counts as passing below — which is exactly why
+          # it filters with a job-level `if` rather than a path filter on the
+          # workflow, since a path-filtered workflow reports nothing and this
+          # loop would wait for it forever.
+          REQUIRED="build ios-core ios-app"
           if RUNS=$(gh api "repos/$REPO/commits/$SHA/check-runs" \
             --jq '[.check_runs[] | select(.status == "completed")
                    | select([.conclusion] | inside(["success","neutral","skipped"]))
