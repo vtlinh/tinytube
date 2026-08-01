@@ -72,13 +72,11 @@ class MainActivity : AppCompatActivity() {
             parentGate.launch(Intent(this, ChallengeActivity::class.java))
         }
 
-        /* About stays on the long press. It is parent-facing but harmless —
-           a version number and an update button — so it does not need the
-           gate, and keeping it off the bar keeps the bar to one choice. */
-        header.setOnLongClickListener {
-            startActivity(Intent(this, AboutActivity::class.java))
-            true
-        }
+        /* The title used to open About on a long-press. About is part of
+           Settings now, inside parent mode — a version number and an update
+           button are parent-facing, and a gesture nobody would guess was there
+           is not where a parent finds them. Nothing on this screen has a
+           hidden action any more. */
 
         back.setOnClickListener { showChannel(null) }
 

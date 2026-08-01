@@ -62,10 +62,17 @@ class PlayerActivity : AppCompatActivity() {
        lifted early can cancel it mid-sweep. */
     private var holdAnimator: ObjectAnimator? = null
 
-    /* The corner's tint, which is shown on demand rather than permanently.
-       The view underneath stays touchable throughout — only the tint fades. */
+    /* The corner's glow, which announces itself when the overlay appears and
+       is invisible otherwise. The view underneath stays touchable throughout —
+       only the colour fades. */
     private var corner: View? = null
-    private val fadeTintRunnable = Runnable { setTintShown(false) }
+    private val fadeGlowRunnable = Runnable { fadeGlow() }
+
+    /* How long the corner must be held, in milliseconds. The parent's, from
+       SettingsStore — read once per video rather than per press, so changing
+       it mid-hold cannot leave a ring counting to a different number than the
+       one the timer is waiting for. */
+    private var holdMillis = HoldTime.DEFAULT_MILLIS
 
     private var bottomBlocker: View? = null
     private val measureRunnable = Runnable { measureBlockHeight() }
@@ -85,17 +92,16 @@ class PlayerActivity : AppCompatActivity() {
         private const val STATE_PLAYING = 1
         private const val STATE_PAUSED = 2
 
-        /* Long enough that no thumb rests its way through by accident — four
-           times Android's own long-press, which is the thing being avoided. */
-        private const val HOLD_MILLIS = 2000L
-        /* And the overlay returns on its own if nothing is touched while the
-           video is running. */
+        /* The overlay returns on its own if nothing is touched while the video
+           is running. */
         private const val IDLE_MILLIS = 5000L
-        /* How long the corner's tint stays up after a tap. Short: it is a
-           reminder of where to press, not something to watch a video through. */
-        private const val TINT_MILLIS = 1000L
-        private const val TINT_IN_MILLIS = 120L
-        private const val TINT_OUT_MILLIS = 400L
+
+        /* The corner's glow, one second end to end, whenever the overlay comes
+           back. A quick rise so it registers, a long fall so it reads as
+           something settling rather than something blinking. */
+        private const val GLOW_MILLIS = 1000L
+        private const val GLOW_IN_MILLIS = 180L
+        private const val GLOW_OUT_MILLIS = 500L
 
         /* Long enough after playback starts for YouTube's controls to have
            finished animating in. Measuring mid-fade reads a half-opaque bar. */
@@ -262,25 +268,31 @@ class PlayerActivity : AppCompatActivity() {
         if (measuredBlockPx < 0) measuredBlockPx = BlockHeightStore.get(this) ?: -1
         if (measuredBlockPx >= 0) applyBlockHeight(measuredBlockPx)
 
-        /* A tap anywhere shows the corner. Nothing else: the overlay has no
-           controls to toggle, so this is the whole of what tapping does. */
-        overlay?.setOnClickListener { setTintShown(true) }
+        /* How long the hold is, as the parent set it. Read here rather than at
+           each press so a change cannot land between the ring starting and the
+           timer firing, which would have them counting to different numbers. */
+        holdMillis = HoldTime.millisFor(SettingsStore.holdSeconds(this))
 
-        /* Hold the corner for two seconds. Deliberately not Android's own
-           long-press, which fires in half a second — that is short enough for
-           a child to hit by resting a thumb.
+        /* The overlay takes every touch and does nothing with them. It used to
+           summon the corner's tint on a tap; the glow does that job now, at a
+           moment nobody is trying to watch anything. Still clickable, because
+           that is what stops the touch reaching YouTube underneath. */
 
-           This works whether or not the tint is showing. Requiring the tap
-           first would make the corner a two-step control and, worse, make it
-           unreachable if the tap that summons it ever failed to register.
+        /* Hold the corner. Deliberately not Android's own long-press, which
+           fires in half a second — short enough for a child to hit by resting
+           a thumb.
+
+           This works whether or not the corner is glowing. Requiring a tap
+           first would make it a two-step control and, worse, make it
+           unreachable if the tap that summoned it ever failed to register.
 
            The ring is shown either way, and deliberately without dragging the
-           tint up with it: a press gets feedback because it was a press, not
+           glow up with it: a press gets feedback because it was a press, not
            because a hint happened to be visible. */
         corner?.setOnTouchListener { v, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    reveal.postDelayed(holdRunnable, HOLD_MILLIS)
+                    reveal.postDelayed(holdRunnable, holdMillis)
                     startHoldProgress()
                     true
                 }
@@ -293,39 +305,57 @@ class PlayerActivity : AppCompatActivity() {
                 else -> true
             }
         }
+
+        /* The overlay is up the moment this screen exists, so its first glow
+           belongs here — a video that starts covered should say where the way
+           out is once, at the start, rather than the first time somebody
+           happens to touch the screen. */
+        glow()
     }
 
-    /* The corner's tint, faded in on a tap and back out a few seconds later.
+    /* The corner announces itself: up quickly, held, then down slowly, one
+     * second end to end.
      *
-     * Only the tint moves. The view keeps its size and keeps taking touches at
-     * alpha 0, so the hold is available at every moment — someone who knows
-     * where the corner is never has to tap first. */
-    private fun setTintShown(shown: Boolean) {
+     * Fired when the overlay BECOMES VISIBLE — at the start of a video and
+     * when a reveal ends — and at no other time. The tint it replaces appeared
+     * on any tap and faded a second later, which put a coloured wedge over the
+     * picture at exactly the moment a child was most likely to be touching the
+     * screen. Saying it once, when the thing it belongs to arrives, tells a
+     * parent the same thing while nobody is watching anything yet.
+     *
+     * Only the colour moves. The view keeps its size and keeps taking touches
+     * at alpha 0, so the hold is available at every moment — someone who knows
+     * where the corner is never has to wait for it. */
+    private fun glow() {
         val c = corner ?: return
-        reveal.removeCallbacks(fadeTintRunnable)
+        reveal.removeCallbacks(fadeGlowRunnable)
         c.animate().cancel()
-        c.animate()
-            .alpha(if (shown) 1f else 0f)
-            .setDuration(if (shown) TINT_IN_MILLIS else TINT_OUT_MILLIS)
-            .start()
-        if (shown) reveal.postDelayed(fadeTintRunnable, TINT_MILLIS)
+        c.animate().alpha(1f).setDuration(GLOW_IN_MILLIS).start()
+        reveal.postDelayed(fadeGlowRunnable, GLOW_MILLIS - GLOW_OUT_MILLIS)
+    }
+
+    private fun fadeGlow() {
+        val c = corner ?: return
+        c.animate().cancel()
+        c.animate().alpha(0f).setDuration(GLOW_OUT_MILLIS).start()
     }
 
     /* The ring, counting out the hold.
      *
-     * Animated rather than stepped, and over exactly HOLD_MILLIS, so what it
-     * shows is the truth about when the finger can come off. Two seconds of
-     * a screen doing nothing is indistinguishable from a dead spot.
+     * Animated rather than stepped, and over exactly the hold the parent set,
+     * so what it shows is the truth about when the finger can come off. Any
+     * number of seconds of a screen doing nothing is indistinguishable from a
+     * dead spot.
      *
-     * Its visibility is its own, independent of the tint's alpha — see the
-     * layout for why it had to stop being a child of the tinted view. */
+     * Its visibility is its own, independent of the corner's alpha — see the
+     * layout for why it had to stop being a child of the glowing view. */
     private fun startHoldProgress() {
         val bar = holdProgress ?: return
         holdAnimator?.cancel()
         bar.progress = 0
         bar.visibility = View.VISIBLE
         holdAnimator = ObjectAnimator.ofInt(bar, "progress", 0, bar.max).apply {
-            duration = HOLD_MILLIS
+            duration = holdMillis
             interpolator = LinearInterpolator()
             start()
         }
@@ -358,9 +388,13 @@ class PlayerActivity : AppCompatActivity() {
         /* And the overlay returns tintless, whichever way it went. Fading a
            hint back in over a video nobody has touched would undo the point
            of hiding it. */
-        reveal.removeCallbacks(fadeTintRunnable)
+        reveal.removeCallbacks(fadeGlowRunnable)
         corner?.animate()?.cancel()
         corner?.alpha = 0f
+        /* And it announces itself again whenever it comes BACK — the overlay
+           reappearing is exactly the moment worth marking, and the only one
+           the glow fires on. */
+        if (!value) glow()
         /* Lifting the overlay is the other reliable moment: the parent is
            about to touch the player, and a touch is what brings the controls
            back. Also the only moment a scrimmed pause can be measured, since
@@ -725,7 +759,7 @@ class PlayerActivity : AppCompatActivity() {
            unprotected player. */
         reveal.removeCallbacks(holdRunnable)
         stopHoldProgress()
-        reveal.removeCallbacks(fadeTintRunnable)
+        reveal.removeCallbacks(fadeGlowRunnable)
         corner?.animate()?.cancel()
         corner?.alpha = 0f
         if (revealed) setRevealed(false)
@@ -744,7 +778,7 @@ class PlayerActivity : AppCompatActivity() {
     override fun onDestroy() {
         reveal.removeCallbacks(holdRunnable)
         reveal.removeCallbacks(idleRunnable)
-        reveal.removeCallbacks(fadeTintRunnable)
+        reveal.removeCallbacks(fadeGlowRunnable)
         reveal.removeCallbacks(measureRunnable)
         holdAnimator?.cancel()
         holdAnimator = null
