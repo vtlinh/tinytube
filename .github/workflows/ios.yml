@@ -3,22 +3,21 @@ name: ios
 # The iOS half of the shared logic.
 #
 # A workflow of its own rather than a step inside android.yml, and the reason is
-# publishing rather than tidiness. android.yml's push trigger and auto-merge's
-# dispatch filter both name `.github/workflows/android.yml` — correctly, since
-# that file decides what goes into the APK — so a Swift-only CI change sitting
-# in it would ship a new versionCode to every Android device for a change that
-# cannot affect them. Editing this file publishes nothing.
+# publishing rather than tidiness. A Swift-only CI change sitting in that file
+# would have shipped a new versionCode to every Android device for something
+# that cannot affect them.
 #
-# That rule now runs in BOTH directions, because there is an iOS release
-# pipeline: the push trigger below is filtered to ios/**, and auto-merge
-# dispatches this workflow only for merges that touched it. A change under
-# android/ publishes no IPA.
+# NO WORKFLOW FILE APPEARS IN ANY PATH FILTER ANY MORE, on either side. The
+# filters name android/** and ios/** and nothing else, which is the same
+# definition the reuse checks already use — `git rev-parse HEAD:ios` covers
+# ios/ alone — so editing CI cannot change either artifact and no longer
+# builds or publishes one. See the changes job below.
 on:
   push:
     branches: [ "main" ]
+    # ios/** and NOTHING ELSE — not even this file. See the changes job.
     paths:
       - "ios/**"
-      - ".github/workflows/ios.yml"
   # Not path-filtered, exactly as in android.yml: a filtered run that doesn't
   # match never reports at all, and auto-merge waits for this one now. A PR
   # touching neither platform would otherwise sit unmerged forever.
@@ -157,7 +156,11 @@ jobs:
           WANTED=false
           for f in $FILES; do
             case "$f" in
-              ios/*|.github/workflows/ios.yml) WANTED=true ;;
+              # ios/** ONLY, for the reasons written out in android.yml's
+              # copy of this filter: the reuse hash covers ios/ and nothing
+              # else, so a workflow edit cannot change the IPA, and treating it
+              # as one spent a macOS runner to rebuild something identical.
+              ios/*) WANTED=true ;;
             esac
           done
           echo "Touches the iOS app: $WANTED"

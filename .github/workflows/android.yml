@@ -3,9 +3,9 @@ name: android
 on:
   push:
     branches: [ "main" ]
+    # android/** and NOTHING ELSE — not even this file. See the changes job.
     paths:
       - "android/**"
-      - ".github/workflows/android.yml"
   # Pull requests build and test but never publish (the release steps are gated
   # on main below). Without this a PR carries no signal at all, and the tests
   # that guard which video ids can reach the player would first run only after
@@ -99,7 +99,22 @@ jobs:
           WORKER=false
           for f in $FILES; do
             case "$f" in
-              android/*|.github/workflows/android.yml) ANDROID=true ;;
+              # android/** ONLY. Editing this workflow does not build the app
+              # and does not publish one, which is the same definition the
+              # reuse check already uses: `git rev-parse HEAD:android` covers
+              # android/ and nothing else, so a workflow edit produces a tree
+              # the check considers identical anyway. Counting it as an Android
+              # change meant a release-note tweak shipped a fresh versionCode
+              # to every installed device for a build that could not differ.
+              #
+              # The cost, stated: a change HERE that breaks the build merges
+              # without ever having been built, and is discovered on the next
+              # real Android change. That is the same hole CLAUDE.md already
+              # names — anything the APK depends on has to live under android/
+              # or it is invisible to the reuse check. If you change how the
+              # APK is actually built, touch something under android/ in the
+              # same commit, or dispatch this workflow by hand afterwards.
+              android/*) ANDROID=true ;;
             esac
             case "$f" in
               worker.js|worker.test.mjs|wrangler.toml) WORKER=true ;;

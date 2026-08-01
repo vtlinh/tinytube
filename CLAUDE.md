@@ -28,9 +28,8 @@ channels. Don't do it again:
 ## Both platforms, always
 
 **A change to one platform must not publish the other.** `android.yml`'s push
-trigger and auto-merge's publish filter name `android/**` and
-`.github/workflows/android.yml` and nothing else, so an `ios/**` change ships no
-APK — and the Swift tests live in `ios.yml` rather than inside `android.yml` for
+trigger and auto-merge's publish filter name `android/**` and nothing else, so
+an `ios/**` change ships no APK — and the Swift tests live in `ios.yml` rather than inside `android.yml` for
 exactly that reason: a CI tweak for iOS sitting in that file would have shipped
 a new `versionCode` to every Android device for a change that cannot affect
 them. When an iOS release pipeline exists it owes Android the same courtesy.
@@ -267,7 +266,13 @@ BOTH `android` and `ios` pass and nothing else on the commit has failed. Label a
   filtered run that doesn't match never reports at all, and auto-merge waits
   for it — a docs-only PR would never merge.
 - The publishes it dispatches afterwards ARE filtered, by hand, to the same
-  paths each `push` trigger uses. `workflow_dispatch` ignores path filters, so
+  paths each `push` trigger uses — `android/**` and `ios/**`, and **no workflow
+  file**. Editing CI cannot change either artifact, because the reuse hashes
+  cover those directories alone, so counting a workflow edit as an app change
+  only ever shipped a new build number wrapping identical code. The cost is
+  that a change to a workflow merges without that workflow having built
+  anything; if you change how a build is actually made, touch that platform's
+  directory in the same commit or dispatch the publish by hand. `workflow_dispatch` ignores path filters, so
   every merge used to publish — a docs-only PR shipped a new `versionCode` to
   every installed device for an update containing nothing. If the file list
   can't be read it publishes anyway: the wrong direction to be wrong in is the
