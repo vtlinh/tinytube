@@ -33,4 +33,9 @@ object Endpoints {
     const val WORKER = "https://tinytube.vtlinh87.workers.dev"
 
     fun uploads(): String = "$WORKER/uploads"
+
+    /* Which channel a page is for. Takes a handle or a channel id — never a
+       URL, which is what lets this route take input at all. See ChannelResolver
+       and the note above channel() in worker.js. */
+    fun channel(): String = "$WORKER/channel"
 }

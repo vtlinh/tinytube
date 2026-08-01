@@ -49,36 +49,24 @@ class YouTubeUrlsTest {
         assertNull(YouTubeUrls.handleFromUrl("javascript:/@nope"))
     }
 
-    @Test fun `reads the channel id out of a page`() {
-        val canonical =
-            """<html><head><link rel="canonical" href="https://www.youtube.com/channel/$ok"></head></html>"""
-        assertEquals(ok, YouTubeUrls.channelIdFromHtml(canonical))
+    /* Reading a channel page is the Worker's job now, so the tests that pinned
+       channelIdFromHtml, channelTitleFromHtml and channelAvatarFromHtml went
+       with it — see worker.test.mjs, which runs in the same CI job this does.
+       They were not dropped, they moved. */
 
-        val payload = """{"header":{"channelId":"$ok","title":"x"}}"""
-        assertEquals(ok, YouTubeUrls.channelIdFromHtml(payload))
-
-        assertNull(YouTubeUrls.channelIdFromHtml("<html>nothing here</html>"))
-        assertNull(YouTubeUrls.channelIdFromHtml(""))
-    }
-
-    /* Cosmetic, but it is stored and then fetched and drawn — so an og:image
-       pointing anywhere other than YouTube's avatar hosts is refused rather
-       than kept. */
-    @Test fun `reads the channel avatar, and only from youtube image hosts`() {
-        val ok = """<meta property="og:image" content="https://yt3.googleusercontent.com/a/x=s900">"""
-        assertEquals("https://yt3.googleusercontent.com/a/x=s900", YouTubeUrls.channelAvatarFromHtml(ok))
-
-        val ggpht = """<meta property="og:image" content="https://yt3.ggpht.com/a/y">"""
-        assertEquals("https://yt3.ggpht.com/a/y", YouTubeUrls.channelAvatarFromHtml(ggpht))
-
+    /* What is still checked here is the half the phone kept: an avatar URL is
+       stored and then fetched and drawn, so it is re-validated on arrival even
+       though the Worker already refused anything off-host. */
+    @Test fun `avatars are only kept from youtube's own hosts`() {
+        assertTrue(YouTubeUrls.isAllowedAvatar("https://yt3.ggpht.com/x"))
+        assertTrue(YouTubeUrls.isAllowedAvatar("https://yt3.googleusercontent.com/x"))
         for (bad in listOf(
-            """<meta property="og:image" content="https://attacker.example/a.png">""",
-            """<meta property="og:image" content="https://yt3.ggpht.com.attacker.example/a">""",
-            """<meta property="og:image" content="javascript:alert(1)">""",
-            """<meta property="og:title" content="not an image">""",
+            "https://attacker.example/x.jpg",
+            "https://yt3.ggpht.com.attacker.example/x.jpg",
+            "javascript:alert(1)",
             "",
         )) {
-            assertNull("should have refused: $bad", YouTubeUrls.channelAvatarFromHtml(bad))
+            assertFalse("should have refused: $bad", YouTubeUrls.isAllowedAvatar(bad))
         }
     }
 

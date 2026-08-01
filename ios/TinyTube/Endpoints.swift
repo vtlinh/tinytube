@@ -27,4 +27,9 @@ enum Endpoints {
     static let worker = "https://tinytube.vtlinh87.workers.dev"
 
     static var uploads: URL { URL(string: "\(worker)/uploads")! }
+
+    /* Which channel a page is for. Takes a handle or a channel id — never a
+       URL, which is what lets this route take input at all. See ChannelResolver
+       and the note above channel() in worker.js. */
+    static var channel: URL { URL(string: "\(worker)/channel")! }
 }

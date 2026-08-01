@@ -101,57 +101,40 @@ object YouTubeUrls {
 
     /* The @handle, for the many YouTube URLs that carry one instead. A handle
        is not a channel id and cannot be turned into one locally — it has to be
-       resolved against the page, see channelIdFromHtml. */
+       resolved — ChannelResolver asks the Worker. */
     fun handleFromUrl(url: String): String? {
         if (Player.hostOf(url) == null) return null
         val m = Regex("/@([A-Za-z0-9._\\-]{3,30})(?:[/?#]|$)").find(url) ?: return null
         return m.groupValues[1]
     }
 
-    /* Pull the channel id out of a fetched YouTube page.
+    /* READING A CHANNEL PAGE MOVED TO THE WORKER.
      *
-     * Every channel page carries its own id in several places; these are the
-     * two that have been stable and that are unambiguous. The canonical link
-     * is preferred because it is a declared identity rather than an incidental
-     * mention — "channelId" also appears in a watch page's payload referring
-     * to the uploader, which is in fact what we want there too. */
-    fun channelIdFromHtml(html: String): String? {
-        Regex("<link[^>]+rel=\"canonical\"[^>]+href=\"https://www\\.youtube\\.com/channel/(UC[A-Za-z0-9_-]{22})\"")
-            .find(html)?.groupValues?.get(1)?.let { if (isValidChannelId(it)) return it }
-        Regex("\"channelId\"\\s*:\\s*\"(UC[A-Za-z0-9_-]{22})\"")
-            .find(html)?.groupValues?.get(1)?.let { if (isValidChannelId(it)) return it }
-        return null
-    }
+     * channelIdFromHtml, channelTitleFromHtml and channelAvatarFromHtml used to
+     * live here, and to feed them the phone downloaded a full desktop channel
+     * page — megabytes of somebody else's web app — to read one 24-character
+     * string out of it, every time a parent approved anything.
+     *
+     * worker.js does that now: parseChannelId, parseChannelTitle and
+     * parseChannelAvatar, with the tests that came with them. ChannelResolver
+     * asks it, sending a handle or a channel id rather than a URL.
+     *
+     * Same trade the uploads parsing already made, and the same rule follows
+     * from it: don't reintroduce a direct-to-YouTube page fetch on the device
+     * without saying what it is for. */
 
-    /* A human name for the channel, so the approved list reads as names rather
-       than 24-character ids. Only ever cosmetic — nothing depends on it — so
-       any failure here falls back to the id rather than blocking an approval. */
-    fun channelTitleFromHtml(html: String): String? {
-        Regex("<meta[^>]+property=\"og:title\"[^>]+content=\"([^\"]{1,120})\"")
-            .find(html)?.groupValues?.get(1)?.let { return it.trim().ifEmpty { null } }
-        Regex("<title>([^<]{1,120})</title>")
-            .find(html)?.groupValues?.get(1)?.let {
-                /* the page title is "Name - YouTube" */
-                return it.removeSuffix(" - YouTube").trim().ifEmpty { null }
-            }
-        return null
-    }
-
-    /* Hosts YouTube serves channel avatars from. Checked before an avatar URL
-       is stored, because whatever is stored is later fetched and drawn: an
-       og:image tag is page-controlled, and "some URL a page told us about" is
-       not something to keep in the database and load on sight. */
+    /* Hosts YouTube serves channel avatars from.
+     *
+     * The Worker checks this before it hands an avatar back, and the phone
+     * checks it again here before storing one — whatever is stored is later
+     * fetched and drawn, an og:image tag is page-controlled, and "our own
+     * server said so" is not the same assurance as a check at the point of
+     * use. Same reasoning as re-validating video ids off the uploads reply. */
     private val AVATAR_HOSTS = setOf("yt3.ggpht.com", "yt3.googleusercontent.com")
 
-    /* The channel's avatar, from its page. Cosmetic — a null just means the
-       list shows a blank circle — so anything unexpected returns null rather
-       than guessing. */
-    fun channelAvatarFromHtml(html: String): String? {
-        val url = Regex("<meta[^>]+property=\"og:image\"[^>]+content=\"([^\"]{1,500})\"")
-            .find(html)?.groupValues?.get(1)
-            ?: return null
-        val host = Player.hostOf(url) ?: return null
-        return if (host in AVATAR_HOSTS || host.endsWith(".googleusercontent.com")) url else null
+    fun isAllowedAvatar(url: String): Boolean {
+        val host = Player.hostOf(url) ?: return false
+        return host in AVATAR_HOSTS || host.endsWith(".googleusercontent.com")
     }
 
     /* The channel's uploads no longer have a URL here.
