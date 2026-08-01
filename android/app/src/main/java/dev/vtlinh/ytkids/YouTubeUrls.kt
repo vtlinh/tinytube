@@ -154,60 +154,15 @@ object YouTubeUrls {
         return if (host in AVATAR_HOSTS || host.endsWith(".googleusercontent.com")) url else null
     }
 
-    /* Every channel has a set of auto-generated playlists whose ids are the
-       channel's own with the leading UC replaced. UU is everything it has ever
-       posted; UULF is the same list with SHORTS TAKEN OUT.
+    /* The channel's uploads no longer have a URL here.
      *
-     * UULF is what this app uses, and it is the whole of how Shorts are kept
-     * off a child's screen. Nothing here classifies a video: the page reports
-     * every entry as LOCKUP_CONTENT_TYPE_VIDEO whether it is a Short or not,
-     * and duration is not the rule — YouTube sorts by aspect ratio, so a
-     * thirty-second landscape video is a video and a three-minute vertical one
-     * is a Short. Guessing from length would drop exactly the short, wide
-     * videos a children's channel posts. This asks YouTube instead.
+     * They used to: the phone fetched YouTube's UULF playlist page — two
+     * megabytes — and its Atom feed, and parsed both. The Worker does that now
+     * and the phone asks it a question instead, so the only place those URLs
+     * are built is worker.js. The UULF-not-UU rule that keeps Shorts off a
+     * child's screen moved with them, and is tested there.
      *
-     * Measured against a live channel: UU held 100 videos of which 48 appeared
-     * on the channel's Shorts tab; UULF held 100 with an intersection of zero,
-     * and the channel's own Videos tab was a strict subset of it.
-     *
-     * The naming convention is YouTube's rather than something derived, but it
-     * has held for years and it is the only way to name these playlists
-     * without an API key. */
-    fun longFormPlaylistId(channelId: String): String? {
-        if (!isValidChannelId(channelId)) return null
-        return "UULF" + channelId.substring(2)
-    }
-
-    /* The long-form uploads playlist as an Atom feed. Fifteen entries, ten
-       kilobytes, published for the purpose — and the only source here that
-       carries an upload TIME, which is what the grid sorts on.
-     *
-       So it is fetched for every channel, not merely as a fallback: the page
-       gives depth and no dates, this gives dates and no depth, and
-       Library.datePositions puts the two together. When the page yields
-       nothing this is also the whole answer, and being a UULF feed rather than
-       a channel feed means even that degraded state has no Shorts in it. */
-    fun feedUrl(channelId: String): String? {
-        val playlist = longFormPlaylistId(channelId) ?: return null
-        return "https://www.youtube.com/feeds/videos.xml?playlist_id=$playlist"
-    }
-
-    /* The same playlist's page, which lists a hundred videos in its first
-       payload where the feed lists fifteen.
-     *
-     * hl=en pins the language: the page is a rendering, and the state embedded
-     * in it is shaped by locale. It costs nothing and removes a class of "works
-     * for me" that would only ever appear on somebody else's phone.
-     *
-     * Fetched with a DESKTOP user agent, by the caller. A mobile one is
-     * redirected to m.youtube.com, whose page carries twenty videos and hides
-     * the rest behind a continuation — the exact thing this is here to avoid.
-     * (Unrelated to the player's user agent, which is deliberately left alone;
-     * see PlayerActivity.) */
-    fun uploadsUrl(channelId: String): String? {
-        val playlist = longFormPlaylistId(channelId) ?: return null
-        return "https://www.youtube.com/playlist?list=$playlist&hl=en"
-    }
+     * See Endpoints.uploads, ChannelFeeds and Uploads. */
 
     const val PARENT_START = "https://m.youtube.com/"
 }

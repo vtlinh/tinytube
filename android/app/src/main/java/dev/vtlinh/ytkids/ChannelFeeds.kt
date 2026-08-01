@@ -3,26 +3,35 @@ package dev.vtlinh.ytkids
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.File
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 /* Recent uploads from every approved channel.
 
-   Two sources, both needing no API key and no quota — which is what makes
-   channel approval workable here at all. The playlist page carries the latest
-   100 in upload order; the Atom feed carries about 15 WITH the upload times the
-   grid sorts on, and is also the whole answer when the page yields nothing.
-   Feed does the parsing and explains the trade.
+   The phone used to do this itself: fetch YouTube's uploads playlist page —
+   about two megabytes, three hundred kilobytes gzipped — per channel, per
+   refresh, and parse it here. That is now the Worker's job, and the phone asks
+   it a question instead.
 
-   Both name the channel's UULF playlist rather than its UU one — the same
-   uploads with Shorts taken out, by YouTube's own classification. That is the
-   entirety of how Shorts stay off a child's screen; see YouTubeUrls.
+   The question carries the ids it already has, so the answer carries details
+   only for what is new. A refresh that finds nothing new is about a kilobyte.
+   A fresh channel is about fifteen. See Uploads for the shape of it.
 
-   Worth being clear about what approving a channel therefore means: the grid
-   will show that channel's NEW uploads as they appear, which no adult has
-   looked at. Channel-level approval is a standing trust in the channel. */
+   And at most once a day per channel. A channel-approval app is not a news
+   feed: the cost of learning about a new upload eleven hours late is that it
+   appears tomorrow, and the cost of asking every time the app is opened is
+   somebody's data allowance. ChannelStore.uploadsFetchedAt is the clock, and a
+   newly approved channel has none, so it fetches at once.
+
+   None of it can carry a Short — the Worker asks for the channel's UULF
+   playlist, which is YouTube's own uploads list with Shorts taken out.
+
+   Curation has not moved. Which channels a child may watch is still SQLite on
+   this device and nothing the Worker says can change it; this only answers
+   what a channel the parent already approved has posted. */
 object ChannelFeeds {
 
     private val client = OkHttpClient.Builder()
@@ -30,130 +39,66 @@ object ChannelFeeds {
         .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
-    /* The playlist page is served to whoever asks, but WHAT is served depends
-       on the user agent: a mobile one is redirected to m.youtube.com, whose
-       page lists twenty videos and puts the rest behind a continuation. This
-       asks as a desktop browser so the hundred-video page comes back.
+    private val JSON = "application/json; charset=utf-8".toMediaType()
 
-       It is about two megabytes, and about three hundred kilobytes on the wire
-       once gzipped — which OkHttp asks for and unwraps by itself. That is the
-       price of the other 85 videos, per channel per refresh. */
-    private const val DESKTOP_UA =
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-            "Chrome/120.0.0.0 Safari/537.36"
+    /* Once a day. Long enough that the answer is measured in requests per
+       week rather than per screen unlock, short enough that a channel a child
+       watches every day is never more than a day behind. */
+    private const val REFRESH_INTERVAL_MILLIS = 24L * 60 * 60 * 1000
 
-    private fun cacheDir(context: Context) = File(context.filesDir, "feeds").apply { mkdirs() }
-
-    /* The parsed list, one line per video — not the bytes it was parsed from.
-       See Feed.encode. */
-    private fun cacheFile(context: Context, channelId: String) =
-        File(cacheDir(context), "$channelId.tsv")
-
-    /* What builds before this one wrote: the Atom feed's raw XML. Still read,
-       so the first launch after an update shows the grid it had rather than an
-       empty screen while the network is asked. Deleted as soon as there is a
-       .tsv to replace it. */
-    private fun legacyCacheFile(context: Context, channelId: String) =
-        File(cacheDir(context), "$channelId.xml")
-
-    /* Whatever was last fetched, with no network.
-
-       The cache is not an optimisation. A child opening the app on dropped
-       wifi should still get the channels their parent approved, rather than an
-       empty screen they have no way to interpret or fix. */
+    /* Whatever was last stored, with no network. */
     fun cached(context: Context): List<Video> = Library.flatten(cachedByChannel(context))
 
-    /* The same, but keeping which channel each video came from.
-     *
-     * A feed entry carries no channel id of its own — the id is the feed's,
-     * not the video's — so the only place that association exists is here,
-     * where the feed was fetched. The Channels tab needs it to show one
-     * channel's uploads. Ordered like ChannelStore's list, newest-approved
-     * first, which is what gives the grid its order. */
-    fun cachedByChannel(context: Context): Map<String, List<Video>> {
-        val out = LinkedHashMap<String, List<Video>>()
-        for (channel in ChannelStore.get(context).all()) {
-            readCache(context, channel.id)?.let { out[channel.id] = it }
-        }
-        return out
-    }
+    /* The same, keeping which channel each video came from — the Channels tab
+       needs it to show one channel's uploads, and the association exists only
+       here because a video does not carry its channel. Ordered like
+       ChannelStore's list, newest-approved first. */
+    fun cachedByChannel(context: Context): Map<String, List<Video>> =
+        VideoStore.byChannel(context)
 
-    private fun readCache(context: Context, channelId: String): List<Video>? {
-        val f = cacheFile(context, channelId)
-        if (f.exists()) {
-            return try { Feed.decode(f.readText()) } catch (e: Exception) { null }
-        }
-        val legacy = legacyCacheFile(context, channelId)
-        if (legacy.exists()) {
-            return try { Feed.parse(legacy.readText()) } catch (e: Exception) { null }
-        }
-        return null
-    }
-
-    private fun writeCache(context: Context, channelId: String, videos: List<Video>) {
-        try {
-            cacheFile(context, channelId).writeText(Feed.encode(videos))
-            legacyCacheFile(context, channelId).delete()
-        } catch (e: Exception) {}
-    }
-
-    /* Refresh every approved channel. Returns what we have afterwards —
-       a channel whose fetch failed contributes its cached copy, so one dead
-       feed doesn't empty the grid. */
     suspend fun refresh(context: Context): List<Video> = Library.flatten(refreshByChannel(context))
 
     suspend fun refreshByChannel(context: Context): Map<String, List<Video>> =
         withContext(Dispatchers.IO) {
-            val out = LinkedHashMap<String, List<Video>>()
-            for (channel in ChannelStore.get(context).all()) {
-                val fetched = fetchUploads(channel.id)
-                if (fetched.isNotEmpty()) {
-                    /* only overwrite the cache once something has parsed */
-                    writeCache(context, channel.id, fetched)
-                    out[channel.id] = fetched
-                } else {
-                    readCache(context, channel.id)?.let { out[channel.id] = it }
-                }
+            dropLegacyCache(context)
+            val channels = ChannelStore.get(context)
+            val now = System.currentTimeMillis()
+            for (channel in channels.all()) {
+                val last = channels.uploadsFetchedAt(channel.id)
+                if (last != null && now - last < REFRESH_INTERVAL_MILLIS) continue
+
+                val fetched = fetchUploads(context, channel.id)
+                if (fetched.isEmpty()) continue
+                VideoStore.replace(context, channel.id, fetched)
+                /* Marked only on a fetch that produced something. A failed one
+                   leaves the clock alone so the next foreground tries again,
+                   rather than buying the outage a full day. */
+                channels.markUploadsFetched(channel.id, now)
             }
-            out
+            VideoStore.byChannel(context)
         }
 
-    /* One channel's uploads, dated.
+    /* One channel's current list, as the Worker sees it.
      *
-     * BOTH sources, every time, because they know different halves. The page
-     * gives a hundred videos in upload order and no dates; the ten-kilobyte
-     * feed gives fifteen with real timestamps, which is what the grid sorts
-     * on. Library.datePositions reconciles them.
+     * The bare ids in the reply are filled in from what is already stored, so
+     * this needs both. An empty result means "learned nothing" — a Worker that
+     * is down, a body that would not parse — and the caller keeps what it had
+     * rather than emptying a grid a child is looking at.
      *
-     * And the feed is the fallback as well: when the page yields nothing it
-     * is the whole answer, at fifteen videos rather than none. That fallback
-     * turns on the page's CONTENT rather than its status, because a page that
-     * returns 200 and parses to nothing — a consent interstitial, a locale
-     * that shapes the state differently, a rename of the entry we look for —
-     * is indistinguishable from success at the HTTP layer.
-     *
-     * Neither source can carry a Short: both name the UULF playlist, which is
-     * YouTube's own uploads list with Shorts taken out. */
-    private fun fetchUploads(channelId: String): List<Video> {
-        val dated = YouTubeUrls.feedUrl(channelId)?.let { get(it, null) }
-            ?.let { Feed.parse(it) }
-            .orEmpty()
-
-        val page = YouTubeUrls.uploadsUrl(channelId)?.let { get(it, DESKTOP_UA) }
-        val ordered = page?.let { Feed.parseUploadsPage(it) }.orEmpty()
-        if (ordered.isEmpty()) return dated
-
-        return Library.datePositions(
-            ordered = ordered,
-            dated = dated.mapNotNull { v -> v.publishedAt?.let { v.id to it } }.toMap(),
-            fallback = System.currentTimeMillis() / 1000,
-        )
+     * There is no direct-to-YouTube path here any more, and that is the point
+     * of the change: the phone downloading and parsing two megabytes of
+     * someone else's web app is exactly what moved. What it costs is that a
+     * Worker outage means no NEW videos; the stored ones keep playing. */
+    private fun fetchUploads(context: Context, channelId: String): List<Video> {
+        if (!YouTubeUrls.isValidChannelId(channelId)) return emptyList()
+        val known = VideoStore.forChannel(context, channelId).associateBy { it.id }
+        val body = post(Endpoints.uploads(), Uploads.request(channelId, known.keys))
+            ?: return emptyList()
+        return Uploads.parse(body, known)
     }
 
-    private fun get(url: String, userAgent: String?): String? = try {
-        val request = Request.Builder().url(url)
-            .apply { if (userAgent != null) header("User-Agent", userAgent) }
-            .build()
+    private fun post(url: String, body: String): String? = try {
+        val request = Request.Builder().url(url).post(body.toRequestBody(JSON)).build()
         client.newCall(request).execute().use { r ->
             if (r.isSuccessful) r.body?.string() else null
         }
@@ -161,11 +106,25 @@ object ChannelFeeds {
         null
     }
 
-    /* Drop the cache for a channel that is no longer approved, so its videos
-       stop appearing immediately rather than lingering until something else
-       evicts them. */
+    /* Drop a channel that is no longer approved. */
     fun forget(context: Context, channelId: String) {
-        try { cacheFile(context, channelId).delete() } catch (e: Exception) {}
-        try { legacyCacheFile(context, channelId).delete() } catch (e: Exception) {}
+        VideoStore.forget(context, channelId)
+    }
+
+    /* The grid used to be files under filesDir/feeds — raw Atom XML, and later
+       tab-separated lines, one file per channel. It is in the database now.
+     *
+       Deleted rather than left: an app's own storage counts against the
+       device, and a directory of files nothing reads is exactly the kind of
+       thing that is still there in a year. Nothing is migrated out of it
+       first — the first refresh fills the database from the Worker, and until
+       it lands the grid is the empty one a fresh install shows. */
+    private fun dropLegacyCache(context: Context) {
+        try {
+            val dir = java.io.File(context.filesDir, "feeds")
+            if (!dir.isDirectory) return
+            dir.listFiles()?.forEach { it.delete() }
+            dir.delete()
+        } catch (e: Exception) {}
     }
 }

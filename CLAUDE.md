@@ -11,7 +11,8 @@ A child sees a grid of approved videos and can reach nothing else. See
 ## Layout
 
 ```
-worker.js / wrangler.toml        Cloudflare Worker: release assets only
+worker.js / wrangler.toml        Cloudflare Worker: release assets + /uploads
+worker.test.mjs                  its parsers, under `node --test` (CI runs it)
 .github/workflows/android.yml    build, sign, publish to the android-latest release
 .github/workflows/auto-merge.yml merge a PR once android passes
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
@@ -22,14 +23,15 @@ android/                         the app
     Player.kt       pure: page + navigation allowlist (unit-tested)
     Challenge.kt    pure: the arithmetic fallback gate (unit-tested)
     YouTubeUrls.kt  pure: channel ids, parent allowlist (unit-tested)
-    Feed.kt         pure: uploads page + Atom feed + cache (unit-tested)
+    Uploads.kt      pure: reading the Worker's reply  (unit-tested)
     Schema.kt       pure: the SQL                     (unit-tested)
     Library.kt      pure: collate + date + order the grid (unit-tested)
     Playlist.kt     pure: what plays next             (unit-tested)
     Chrome.kt       pure: find the seek bar's track     (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
     SettingsStore.kt the parent's choices; SettingsActivity edits them, behind the gate
-    ChannelFeeds.kt per-channel uploads + cache
+    ChannelFeeds.kt asks the Worker, once a day per channel
+    VideoStore.kt   the grid, in SQLite
     BlockHeightStore.kt the measured player inset, per display
     MainActivity.kt the grid + the read-only Channels tab
     BottomTabs.kt   the two-tab bottom bar, shared by the child's screens
@@ -45,6 +47,7 @@ android/                         the app
 ```bash
 gradle -p android testReleaseUnitTest   # runs in CI before anything is published
 gradle -p android assembleRelease
+node --test                             # the Worker's parsers; CI runs this too
 npx wrangler deploy --dry-run           # validates the worker bundles
 ```
 
@@ -115,40 +118,58 @@ stops, green publishes.
 ## Conventions
 
 - **The pure files must stay free of Android imports.** `VideoId`, `Player`,
-  `Challenge`, `YouTubeUrls`, `Feed`, `Schema`, `Library`, `Playlist` and
+  `Challenge`, `YouTubeUrls`, `Uploads`, `Schema`, `Library`, `Playlist` and
   `Chrome` are the app's safety boundary and they are testable precisely
   because a plain JVM can run them. Anything needing a `Context` belongs in the
   Activity or Store that calls them.
-- **Validate video ids at every hop.** `Feed` refuses malformed ids coming off
-  a channel's feed, off the uploads page, and off the on-disk cache; and
-  `Player.pageFor` refuses them again rather than trusting its caller. An id is
-  interpolated into both a URL and a JS string literal, so a partially-checked
-  one is how the wrong video gets played.
-- **The uploads page is the optional half of the grid.** 100 videos come from
+- **Validate video ids at every hop.** The Worker refuses malformed ids off the
+  page and off the feed, `Uploads.parse` refuses them again off the reply, and
+  `Player.pageFor` refuses them a third time rather than trusting its caller. An
+  id is interpolated into both a URL and a JS string literal, so a
+  partially-checked one is how the wrong video gets played.
+- **The phone does not parse YouTube any more; the Worker does.** `/uploads`
+  fetches the playlist page and the Atom feed and answers with the list. The
+  phone sends the ids it already has and gets details back only for what is
+  new, so an ordinary refresh is about a kilobyte instead of two megabytes.
+  Don't reintroduce a direct-to-YouTube uploads fetch on the device without
+  saying what it is for — the data cost is the whole reason it moved.
+- **Refresh is at most once a day per channel.** `channels.uploads_at` is the
+  clock and NULL means never, which is why a newly approved channel fetches at
+  once. Mark it only after a fetch that produced something: marking a failure
+  buys the outage a full day.
+- **The uploads page is the optional half of the answer.** 100 videos come from
   YouTube's uploads-playlist page, which is a rendering of their own web app and
   can be renamed under us; 15 come from the Atom feed, which is published for
   the purpose and is also the only source carrying an upload TIME. So
-  `parseUploadsPage` returning empty must always fall through to `Feed.parse`,
-  and it must return empty rather than throw on anything it does not recognise.
-  Fifteen videos is a thinner grid; a crash or an empty one is a broken app.
-  `FeedTest` pins the parser against three entries lifted verbatim from a live
-  page — when YouTube renames the shape, that test is what says so.
+  `parseUploadsPage` returning empty must fall through to the feed in
+  `worker.js`, and every parser there must return empty rather than throw on
+  anything it does not recognise. Fifteen videos is a thinner grid; a crash or
+  an empty one is a broken app.
 - **Shorts are excluded by naming the `UULF` playlist, and by nothing else.**
-  Every URL in `YouTubeUrls` — the page and the feed — is built from
-  `longFormPlaylistId`, which is the channel id with `UC` replaced by `UULF`:
-  YouTube's own uploads list with Shorts removed. Do not classify videos here.
-  The page reports every entry as `LOCKUP_CONTENT_TYPE_VIDEO` whether it is a
-  Short or not, and duration is not the rule — YouTube sorts by aspect ratio, so
-  filtering by length would drop exactly the short, wide videos a children's
-  channel posts while keeping three-minute vertical Shorts. A `UU` playlist id
-  anywhere in that file puts Shorts back silently; there is a test that fails
-  if one appears.
+  Both URLs in `worker.js` are built from `longFormPlaylistId`, which is the
+  channel id with `UC` replaced by `UULF`: YouTube's own uploads list with
+  Shorts removed. Do not classify videos anywhere. The page reports every entry
+  as `LOCKUP_CONTENT_TYPE_VIDEO` whether it is a Short or not, and duration is
+  not the rule — YouTube sorts by aspect ratio, so filtering by length would
+  drop exactly the short, wide videos a children's channel posts while keeping
+  three-minute vertical Shorts. A `UU` playlist id there puts Shorts back
+  silently.
 - **The grid is ordered by upload time, newest first, across all channels.**
-  The page gives order and no dates, the feed gives dates and no depth;
-  `Library.datePositions` reconciles them by keeping every date the feed knows
+  The page gives order and no dates, the feed gives dates and no depth; the
+  Worker's `datePositions` reconciles them by keeping every date the feed knows
   and placing everything below it one second apart in page order. That number
   is a SORT KEY, not a claim about when something was posted — don't display it
   as a date, and don't let anything downstream treat it as one.
+- **Re-validate everything the Worker sends.** `Uploads.parse` puts every id
+  through `VideoId.isValid` and every thumbnail URL through a host check, even
+  though the Worker checked both. An id reaches a URL and a JS string literal,
+  and a stored thumbnail URL is later fetched and drawn; "our own server said
+  so" is not a reason to skip the check that stops the wrong video playing.
+- **The Worker's reply REPLACES a channel's videos.** It is the answer to what
+  the channel has now, so a video missing from it is one that was deleted, made
+  private, or pushed past the hundred. Merging would fill the grid with tiles
+  that play nothing. A reply that parses to nothing changes nothing — a stale
+  grid beats an empty one.
 - **What plays next comes from the list the child tapped on.** `PlayerActivity`
   is handed the whole visible list and an index, so a video started from a
   channel-filtered grid cannot lead out of that channel — and there is no rule
@@ -233,8 +254,21 @@ stops, green publishes.
 - **Don't rename the Worker.** Its hostname is compiled into `Endpoints.kt`, and
   installed copies can only learn a new one via an update they'd fetch from the
   old one.
-- **The Worker serves release assets only.** It holds a GitHub token; every
-  route is fixed and takes nothing from the caller. Adding a route that does is
-  how that token becomes everyone's.
+- **Nothing on `/uploads` may reach the GitHub token.** The release routes hold
+  a credential and are fixed — none takes a URL, repo or path from the caller,
+  which is what makes them safe unauthenticated. `/uploads` is the one route
+  that does take input, and it earns that by being separated from the
+  credential: it never reads `env.GH_TOKEN`, `env` is not even passed to it,
+  the only caller input is a channel id matched against
+  `^UC[A-Za-z0-9_-]{22}$` and a bounded list of `^[A-Za-z0-9_-]{11}$` ids, and
+  every URL it fetches is BUILT from a validated id. Don't let a caller-supplied
+  URL, host or path reach `fetch()` there, and don't put the token within reach
+  of it. A third route that takes input has to make the same argument or it
+  doesn't belong.
+- **The Worker's parsing is tested by `worker.test.mjs`, run in CI.** It reads a
+  rendering of YouTube's own web app, so it breaks without anyone touching it —
+  it is pinned against three entries lifted verbatim from a live page. The
+  `node --test` step lives in `android.yml` on purpose: auto-merge waits only
+  for the `android` run, so a check anywhere else would not gate a merge.
 - Never commit API keys or tokens. The Worker's `GH_TOKEN` is a wrangler secret;
   `signing.p12` is committed on purpose and is not a secret (see README).

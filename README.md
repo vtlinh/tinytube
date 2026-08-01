@@ -17,8 +17,9 @@ the whole session stays inside it.
 ## How it fits together
 
 ```
-approved channels          YouTube per-channel
-  (SQLite, on device) ────►  Atom feeds  ────► the grid
+approved channels        Cloudflare Worker        the grid
+  (SQLite, on device) ──►  /uploads          ──►   (SQLite, on device)
+                            └─► YouTube
 
 GitHub release             Cloudflare Worker
   android-latest    ────►   (yt-kids.*.workers.dev) ────► self-update
@@ -27,19 +28,26 @@ GitHub release             Cloudflare Worker
 | Piece | What it does |
 | --- | --- |
 | `ChannelStore` | The approved-channel list, on the device. **This is the parental control.** |
-| `worker.js` | Serves the app's own release assets, publicly. Nothing else. |
+| `worker.js` | Serves the app's release assets, and answers what an approved channel has posted. |
 | `android/` | The app: a grid, a locked-down player, parent mode, a self-updater. |
 | `.github/workflows/android.yml` | Builds, signs, and publishes every push to `main`. |
 
-Curation never leaves the phone. There is no server-side list and nothing to
-deploy when you approve something — the app reads YouTube's per-channel feeds
-directly, which need no API key and no quota.
+Curation never leaves the phone. There is no server-side list of who may watch
+what and nothing to deploy when you approve something — the approved channels
+are SQLite on the device, and so is the grid built from them.
 
-The Worker exists for one reason: the repository is private, so a device with
-no credential gets a 404 from the release assets and could never find an
-update. It holds a read-only GitHub token and re-serves them. Its routes are
-public but fixed — none takes a URL, repo, or path from the caller, so the
-credential never leaves the Worker.
+The Worker does two jobs. It re-serves the app's release assets, because the
+repository is private and a device with no credential would get a 404 and could
+never find an update; that path holds a read-only GitHub token and its routes
+are fixed, so the credential cannot be pointed anywhere. And it answers
+`/uploads` — what has this channel posted — so the phone doesn't download two
+megabytes of YouTube's web app per channel and parse it.
+
+That second route is the only one that takes anything from the caller, so it is
+kept away from the credential: it never reads the token, the only input is a
+channel id and a bounded list of video ids matched against fixed patterns, and
+every URL it fetches is built from a validated id. Nothing a caller sends
+reaches `fetch()`.
 
 ## Approving a channel
 
@@ -62,16 +70,32 @@ Removing a channel drops its videos from the grid immediately.
 The grid holds each channel's **latest 100 uploads**, ordered by upload time,
 newest first, across every approved channel together.
 
-Two requests per channel make that. The **uploads playlist page** lists exactly
-a hundred videos in upload order and carries no dates; the **Atom feed** for the
-same playlist carries the newest fifteen with real timestamps, in ten kilobytes.
-Videos the feed dates keep those dates; everything below is placed one second
-apart in the page's order — a sort key that preserves what is actually known,
-not a claim about when something was posted. About 150 KB gzipped per channel
-per refresh.
+The phone doesn't fetch those from YouTube. It asks the Worker, and it sends
+along the ids it already has — so the reply carries full details only for videos
+that are new, and bare ids for everything it already knows. A refresh that finds
+nothing new is about a kilobyte. Before this the phone pulled about 300 KB
+gzipped per channel per refresh and parsed two megabytes of markup to do it.
 
-If the page comes back empty for any reason the feed is the whole answer, at
-fifteen videos. Fifteen is a thinner grid; an empty one is a broken app.
+**At most once a day per channel.** A channel-approval app is not a news feed:
+learning about an upload eleven hours late means it appears tomorrow, and asking
+on every app open costs somebody's data allowance. A newly approved channel has
+never been fetched, so it fills immediately.
+
+Videos, titles, upload times and poster URLs live in SQLite next to the approved
+channels. A reply **replaces** a channel's list rather than merging into it —
+the Worker's answer is what the channel has *now*, so a video missing from it
+was deleted, made private, or pushed past the hundred. Merging would slowly fill
+the grid with tiles that play nothing. A reply that parses to nothing changes
+nothing: a stale grid beats an empty one, which is also what a phone with no
+signal gets.
+
+On the Worker's side, two requests make that answer. The **uploads playlist
+page** lists exactly a hundred videos in upload order and carries no dates; the
+**Atom feed** for the same playlist carries the newest fifteen with real
+timestamps. Videos the feed dates keep those dates; everything below is placed
+one second apart in the page's order — a sort key that preserves what is
+actually known, not a claim about when something was posted. If the page comes
+back empty the feed is the whole answer, at fifteen videos.
 
 **No Shorts, ever.** Both requests name the channel's `UULF` playlist — its
 uploads with Shorts removed, by YouTube's own classification — rather than the
@@ -118,7 +142,7 @@ before anything is published:
 | `VideoId.kt` | which video ids are usable at all |
 | `Player.kt` | where the player's WebView may navigate |
 | `YouTubeUrls.kt` | channel ids, which playlist is fetched, where parent mode may browse |
-| `Feed.kt` | what comes out of a channel's uploads |
+| `Uploads.kt` | what the app accepts from the Worker's reply |
 | `Challenge.kt` | the arithmetic fallback gate |
 | `Schema.kt` | the SQL behind the approved list |
 | `Library.kt` | how uploads become the grid, and its order |
@@ -138,20 +162,25 @@ Two of them matter most:
   Non-`http(s)` schemes — `intent:`, `javascript:`, `file:` — have no host and
   are refused outright.
 
-`Feed.kt` parses both sources with regex on purpose. Nothing in either is
-trusted, and every id still goes through `VideoId` before it can become a tile,
-so the worst a malformed or hostile response can do is yield *fewer* videos,
-never a bad one — while a DOM parser would add an XXE surface for correctness
-that isn't needed, and a JSON parser aimed at two megabytes of someone else's
-app state would buy about as much.
+`worker.js` parses both sources with regex on purpose. Nothing in either is
+trusted, and every id goes through a pattern there and through `VideoId` again
+on the phone before it can become a tile — so the worst a malformed or hostile
+response can do is yield *fewer* videos, never a bad one. A DOM parser would add
+an XXE surface for correctness that isn't needed, and a JSON parser aimed at two
+megabytes of someone else's app state would buy about as much.
 
-The playlist page is the one place this app reads something YouTube publishes
-for its own web app rather than for consumers, so it is deliberately the
-*optional* half: the shape it looks for can be renamed without warning, and
+The phone re-checks what its own server sends, which is not paranoia about the
+server: an id ends up in a URL *and* in a JS string literal inside the player,
+and a stored thumbnail URL is later fetched and drawn. "Our own Worker said so"
+is not the same kind of assurance as a pattern match at the point of use.
+
+The playlist page is the one place anything here reads something YouTube
+publishes for its own web app rather than for consumers, so it is deliberately
+the *optional* half: the shape it looks for can be renamed without warning, and
 when it is, every channel quietly drops back to the Atom feed and 15 videos
-instead of breaking. The parser is pinned against three entries lifted verbatim
-from a live page, so a rename shows up as a failing test rather than as an empty
-grid.
+instead of breaking. `worker.test.mjs` pins the parser against three entries
+lifted verbatim from a live page and runs in CI, so a rename shows up as a
+failing check rather than as an empty grid.
 
 On top of that the player disables the long-press context menu, popups, file and
 content access, and acts the moment a video ends — loading the next one, or
@@ -281,9 +310,13 @@ otherwise is an update they can no longer find.
 ## Building locally
 
 ```bash
-gradle -p android testReleaseUnitTest   # id, player, gate, feed and schema tests
+gradle -p android testReleaseUnitTest   # id, player, gate, uploads and schema tests
 gradle -p android assembleRelease       # → android/app/build/outputs/apk/release/
+node --test                             # the Worker's parsers
+npx wrangler deploy --dry-run           # checks the Worker still bundles
 ```
+
+CI runs the first, the third and the fourth before anything is published.
 
 Local builds get `versionCode 1` and `versionName "dev"`, since both come from
 CI environment variables.

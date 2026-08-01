@@ -10,9 +10,10 @@ package dev.vtlinh.ytkids
 object Schema {
 
     const val DATABASE = "ytkids.db"
-    const val VERSION = 3
+    const val VERSION = 4
 
     const val CHANNELS = "channels"
+    const val VIDEOS = "videos"
 
     private val V1 = listOf(
         """
@@ -48,6 +49,42 @@ object Schema {
         "ALTER TABLE channels ADD COLUMN avatar_url TEXT",
     )
 
+    /* The grid itself, which used to be a file of tab-separated lines next to
+       the database and is now in it.
+     *
+       Moving it here is what lets the app tell the Worker which videos it
+       already has, which is what keeps a refresh at a kilobyte instead of two
+       megabytes. It also means one store rather than two: a channel's rows go
+       when the channel does, in the same place the approval lives.
+
+       `position` is the order the Worker sent, kept because it is upload order
+       and the sort key below is derived from it. `published_at` is what the
+       grid actually sorts on and is nullable — see Video and
+       Library.datePositions for why a video can arrive undated.
+
+       `uploads_at` on channels is the throttle: the deep fetch happens at most
+       once a day per channel, and this is what remembers when. NULL means
+       never, which is why a channel approved a moment ago fetches at once.
+       A re-approval REPLACEs the row and clears it, so re-adding a channel
+       also refetches — which is what someone re-adding one would expect. */
+    private val V4 = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS videos (
+            video_id     TEXT PRIMARY KEY NOT NULL,
+            channel_id   TEXT NOT NULL,
+            title        TEXT NOT NULL,
+            published_at INTEGER,
+            thumb_url    TEXT,
+            position     INTEGER NOT NULL
+        )
+        """.trimIndent(),
+        /* Both reads this table has: one channel's videos in order, and
+           everything in date order for the grid. */
+        "CREATE INDEX IF NOT EXISTS idx_videos_channel ON videos (channel_id, position)",
+        "CREATE INDEX IF NOT EXISTS idx_videos_published ON videos (published_at DESC)",
+        "ALTER TABLE channels ADD COLUMN uploads_at INTEGER",
+    )
+
     /* Every statement needed to move a database from `from` to `to`.
        from == 0 means a fresh install, which is just every version in order. */
     fun statementsFor(from: Int, to: Int): List<String> {
@@ -55,6 +92,7 @@ object Schema {
         if (from < 1 && to >= 1) out += V1
         if (from < 2 && to >= 2) out += V2
         if (from < 3 && to >= 3) out += V3
+        if (from < 4 && to >= 4) out += V4
         /* Later versions append their own block here. Nothing is ever edited
            in place: a device that already ran V1 will never run it again, so
            changing it only affects fresh installs and silently splits the
