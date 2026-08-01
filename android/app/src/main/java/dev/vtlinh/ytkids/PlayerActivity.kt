@@ -501,7 +501,7 @@ class PlayerActivity : AppCompatActivity() {
             PixelCopy.request(window, src, bmp, { result ->
                 val found = if (result == PixelCopy.SUCCESS) {
                     readBlockHeight(bmp, vw, stripH)
-                        .also { measureNote = if (it != null) "measured $it px" else "copied, no bar" }
+                        .also { if (it == null) measureNote = "copied, no bar" }
                 } else {
                     measureNote = "copy failed $result"
                     /* PixelCopy can refuse a window it considers protected, or
@@ -535,7 +535,7 @@ class PlayerActivity : AppCompatActivity() {
             canvas.translate(0f, -(vh - stripH).toFloat())
             w.draw(canvas)
             readBlockHeight(bmp, vw, stripH).also {
-                if (it != null) measureNote = "measured $it px (drawn)"
+                if (it != null) measureNote = "$measureNote (drawn)"
             }
         } finally {
             bmp.recycle()
@@ -551,7 +551,13 @@ class PlayerActivity : AppCompatActivity() {
     private fun readBlockHeight(bmp: Bitmap, width: Int, height: Int): Int? = try {
         val pixels = IntArray(width * height)
         bmp.getPixels(pixels, 0, width, 0, 0, width, height)
-        Chrome.blockHeightOrNull(pixels, width, height)
+        val m = Chrome.measure(pixels, width, height)
+        /* The working, not just the conclusion: a wrong number is far easier
+           to place when the thickness and the gap it came from sit next to
+           it — which is how the scrubber knob was caught being measured as
+           the bar. */
+        if (m != null) measureNote = m.toString()
+        m?.blockPx
     } catch (e: Throwable) {
         null
     }
