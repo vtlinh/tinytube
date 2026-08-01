@@ -5,14 +5,11 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
-import android.graphics.BitmapFactory
 import android.widget.Button
-import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import java.util.concurrent.ExecutorService
@@ -33,11 +30,6 @@ class AboutActivity : AppCompatActivity() {
     /* The hairline above the notification block, so it appears and disappears
        with it rather than leaving a rule under nothing. */
     private lateinit var notifDivider: View
-    private lateinit var playerMeasure: TextView
-    private lateinit var capturePreview: ImageView
-    private lateinit var captureNone: TextView
-    private lateinit var captureShare: Button
-    private lateinit var captureDelete: Button
 
     /* One at a time, so an impatient double-tap on Install queues instead of
        racing two PackageInstaller commits. */
@@ -61,28 +53,6 @@ class AboutActivity : AppCompatActivity() {
         notifStatus = findViewById(R.id.notif_status)
         notifAction = findViewById(R.id.notif_action)
         notifDivider = findViewById(R.id.notif_divider)
-        playerMeasure = findViewById(R.id.player_measure)
-        capturePreview = findViewById(R.id.capture_preview)
-        captureNone = findViewById(R.id.capture_none)
-        captureShare = findViewById(R.id.capture_share)
-        captureDelete = findViewById(R.id.capture_delete)
-        captureShare.setOnClickListener { shareCapture() }
-        captureDelete.setOnClickListener {
-            CaptureStore.clear(this)
-            renderCapture()
-            Toast.makeText(this, R.string.about_capture_deleted, Toast.LENGTH_SHORT).show()
-        }
-        findViewById<Button>(R.id.player_remeasure).setOnClickListener {
-            BlockHeightStore.clear(this)
-            renderMeasurement()
-            Toast.makeText(this, R.string.about_remeasured, Toast.LENGTH_SHORT).show()
-        }
-
-        /* Neither tab is "here", so neither is drawn as selected — both are
-           the way out. About is somewhere you arrive from the grid and leave
-           back to it. */
-        BottomTabs.bind(this, selected = -1) { BottomTabs.goToGrid(this, it) }
-
         findViewById<TextView>(R.id.version).text = getString(
             R.string.version_fmt,
             packageManager.getPackageInfo(packageName, 0).versionName,
@@ -94,86 +64,10 @@ class AboutActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        renderMeasurement()
-        renderCapture()
         refreshUpdateState()
         /* re-read on every resume: returning from the system Settings screen is
            exactly how this changes */
         renderNotifications()
-    }
-
-    /* ---- the player's measurement ---- */
-
-    /* Everything known about it, whether or not any of it looks wrong.
-     *
-     * The player blocks a strip along its bottom edge so a scrub that slides
-     * off YouTube's seek bar lands on nothing, and the height of that strip is
-     * measured off the player's own pixels rather than written down. When the
-     * measurement is wrong there is nothing on screen to say so — the strip is
-     * simply the wrong size — so this is where it can be read, and reported,
-     * without anyone having to catch it happening. */
-    private fun renderMeasurement() {
-        val raw = BlockHeightStore.rawPx(this)
-        val fallback = resources.getDimensionPixelSize(R.dimen.player_bottom_block)
-
-        /* Every player session measures for itself now, so there is no single
-           value "in force" to report — only the last one measured, which is
-           what the store holds. Until one succeeds, the fallback is what the
-           next video will start with. */
-        val inUse =
-            if (raw >= 0) getString(R.string.about_measure_measured, raw)
-            else getString(R.string.about_measure_fallback, fallback)
-        val storedText =
-            if (raw >= 0) "$raw px" else getString(R.string.about_measure_none)
-        val storedFor =
-            BlockHeightStore.storedDisplay(this) ?: getString(R.string.about_measure_none)
-
-        playerMeasure.text = getString(
-            R.string.about_measure_fmt,
-            inUse,
-            storedText,
-            BlockHeightStore.displayKey(this),
-            storedFor,
-            "${BlockHeightStore.storedVersion(this)} of ${BlockHeightStore.currentVersion()}",
-            BlockHeightStore.note(this),
-        )
-    }
-
-    /* The frame the analysis looked at, if there is one.
-     *
-     * Shown small — it is a wide strip and this is a phone — with Share for
-     * getting the real pixels off the device, since a screenshot of a preview
-     * is not what anyone needs to inspect. */
-    private fun renderCapture() {
-        val has = CaptureStore.exists(this)
-        captureNone.visibility = if (has) View.GONE else View.VISIBLE
-        capturePreview.visibility = if (has) View.VISIBLE else View.GONE
-        captureShare.isEnabled = has
-        captureDelete.isEnabled = has
-        if (!has) { capturePreview.setImageDrawable(null); return }
-        capturePreview.setImageBitmap(
-            try {
-                BitmapFactory.decodeFile(CaptureStore.file(this).absolutePath)
-            } catch (e: Throwable) {
-                null
-            },
-        )
-    }
-
-    private fun shareCapture() {
-        if (!CaptureStore.exists(this)) return
-        val uri = try {
-            FileProvider.getUriForFile(this, "$packageName.files", CaptureStore.file(this))
-        } catch (e: Throwable) {
-            return
-        }
-        val send = Intent(Intent.ACTION_SEND)
-            .setType("image/png")
-            .putExtra(Intent.EXTRA_STREAM, uri)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        try {
-            startActivity(Intent.createChooser(send, getString(R.string.about_capture_share_title)))
-        } catch (e: Throwable) {}
     }
 
     /* ---- notifications ---- */

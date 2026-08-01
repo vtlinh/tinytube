@@ -32,7 +32,6 @@ object BlockHeightStore {
     private const val KEY_PX = "block_px"
     private const val KEY_DISPLAY = "block_display"
     private const val KEY_VERSION = "block_version"
-    private const val KEY_NOTE = "block_note"
 
     /* 1 was never written — the original store had no version key, so anything
        without one came from the build that could persist a failure. */
@@ -65,37 +64,12 @@ object BlockHeightStore {
             .apply()
     }
 
-    /* What the last capture did, whatever it did.
-     *
-     * Every outcome is recorded, successes included. Recording only failures
-     * was a mistake that cost two rounds: a screen that says nothing when
-     * things work is indistinguishable from a screen that is broken, and "no
-     * message" turned out to mean "the app is certain, and wrong". */
-    fun putNote(context: Context, note: String) {
-        prefs(context).edit().putString(KEY_NOTE, note).apply()
-    }
-
-    fun note(context: Context): String = prefs(context).getString(KEY_NOTE, null) ?: "nothing yet"
-
-    /* The stored height whatever its state, for a readout rather than for use:
-       unlike get() this does not care about the version or the display, so a
-       stale entry can be seen rather than silently ignored. */
-    fun rawPx(context: Context): Int = prefs(context).getInt(KEY_PX, -1)
-
-    fun storedDisplay(context: Context): String? =
-        prefs(context).getString(KEY_DISPLAY, null)
-
-    fun storedVersion(context: Context): Int = prefs(context).getInt(KEY_VERSION, 0)
-
-    fun currentVersion(): Int = VERSION
-
     /* Throw the answer away and measure again on the next video. */
     fun clear(context: Context) {
         prefs(context).edit()
             .remove(KEY_PX)
             .remove(KEY_DISPLAY)
             .remove(KEY_VERSION)
-            .putString(KEY_NOTE, "cleared, not measured since")
             .apply()
     }
 }
