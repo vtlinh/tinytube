@@ -14,10 +14,17 @@
 # told by an update it can only fetch from the hostname it no longer has — so
 # the app that talks to this one has to be a NEW install rather than an update.
 #
-# The old Worker is deliberately left deployed. It stops receiving builds but
-# goes on answering, so a phone still carrying the old app keeps working until
-# somebody replaces it by hand. Don't delete it, and don't rename this again
-# without the same plan and the same cost.
+# And note what changing this name actually DOES, because it was not what was
+# expected. Cloudflare's git-connected build RENAMES the existing service; it
+# does not stand a second one up beside it. The moment the new name deployed,
+# yt-kids.vtlinh87.workers.dev started answering 404 — so every already
+# installed app lost its uploads feed and its update check in the same instant,
+# with no way to be told where to look. Their cached grids still play, because
+# videos come from YouTube directly, but they learn nothing new ever again.
+#
+# That is the whole reason this file said "don't". Doing it left no bridge: the
+# only recovery is installing the new app by hand on every phone. Don't rename
+# this again.
 #
 # One-time setup, from this directory:
 #   npx wrangler deploy                 # if the git-connected build isn't on

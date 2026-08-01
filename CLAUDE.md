@@ -18,8 +18,11 @@ channels. Don't do it again:
   build cannot update what is on a phone; it installs beside it with its own
   data directory, and the approved channels and watch history are gone.
 - The Worker's hostname is compiled into `Endpoints.kt`, so a renamed Worker
-  cannot tell an installed app where it went. The old `yt-kids` Worker stays
-  deployed for exactly that reason — don't delete it.
+  cannot tell an installed app where it went. Worse than expected in practice:
+  Cloudflare's git build RENAMES the service rather than adding one, so
+  `yt-kids.vtlinh87.workers.dev` went to 404 the moment the new name deployed
+  and every installed app lost its uploads and updates at once. There was no
+  bridge and no way to build one after the fact.
 
 ## Layout
 
@@ -296,9 +299,10 @@ stops, green publishes.
   identifies an install, so changing it installs a second app rather than
   updating the first. They were renamed once, together — that pairing is what
   made it survivable, because the app carrying the new hostname was a fresh
-  install rather than an update. It cost every phone its approved channels. The
-  old `yt-kids` Worker stays deployed so an un-migrated phone keeps working;
-  don't delete it, and don't do this again.
+  install rather than an update. It cost every phone its approved channels AND
+  stranded every un-migrated one: Cloudflare renames the service rather than
+  adding a second, so the old hostname 404s from the moment the new one
+  deploys. There is no bridge. Don't do this again.
 - **Nothing on `/uploads` may reach the GitHub token.** The release routes hold
   a credential and are fixed — none takes a URL, repo or path from the caller,
   which is what makes them safe unauthenticated. `/uploads` is the one route

@@ -375,9 +375,17 @@ is survivable exactly once, and only because it happened alongside the
 applicationId: the app carrying the new hostname is a fresh install, not an
 update to something that was pointed at the old one.
 
-The old `yt-kids` Worker is deliberately left deployed. It stops receiving
-builds but goes on answering, so a phone still carrying the old app keeps
-working until somebody replaces it by hand.
+The old hostname did **not** survive the rename, and this is the part that went
+differently from the plan. Cloudflare's git-connected build **renames the
+existing service** rather than standing a second one up beside it, so
+`yt-kids.vtlinh87.workers.dev` began answering 404 the moment the new name
+deployed. Every app already installed lost its uploads feed and its update check
+in the same instant, with nothing able to tell it where to look.
+
+Those apps still play what is already in their grid — videos come from YouTube
+directly — but they will never learn about a new upload or a new build again.
+Installing the new app by hand is the only recovery, which makes the migration
+below mandatory rather than tidy-up.
 
 ### Migrating a phone
 
@@ -387,10 +395,8 @@ working until somebody replaces it by hand.
    is `dev.vtlinh.ytkids` under Android's app info.
 3. Approve the channels again, in parent mode.
 
-That order keeps the grid empty for no longer than it takes to re-approve. The
-old app will offer to "update" itself to the new one — letting it is harmless,
-since what it actually does is install the new app rather than replace itself,
-but it does not save step 3 and the old app has to go either way.
+The old app cannot update itself to the new one — its update check points at a
+hostname that no longer answers — so step 1 has to be a manual download.
 
 ## Building locally
 
