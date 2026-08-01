@@ -17,8 +17,9 @@ import java.util.concurrent.TimeUnit
    it a question instead.
 
    The question carries the ids it already has, so the answer carries details
-   only for what is new. A refresh that finds nothing new is about a kilobyte.
-   A fresh channel is about fifteen. See Uploads for the shape of it.
+   only for what is new. Measured against a live channel: 1.4 KB when nothing
+   is new, 19 KB for a channel seen for the first time. See Uploads for the
+   shape of it.
 
    And at most once a day per channel. A channel-approval app is not a news
    feed: the cost of learning about a new upload eleven hours late is that it

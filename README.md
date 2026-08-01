@@ -72,9 +72,12 @@ newest first, across every approved channel together.
 
 The phone doesn't fetch those from YouTube. It asks the Worker, and it sends
 along the ids it already has — so the reply carries full details only for videos
-that are new, and bare ids for everything it already knows. A refresh that finds
-nothing new is about a kilobyte. Before this the phone pulled about 300 KB
-gzipped per channel per refresh and parsed two megabytes of markup to do it.
+that are new, and bare ids for everything it already knows.
+
+Measured against a live channel: a refresh that finds nothing new is **1.4 KB**,
+and a channel seen for the first time is **19 KB**. Before this the phone pulled
+about 300 KB gzipped per channel per refresh and parsed two megabytes of markup
+to do it.
 
 **At most once a day per channel.** A channel-approval app is not a news feed:
 learning about an upload eleven hours late means it appears tomorrow, and asking
