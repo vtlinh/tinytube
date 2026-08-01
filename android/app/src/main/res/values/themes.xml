@@ -4,7 +4,7 @@
     <!-- DayNight, with the colours resolved from values/ or values-night/. The
          app pins itself to night in App.kt; the parent is DayNight anyway so
          that unpinning it is a one-line change rather than a re-theme. -->
-    <style name="Theme.YtKids" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.TinyTube" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/accent</item>
         <item name="colorOnPrimary">@color/on_accent</item>
         <item name="colorSecondary">@color/accent</item>
@@ -24,7 +24,7 @@
     <!-- The player is black in both palettes and always was: a video should
          have nothing around it, and anything showing at the margins reads as a
          rendering glitch. It does not follow the theme. -->
-    <style name="Theme.YtKids.Player" parent="Theme.MaterialComponents.NoActionBar">
+    <style name="Theme.TinyTube.Player" parent="Theme.MaterialComponents.NoActionBar">
         <item name="android:colorBackground">@color/black</item>
         <item name="android:windowBackground">@color/black</item>
         <item name="android:statusBarColor" tools:targetApi="21">@color/black</item>
@@ -34,7 +34,7 @@
 
     <!-- The toolbar sits on @color/surface, so its title and up arrow need to
          be tinted for that rather than inheriting the window's. -->
-    <style name="ThemeOverlay.YtKids.Toolbar" parent="ThemeOverlay.MaterialComponents.Toolbar.Surface">
+    <style name="ThemeOverlay.TinyTube.Toolbar" parent="ThemeOverlay.MaterialComponents.Toolbar.Surface">
         <item name="android:textColorPrimary">@color/text</item>
         <item name="colorControlNormal">@color/text</item>
     </style>

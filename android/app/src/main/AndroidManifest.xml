@@ -12,7 +12,7 @@
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
-        android:theme="@style/Theme.YtKids"
+        android:theme="@style/Theme.TinyTube"
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -48,7 +48,7 @@
             android:exported="false"
             android:screenOrientation="sensorLandscape"
             android:supportsPictureInPicture="false"
-            android:theme="@style/Theme.YtKids.Player"
+            android:theme="@style/Theme.TinyTube.Player"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
 
         <!-- Both are parent-facing and neither is exported: nothing outside

@@ -45,6 +45,21 @@ android {
     signingConfigs {
         create("shared") {
             storeFile = file("../signing.p12")
+            /* ⚠️ "ytkids" HERE IS NOT A NAME, IT IS A PASSWORD AND AN ALIAS.
+               These are the actual credentials of the committed signing.p12,
+               set when that file was created. Renaming them to match the app
+               does not rename anything inside the keystore — it just stops the
+               build being able to open it.
+
+               And if it somehow signed with a different key, that would be far
+               worse than a build failure: Android installs an update over an
+               existing app only when the signatures match, so every phone with
+               TinyTube on it could never update again. That is the whole reason
+               this key is committed at all — see README's "About that committed
+               key".
+
+               A rename sweep across this repository has already come past here
+               once. Leave it. */
             storePassword = "ytkids"
             keyAlias = "ytkids"
             keyPassword = "ytkids"

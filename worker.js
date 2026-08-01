@@ -77,7 +77,7 @@ const MAX_HOPS = 5;
 async function releaseAsset(env, name) {
   if (!env.GH_TOKEN) return new Response("GH_TOKEN is not set\n", { status: 500 });
   const api = {
-    "User-Agent": "yt-kids-worker",
+    "User-Agent": "tinytube-worker",
     "Authorization": `Bearer ${env.GH_TOKEN}`,
     "X-GitHub-Api-Version": "2022-11-28",
   };
@@ -104,7 +104,7 @@ async function releaseAsset(env, name) {
     at = new URL(loc, at).toString();
     if (!GH_HOSTS.test(at)) return new Response("asset redirected off GitHub\n", { status: 502 });
     /* the signed URL carries its own credential and rejects ours */
-    carry = { "User-Agent": "yt-kids-worker" };
+    carry = { "User-Agent": "tinytube-worker" };
   }
   if (!r.ok) return new Response(`asset fetch failed: ${r.status}\n`, { status: 502 });
 

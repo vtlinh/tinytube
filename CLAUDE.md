@@ -489,6 +489,23 @@ stops, green publishes.
 - **`version.json` is published last, in its own upload.** It is what tells an
   app a new build exists; landing it before the APK advertises a version that
   can't be downloaded.
+- **Two more strings look like stale names and are not.** A rename sweep will
+  find both, and changing either breaks installed phones silently rather than
+  loudly, so each carries a warning in place:
+  - **`Schema.DATABASE = "ytkids.db"`** is the SQLite file on every device that
+    has run the app. Rename it and the app opens a new empty database: the
+    approved channels, the grid and the watch history are all still there and
+    simply never looked for. No crash, no error — a child sees an empty grid
+    and the parental control has reset itself. iOS's `tinytube.sqlite` differs
+    on purpose; nothing has shipped there to lose.
+  - **`storePassword` / `keyAlias` / `keyPassword = "ytkids"`** in
+    `build.gradle.kts` are the committed keystore's actual credentials, not a
+    label. Renaming them stops the build opening `signing.p12`; a build signed
+    with a different key could never update an installed app.
+
+  What IS safe to rename, and has been: the CI artifact name, the Worker's
+  outgoing `User-Agent`, the Gradle `rootProject.name`, and the `Theme.*`
+  resource names. None of those is persisted on a device or inside a file.
 - **Don't rename the Worker or the `applicationId`.** The Worker's hostname is
   compiled into `Endpoints.kt` and installed copies can only learn a new one via
   an update they'd fetch from the old one; the `applicationId` is how Android

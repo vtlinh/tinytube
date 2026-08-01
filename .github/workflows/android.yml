@@ -192,8 +192,8 @@ jobs:
           say() { echo "$*"; echo "$*" >> "$GITHUB_STEP_SUMMARY"; }
           give_up() { say "$*"; rm -rf dist; exit 0; }
 
-          if ! gh run download "$RUN_ID" --repo "$REPO" --name yt-kids-apk --dir dist; then
-            give_up "Run $RUN_ID has no yt-kids-apk artifact — building instead."
+          if ! gh run download "$RUN_ID" --repo "$REPO" --name tinytube-apk --dir dist; then
+            give_up "Run $RUN_ID has no tinytube-apk artifact — building instead."
           fi
 
           BUILT=$(cat dist/build-tree.txt 2>/dev/null || true)
@@ -305,7 +305,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: yt-kids-apk
+          name: tinytube-apk
           path: dist/
 
       # main builds publish to a fixed release so the Worker always has a stable
