@@ -47,7 +47,26 @@ Linux under `swift test`, so CI checks both.
 
 One language difference bit already and will again: **Kotlin wraps on integer
 overflow, Swift traps.** A line that produces a wrong answer on Android is a
-crash on iOS. Bound before you add, not after.
+crash on iOS. Bound before you add, not after. A second: **Swift's sort is not
+stable and Kotlin's is**, so anything that leans on tie order has to buy it
+explicitly — sort by an explicit tiebreaker rather than trusting the order in.
+
+Two answers already bought with a spike, so don't re-derive them:
+
+- **`Chrome.swift` is unused on iOS on purpose. Don't delete it as dead code.**
+  No iOS API hands the app the composited pixels of a playing video —
+  `takeSnapshot` is software-painted, `CALayer.render(in:)` can't see an
+  out-of-process layer, `drawHierarchy` returns black over video on devices
+  *while working in the simulator*, and ReplayKit is a recording API that
+  yields a picture rather than a measurement. The iOS blocker is a fixed 16pt.
+  The file stays because its Kotlin counterpart is live and the line-for-line
+  rule would otherwise have a hole in it.
+- **Google sign-in inside a webview works only by user-agent evasion**, on both
+  platforms — Android removes `; wv`, iOS adds `Version/… Safari/…`. It is
+  expected to break. `SFSafariViewController` is not the fallback: the app
+  cannot read its URL, which is what parent mode's approve button needs, and
+  its cookies don't reach `WKWebView` anyway. The real fallback is
+  signed-out browsing, which needs no code.
 
 ## Layout
 
