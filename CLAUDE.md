@@ -4,9 +4,16 @@ Guidance for Claude Code when working in this repository.
 
 ## Project
 
-`yt_kids` is an Android app for watching a parent-curated set of YouTube videos.
-A child sees a grid of approved videos and can reach nothing else. See
+**TinyTube** is an Android app for watching a parent-curated set of YouTube
+videos. A child sees a grid of approved videos and can reach nothing else. See
 `README.md` for the architecture and the approval workflow.
+
+The app's NAME is TinyTube; its addresses are not. The repository is `yt_kids`,
+the package and `applicationId` are `dev.vtlinh.ytkids`, and the Worker is
+`yt-kids`. Renaming the applicationId would install a second app beside the
+first on every phone that already has this one, and renaming the Worker would
+strand installed copies on a hostname they can only be told about by an update
+they would fetch from it. Change `app_name` and the docs; leave the rest.
 
 ## Layout
 
