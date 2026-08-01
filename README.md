@@ -120,12 +120,18 @@ player into an in-memory bitmap and finds the bar's red played portion in the
 pixels. A margin under the bar is left reachable, because the drawn line is
 under 4dp and a thumb aiming at it lands around it.
 
-How much of the bottom is a dp figure, not a fraction of the screen. YouTube's
-chrome under the bar — a gap, a row of 48dp buttons, an inset — comes to about
-80dp on any device, which is a quarter of a short landscape phone's height and a
-tenth of a tablet's. A fraction-shaped limit is therefore either too tight for
-one or useless for the other, and the tests lay the same dp geometry out at
-seven device resolutions to keep it honest.
+Nothing about that is written down in the app. The bar's own drawn thickness —
+about 3dp — is the scale, measured from the same pixels, so how much room to
+leave under it and what counts as an implausible answer are expressed as
+multiples of it. Ratios hold at any resolution, which is why no part of this
+converts dp to pixels or asks the device its density. The tests lay the same
+layout out at seven device geometries and check that doubling the resolution
+doubles the answer.
+
+The result is saved, keyed to the display it was measured on, so it survives a
+restart instead of reverting to the fallback until someone pauses a video. A
+foldable opening, a change to Android's display-size setting, or a restore onto
+a different phone all change that key, and the app measures again.
 
 That capture is a measurement, not a picture. Only that bottom strip is ever
 drawn, so the part of the screen with the video in it is never captured at all;

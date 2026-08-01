@@ -81,21 +81,22 @@ class PlayerActivity : AppCompatActivity() {
         /* Long enough after a pause for YouTube's controls to have finished
            animating in. Measuring mid-fade reads a half-opaque bar. */
         private const val MEASURE_DELAY_MILLIS = 400L
-        /* Floors under the dp figures in dimens, for a player short enough
-           that 200dp would be most of it. Whichever is larger wins, so the
-           measurement degrades to "look at a third of the screen" rather than
-           to "look at all of it" on an unusually squat display. */
-        private const val MEASURE_MAX_FRACTION = 0.30f
-        private const val MEASURE_STRIP_FRACTION = 0.35f
+        /* How much of the bottom edge is drawn. Not a statement about where
+           YouTube's chrome is — Chrome works that out from the pixels — only
+           about how much of the screen is worth looking at, and how much is
+           deliberately never captured. Two fifths is far more than any inset
+           and still leaves the picture out of it. */
+        private const val MEASURE_STRIP_FRACTION = 0.4f
 
-        /* The measured blocker height, in pixels, or 0 for "not yet".
+        /* The measured blocker height in pixels, or -1 for "not looked yet".
          *
-         * Deliberately here rather than on the instance: it is a property of
-         * this device and this build of YouTube's player, not of one video, so
-         * measuring it once is enough for every video afterwards. A process
-         * restart measures again, which is the right cadence for something
-         * that only changes when the player does. */
-        @Volatile private var measuredBlockPx: Int = 0
+         * Only a cache in front of BlockHeightStore, which is where the answer
+         * actually lives. It is a property of this device and this build of
+         * YouTube's player, not of one video, so it is measured once and then
+         * read back for every video afterwards — including after a reboot,
+         * which is the point of persisting it: otherwise every cold start put
+         * the strip back to the fallback until someone paused something. */
+        @Volatile private var measuredBlockPx: Int = -1
 
         private const val EXTRA_ID = "id"
         private const val EXTRA_TITLE = "title"
@@ -193,9 +194,11 @@ class PlayerActivity : AppCompatActivity() {
         corner = findViewById(R.id.reveal_corner)
         bottomBlocker = findViewById(R.id.bottom_blocker)
 
-        /* Already worked out earlier in this process — apply it now rather
-           than waiting for this video to be paused too. */
-        if (measuredBlockPx > 0) applyBlockHeight(measuredBlockPx)
+        /* Measured before — on an earlier video, or in an earlier run of the
+           app entirely — so apply it now rather than waiting for this video to
+           be paused too. */
+        if (measuredBlockPx < 0) measuredBlockPx = BlockHeightStore.get(this) ?: -1
+        if (measuredBlockPx >= 0) applyBlockHeight(measuredBlockPx)
 
         /* A tap anywhere shows the corner. Nothing else: the overlay has no
            controls to toggle, so this is the whole of what tapping does. */
@@ -333,7 +336,7 @@ class PlayerActivity : AppCompatActivity() {
 
         /* A pause is the one moment the controls are certainly on screen and
            certainly still, which is why the measurement waits for one. */
-        if (state == STATE_PAUSED && !showingAd && measuredBlockPx == 0) {
+        if (state == STATE_PAUSED && !showingAd && measuredBlockPx < 0) {
             reveal.removeCallbacks(measureRunnable)
             reveal.postDelayed(measureRunnable, MEASURE_DELAY_MILLIS)
         }
@@ -356,36 +359,20 @@ class PlayerActivity : AppCompatActivity() {
      * - Only the bottom fifth is drawn at all, by translating the canvas. The
      *   part of the screen with the video in it is never captured, which makes
      *   the above true by construction rather than by promise.
-     * - It happens once. measuredBlockPx is on the companion, so every later
-     *   video in this process reuses the answer.
+     * - It happens once, ever. The answer goes to BlockHeightStore, so every
+     *   later video reuses it — including after a reboot. It is measured again
+     *   only if the display's geometry changes underneath it.
      *
      * Any failure leaves the compiled-in fallback in place, which is what the
      * app used before this existed. */
     private fun measureBlockHeight() {
-        if (measuredBlockPx > 0) return
+        if (measuredBlockPx >= 0) return
         val w = web ?: return
         val vw = w.width
         val vh = w.height
         if (vw <= 0 || vh <= 0) return
 
-        /* Both bounds come from dp, floored by a fraction of the player.
-         *
-         * dp because YouTube's chrome is a fixed physical size — a bar, a row
-         * of buttons, an inset — and stays that size whatever the resolution
-         * or aspect ratio. The fractions are only there so an unusually squat
-         * player, where 200dp would be most of the screen, degrades to looking
-         * at a third of itself rather than at all of it. */
-        val maxPx = maxOf(
-            resources.getDimensionPixelSize(R.dimen.player_chrome_max),
-            (vh * MEASURE_MAX_FRACTION).toInt(),
-        )
-        val stripH = minOf(
-            vh,
-            maxOf(
-                maxPx + resources.getDimensionPixelSize(R.dimen.player_chrome_headroom),
-                (vh * MEASURE_STRIP_FRACTION).toInt(),
-            ),
-        )
+        val stripH = (vh * MEASURE_STRIP_FRACTION).toInt()
         if (stripH <= 0) return
         val fallback = resources.getDimensionPixelSize(R.dimen.player_bottom_block)
 
@@ -399,17 +386,11 @@ class PlayerActivity : AppCompatActivity() {
                 w.draw(canvas)
                 val pixels = IntArray(vw * stripH)
                 bmp.getPixels(pixels, 0, vw, 0, 0, vw, stripH)
-                Chrome.blockHeight(
-                    pixels,
-                    vw,
-                    stripH,
-                    fallbackPx = fallback,
-                    maxPx = maxPx,
-                    /* Left reachable under the bar, so a thumb aiming at a
-                       line under 4dp thick still lands on it. */
-                    touchMarginPx =
-                        resources.getDimensionPixelSize(R.dimen.player_seek_touch_margin),
-                )
+                /* No dimensions passed in but the fallback. The bar's own
+                   drawn thickness is the scale, and it comes out of these
+                   pixels — so nothing here has to know the device's density
+                   or trust a figure somebody eyeballed off a screenshot. */
+                Chrome.blockHeight(pixels, vw, stripH, fallbackPx = fallback)
             } finally {
                 bmp.recycle()
             }
@@ -421,6 +402,7 @@ class PlayerActivity : AppCompatActivity() {
         }
 
         measuredBlockPx = measured
+        BlockHeightStore.put(this, measured)
         applyBlockHeight(measured)
     }
 

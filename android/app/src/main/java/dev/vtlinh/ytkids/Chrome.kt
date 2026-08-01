@@ -7,11 +7,41 @@ package dev.vtlinh.ytkids
    therefore a constant — YouTube's mobile-embed inset, guessed once and wrong
    on any device or player version that differs. This measures it instead.
 
+   Nothing here is in dp, and nothing here knows the screen's density. An
+   earlier version did, and it was the wrong shape: the app can convert dp to
+   pixels exactly, but only by trusting a figure for YouTube's chrome that came
+   from eyeballing one screenshot whose density was itself a guess. Two guesses
+   multiplied together.
+
+   The picture already carries its own scale. The drawn bar is about 3dp thick,
+   so its thickness in pixels IS the device's dp-to-pixel ratio, measured on the
+   spot from the thing being measured. Everything below is expressed as a
+   multiple of that — ratios, which are the same number at any resolution.
+
    Pure, and no Android in it, so ChromeTest can hold it to its promises under
    a plain JVM: it takes a rectangle of ARGB pixels and returns a height. The
    Activity does the capturing, and never keeps what it captured — see
    PlayerActivity.measureBlockHeight. */
 object Chrome {
+
+    /* How much of the space under the bar stays reachable, in bar-thicknesses.
+     *
+     * On the frame this was calibrated against the bar is 9px thick, the gap
+     * to the row of chrome below is 58px — 6.4 thicknesses — and the whole
+     * inset is 217px. Five thicknesses is 45px there: comfortably inside the
+     * gap, and comfortably more than a fingertip's error against a 9px line.
+     * Because the bar and the gap are both drawn in dp, that ratio holds on
+     * every device without anyone converting anything. */
+    private const val MARGIN_IN_BARS = 5
+
+    /* A sanity limit on how far above the bottom the bar may be, again in
+       bar-thicknesses. The real figure is 24; anything past 40 is not an inset
+       and the match was something in the picture. */
+    private const val MAX_BELOW_IN_BARS = 40
+
+    /* And a limit on the bar itself: a red band a tenth of the frame tall is
+       not a 3dp line. */
+    private const val MAX_THICKNESS_FRACTION = 10
 
     /* The played portion of YouTube's progress bar, which is red and has been
        for the entire life of the product. Saturated red specifically: a
@@ -29,17 +59,13 @@ object Chrome {
         return r >= 140 && g * 2 <= r && b * 2 <= r
     }
 
-    /* The lowest row of the strip that looks like the progress bar, or null.
+    /* Does this row look like the progress bar?
 
-       Two things make a row qualify, and both are needed. It must contain a
-       run of red — a single stray red pixel is noise, and a long one is the
-       bar. And that run must START near the left edge, because the played
-       portion always does: it grows rightwards from the beginning of the bar.
-       Red in the middle of the frame is a red shirt.
-
-       Scanned from the bottom up so the FIRST match is the bar's bottom edge.
-       Below the bar is the row of chrome this is here to measure — share,
-       "More videos", the YouTube wordmark, every one of them a way out.
+       Two things are needed, and both matter. It must contain a run of red — a
+       single stray red pixel is noise, a long one is the bar. And that run
+       must START near the left edge, because the played portion always does:
+       it grows rightwards from the beginning of the bar. Red in the middle of
+       the frame is a red shirt.
 
        On the real frame the run starts 9% of the way across, because YouTube
        insets its controls past the display cutout — and a cutout is exactly
@@ -47,60 +73,79 @@ object Chrome {
        a wider one without reaching the middle of the picture, where the red
        jumper lives. Proportional rather than absolute for the same reason:
        nothing here may assume a resolution. */
-    fun seekBarBottom(pixels: IntArray, width: Int, height: Int): Int? {
-        if (width <= 0 || height <= 0 || pixels.size < width * height) return null
+    private fun rowIsBar(pixels: IntArray, width: Int, y: Int): Boolean {
         val startsWithin = maxOf(width / 6, 1)
         val minRun = maxOf(width / 200, 4)
-
-        for (y in height - 1 downTo 0) {
-            var runStart = -1
-            var run = 0
-            for (x in 0 until width) {
-                if (isProgressRed(pixels[y * width + x])) {
-                    if (run == 0) runStart = x
-                    run++
-                    if (run >= minRun && runStart <= startsWithin) return y
-                } else {
-                    run = 0
-                }
+        var runStart = -1
+        var run = 0
+        for (x in 0 until width) {
+            if (isProgressRed(pixels[y * width + x])) {
+                if (run == 0) runStart = x
+                run++
+                if (run >= minRun && runStart <= startsWithin) return true
+            } else {
+                run = 0
             }
         }
-        return null
+        return false
     }
+
+    /* The bar, as the rows it occupies.
+
+       Found by scanning up from the bottom, so the FIRST match is its bottom
+       edge — below the bar is only the row of chrome this is here to measure,
+       and above it is a whole frame of video that might be any colour at all.
+       Then up again while rows keep qualifying, which is what gives the
+       thickness everything else is scaled by. */
+    fun seekBar(pixels: IntArray, width: Int, height: Int): IntRange? {
+        if (width <= 0 || height <= 0 || pixels.size < width * height) return null
+
+        var bottom = -1
+        for (y in height - 1 downTo 0) {
+            if (rowIsBar(pixels, width, y)) { bottom = y; break }
+        }
+        if (bottom < 0) return null
+
+        var top = bottom
+        while (top > 0 && rowIsBar(pixels, width, top - 1)) top--
+
+        /* Too thick to be a 3dp line — a red band in the picture that happened
+           to reach the left edge. */
+        if (bottom - top + 1 > maxOf(height / MAX_THICKNESS_FRACTION, 1)) return null
+        return top..bottom
+    }
+
+    /* Kept for the cases that only care where it ends. */
+    fun seekBarBottom(pixels: IntArray, width: Int, height: Int): Int? =
+        seekBar(pixels, width, height)?.last
 
     /* How tall the bottom blocker should be, given a strip captured from the
        bottom of the player.
 
-       Not simply "everything under the bar". touchMarginPx of that is left
-       reachable, because the drawn bar is thin — nine pixels on the frame this
-       was measured from, under 4dp — and a thumb aiming for it lands around
-       it, not on it. Blocking flush to the line would make the one control the
+       Not simply "everything under the bar". A few bar-thicknesses of it are
+       left reachable, because the drawn bar is thin — nine pixels on the frame
+       this was calibrated against — and a thumb aiming for it lands around it,
+       not on it. Blocking flush to the line would make the one control the
        reveal exists to reach the one control nobody can hit. Everything above
        the line is already reachable, so the margin only has to cover fingers
        that land low.
 
-       maxPx is the caller's sanity limit, in the same pixels: a match further
-       up than that is something in the picture rather than the bar. It comes
-       from the caller because only the caller knows the player's full height —
-       this sees a strip of it.
+       Takes no measurements from its caller beyond the fallback. Where the bar
+       is, how thick it is, how much room to leave and what counts as an
+       implausible answer all come out of the pixels.
 
        Returns fallbackPx rather than guessing whenever the answer would be
-       untrustworthy: no bar, a bar on the last row, or a match past maxPx. The
-       fallback is the compiled-in constant the app used before this existed. */
-    fun blockHeight(
-        pixels: IntArray,
-        width: Int,
-        height: Int,
-        fallbackPx: Int,
-        maxPx: Int,
-        touchMarginPx: Int,
-    ): Int {
-        val bottom = seekBarBottom(pixels, width, height) ?: return fallbackPx
-        val below = height - 1 - bottom
-        if (below <= 0 || below > maxPx) return fallbackPx
+       untrustworthy: no bar, a bar on the last row, or a gap too large to be
+       an inset. The fallback is the compiled-in constant the app used before
+       this existed. */
+    fun blockHeight(pixels: IntArray, width: Int, height: Int, fallbackPx: Int): Int {
+        val bar = seekBar(pixels, width, height) ?: return fallbackPx
+        val thickness = bar.last - bar.first + 1
+        val below = height - 1 - bar.last
+        if (below <= 0 || below > thickness * MAX_BELOW_IN_BARS) return fallbackPx
         /* A bar close enough to the bottom that the margin swallows the lot
            means there is genuinely nothing down there to block. Zero is the
            measurement, not a failure. */
-        return (below - touchMarginPx).coerceAtLeast(0)
+        return (below - thickness * MARGIN_IN_BARS).coerceAtLeast(0)
     }
 }
