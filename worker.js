@@ -7,8 +7,16 @@
  * update — nothing on the device could recover from that, the update mechanism
  * being the thing that broke. This holds a read-only GitHub token and re-serves
  * them. Those routes are fixed: none takes a URL, a repo or a path from the
- * caller, so the credential cannot be pointed anywhere. (Android only; there is
- * no self-update on iOS.)
+ * caller, so the credential cannot be pointed anywhere.
+ *
+ * The iOS ones serve a DIFFERENT purpose from the Android ones, and it is worth
+ * not confusing them. /app/* exists because an installed app has to be able to
+ * find its own update; /ios/* exists because a private repository's release
+ * assets 404 in a browser, so without it the owner cannot hand themselves a
+ * link to the latest IPA without going hunting through Actions runs for it.
+ * Nothing on iOS self-updates and nothing reads /ios/version.json to decide
+ * anything — it is there so a person can see what the link is currently
+ * serving.
  *
  * UPLOADS. /uploads answers "what has this channel posted" so the phone does
  * not have to download two megabytes of YouTube's web app and parse it. It
@@ -60,12 +68,25 @@
  * one thing this Worker must never fail at is telling an app where its update
  * is. Name it directly. */
 const RELEASE_REPO = "vtlinh/tinytube";
-const RELEASE_TAG = "android-latest";
 
-/* path -> the asset name published by .github/workflows/android.yml */
-const RELEASE_ASSETS = {
-  "/app/version.json": "version.json",
-  "/app/app-release.apk": "app-release.apk",
+/* path -> the release it lives in and the asset name published there.
+ *
+ * TWO RELEASES, one per platform, because the two publish independently:
+ * android.yml writes android-latest and ios.yml writes ios-latest, and neither
+ * merge should disturb the other's assets.
+ *
+ * The /app/… paths are COMPILED INTO INSTALLED ANDROID APPS (see Endpoints.kt)
+ * and can never change — an app that cannot find its update is an app that can
+ * never be fixed remotely. The /ios/… paths carry no such weight: nothing on
+ * iOS self-updates, so they are read by a person with a browser and could be
+ * renamed tomorrow. They are still spelled out one path at a time here rather
+ * than assembled from anything the caller sends, which is what keeps the
+ * credential unreachable. */
+export const RELEASE_ASSETS = {
+  "/app/version.json": { tag: "android-latest", name: "version.json" },
+  "/app/app-release.apk": { tag: "android-latest", name: "app-release.apk" },
+  "/ios/TinyTube.ipa": { tag: "ios-latest", name: "TinyTube-unsigned.ipa" },
+  "/ios/version.json": { tag: "ios-latest", name: "version.json" },
 };
 
 /* GitHub hands an asset download off to a signed URL on another host; these are
@@ -74,7 +95,15 @@ const GH_HOSTS = /^https:\/\/([a-z0-9-]+\.)*(githubusercontent\.com|github\.com)
 
 const MAX_HOPS = 5;
 
-async function releaseAsset(env, name) {
+/* Decided by the asset's own extension, from the fixed table above — never from
+ * anything a caller sends. */
+export function contentType(name) {
+  if (name.endsWith(".json")) return "application/json; charset=utf-8";
+  if (name.endsWith(".ipa")) return "application/octet-stream";
+  return "application/vnd.android.package-archive";
+}
+
+async function releaseAsset(env, { tag, name }) {
   if (!env.GH_TOKEN) return new Response("GH_TOKEN is not set\n", { status: 500 });
   const api = {
     "User-Agent": "tinytube-worker",
@@ -82,7 +111,7 @@ async function releaseAsset(env, name) {
     "X-GitHub-Api-Version": "2022-11-28",
   };
   const rel = await fetch(
-    `https://api.github.com/repos/${RELEASE_REPO}/releases/tags/${RELEASE_TAG}`,
+    `https://api.github.com/repos/${RELEASE_REPO}/releases/tags/${tag}`,
     { headers: { ...api, Accept: "application/vnd.github+json" } },
   );
   if (!rel.ok) return new Response(`release lookup failed: ${rel.status}\n`, { status: 502 });
@@ -109,12 +138,14 @@ async function releaseAsset(env, name) {
   if (!r.ok) return new Response(`asset fetch failed: ${r.status}\n`, { status: 502 });
 
   const headers = new Headers();
-  headers.set(
-    "content-type",
-    name.endsWith(".json")
-      ? "application/json; charset=utf-8"
-      : "application/vnd.android.package-archive",
-  );
+  headers.set("content-type", contentType(name));
+  /* The IPA is fetched by a person in a browser rather than by an app, and
+   * without this Chrome and Edge save it under the asset's own name — which is
+   * TinyTube-unsigned.ipa, and looks enough like a mistake that somebody will
+   * wonder whether they got the right file. */
+  if (name.endsWith(".ipa")) {
+    headers.set("content-disposition", 'attachment; filename="TinyTube.ipa"');
+  }
   /* Short, because the updater's whole job is noticing a new build. The APK is
    * immutable per build but is republished under the same name, so it cannot be
    * cached for longer than the manifest that points at it. */

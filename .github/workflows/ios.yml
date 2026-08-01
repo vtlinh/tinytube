@@ -9,8 +9,10 @@ name: ios
 # in it would ship a new versionCode to every Android device for a change that
 # cannot affect them. Editing this file publishes nothing.
 #
-# The same rule applies in the other direction the moment there is an iOS
-# release pipeline: it must not fire for a change under android/.
+# That rule now runs in BOTH directions, because there is an iOS release
+# pipeline: the push trigger below is filtered to ios/**, and auto-merge
+# dispatches this workflow only for merges that touched it. A change under
+# android/ publishes no IPA.
 on:
   push:
     branches: [ "main" ]
@@ -22,9 +24,24 @@ on:
   # touching neither platform would otherwise sit unmerged forever.
   pull_request:
   workflow_dispatch:
+    inputs:
+      reuse_run_id:
+        description: >-
+          A previous ios run whose IPA to publish as-is instead of building a
+          new one. Honoured only if that run recorded building the exact ios/
+          tree this run checks out; otherwise it is ignored and the build runs
+          normally. auto-merge.yml passes the run that just passed on the PR.
+        required: false
+        default: ""
 
+# contents: write publishes the release. actions: read is what lets this run
+# download an artifact belonging to a DIFFERENT run — the reuse path below.
+# A permissions block REPLACES the defaults rather than adding to them, so every
+# scope any job here touches has to be listed; leaving one out 403s at the call
+# rather than failing loudly at the top. See the same note in android.yml.
 permissions:
-  contents: read
+  contents: write
+  actions: read
   pull-requests: read   # the `changes` job asks which files a PR touched
 
 concurrency:
@@ -104,7 +121,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
+      reuse: ${{ steps.reuse.outputs.reuse }}
+      reuse_run_id: ${{ steps.reuse.outputs.run_id }}
     steps:
+      # Needed by the reuse check below, which compares git's own hash of the
+      # ios/ subtree against the one the offered run recorded.
+      - uses: actions/checkout@v4
+
       - id: filter
         env:
           GH_TOKEN: ${{ github.token }}
@@ -140,6 +163,51 @@ jobs:
           echo "Touches the iOS app: $WANTED"
           echo "ios=$WANTED" >> "$GITHUB_OUTPUT"
 
+      # Can this publish just re-serve the IPA the pull request already built?
+      #
+      # THIS DECISION IS MADE HERE, ON UBUNTU, and that placement is the whole
+      # saving. android.yml can afford to make the same call inside its build
+      # job because that job is an ordinary runner; ios-app is macOS and bills
+      # at 10x, so starting it merely to discover there is nothing to do would
+      # cost about ten minutes of a ~200-minute monthly budget on every single
+      # iOS merge. Deciding first means an unchanged tree spends no macOS
+      # minutes at all.
+      #
+      # Same content hash as android.yml uses, pointed at the other subtree:
+      # `git rev-parse HEAD:ios` is the SHA git already stores for ios/. If it
+      # matches what the offered run wrote into build-tree.txt, that run built
+      # this exact source and its IPA is this tree's IPA. If main moved in
+      # between, they differ and the build runs — which is also precisely when
+      # it must, because no run has compiled the combined tree.
+      #
+      # So the failure mode is a needless rebuild, never a stale publish.
+      - id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ inputs.reuse_run_id }}
+        run: |
+          set -uo pipefail
+          say() { echo "$*"; echo "$*" >> "$GITHUB_STEP_SUMMARY"; }
+          no() { say "$*"; echo "reuse=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          [ -n "${RUN_ID:-}" ] || no "No run offered — building."
+
+          if ! gh run download "$RUN_ID" --repo "$REPO" --name tinytube-ipa --dir offered 2>/dev/null; then
+            no "Run $RUN_ID has no tinytube-ipa artifact — building instead."
+          fi
+
+          BUILT=$(cat offered/build-tree.txt 2>/dev/null || true)
+          HERE=$(git rev-parse HEAD:ios)
+          if [ -z "$BUILT" ] || [ "$BUILT" != "$HERE" ]; then
+            no "Run $RUN_ID built ios/ ${BUILT:-<unrecorded>}; main has $HERE — building instead."
+          fi
+          test -s offered/TinyTube-unsigned.ipa || no "Run $RUN_ID's artifact has no IPA in it — building instead."
+
+          say "Reusing run $RUN_ID's IPA: tree $HERE. No macOS runner needed."
+          echo "reuse=true" >> "$GITHUB_OUTPUT"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
   # Builds the app and produces the IPA the owner sideloads.
   #
   # The job name is the check-run name and auto-merge.yml requires this exact
@@ -154,9 +222,14 @@ jobs:
   # written up next to android.yml's deliberately unfiltered pull_request
   # trigger. Same trap, avoided a different way, because this one has to be
   # cheap as well as present.
+  #
+  # The second half of that `if` is the publish path, and it is FALSE ON EVERY
+  # PULL REQUEST — `reuse_run_id` is a dispatch input and a PR run has none. So
+  # a PR still always builds, and the gate is untouched. It can only go true on
+  # a dispatched publish whose tree was already built.
   ios-app:
     needs: changes
-    if: needs.changes.outputs.ios == 'true'
+    if: needs.changes.outputs.ios == 'true' && needs.changes.outputs.reuse != 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -225,11 +298,93 @@ jobs:
           (cd build && zip -qry TinyTube-unsigned.ipa Payload)
           echo "Built $(du -h build/TinyTube-unsigned.ipa | cut -f1) unsigned IPA"
 
+      # dist/ is what both the artifact and the release are made of, so a reused
+      # build and a fresh one are the same shape by the time anything reads them.
+      #
+      # build-tree.txt is what the reuse check compares, and version.json is
+      # written HERE, beside the IPA it describes, rather than at publish time —
+      # so a publish cannot pair one build's binary with another's manifest.
+      # Nothing on iOS reads either one at runtime; there is no self-update. It
+      # is for a person asking what the download link is currently serving.
+      - name: Collect the build outputs
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp ios/build/TinyTube-unsigned.ipa dist/
+          git rev-parse HEAD:ios > dist/build-tree.txt
+          printf '{"build": %s, "commit": "%s", "builtAt": "%s"}\n' \
+            "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/version.json
+          cat dist/version.json dist/build-tree.txt
+
       - uses: actions/upload-artifact@v4
         with:
-          name: TinyTube-unsigned-ipa
-          path: ios/build/TinyTube-unsigned.ipa
+          name: tinytube-ipa
+          path: dist/
           # A sideloaded build is only good for 7 days on the free tier, so an
           # artifact outliving that is storage spent on something nobody can
           # install any more.
           retention-days: 7
+
+  # Publishes the IPA to a fixed ios-latest release, so there is one URL that
+  # always serves the newest build.
+  #
+  # It exists because the repository is PRIVATE: its release assets 404 without
+  # a credential, and an Actions artifact needs a logged-in browser and some
+  # hunting through run pages to reach. The Worker holds a read-only token and
+  # re-serves this release at /ios/TinyTube.ipa — the same trick /app already
+  # uses for the APK, for a different reason. Android needs it so an installed
+  # app can find its update; iOS needs it so a person can find the download.
+  #
+  # Ubuntu, always. The only thing that needs a Mac is compiling, and by the
+  # time this runs that has either happened in ios-app or been skipped because
+  # an identical build already existed.
+  publish:
+    needs: [changes, ios-app]
+    # always(), or a skipped ios-app would skip this too — which is exactly the
+    # reuse case, the one where publishing matters most.
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      (needs.changes.outputs.reuse == 'true' || needs['ios-app'].result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      # From the offered run when it was reusable, from this run's own ios-app
+      # otherwise. `gh run download` reads both the same way, which is why this
+      # is one step and not two — the only difference is whose run id it names.
+      - name: Fetch the build to publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          FROM: ${{ needs.changes.outputs.reuse_run_id }}
+        run: |
+          set -euo pipefail
+          RUN="${FROM:-$GITHUB_RUN_ID}"
+          echo "Publishing the IPA built by run $RUN"
+          gh run download "$RUN" --repo "$REPO" --name tinytube-ipa --dir dist
+          test -s dist/TinyTube-unsigned.ipa
+          ls -l dist
+
+      - name: Publish to the ios-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view ios-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create ios-latest --repo "$GITHUB_REPOSITORY" \
+              --title "TinyTube for iOS (latest)" \
+              --notes "Unsigned IPA auto-built from main. Sideload it with AltStore or Sideloadly; CI cannot sign for a free Apple ID." \
+              --latest=false
+
+          # version.json last and in its own call, matching android.yml. It is
+          # not load-bearing here — nothing on iOS polls it, because nothing on
+          # iOS self-updates — but the ordering costs nothing and the habit is
+          # worth more than the exception: uploaded together, gh sends them
+          # concurrently and the manifest goes live long before the IPA does.
+          gh release upload ios-latest --repo "$GITHUB_REPOSITORY" --clobber \
+            dist/TinyTube-unsigned.ipa
+          gh release upload ios-latest --repo "$GITHUB_REPOSITORY" --clobber dist/version.json
+
+          {
+            echo "Published build $GITHUB_RUN_NUMBER to ios-latest."
+            echo ""
+            echo "Download: https://tinytube.vtlinh87.workers.dev/ios/TinyTube.ipa"
+          } >> "$GITHUB_STEP_SUMMARY"

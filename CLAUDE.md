@@ -110,7 +110,9 @@ ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
                                  Schema Chrome — the whole pure layer
   Tests/                         the Kotlin tests, ported alongside
 .github/workflows/android.yml    build, sign, publish to the android-latest release
-.github/workflows/ios.yml        ios-core on Linux; ios-app builds the IPA on macOS
+.github/workflows/ios.yml        ios-core on Linux; ios-app builds the IPA on
+                                 macOS; publish puts it on ios-latest, from
+                                 ubuntu — see the reuse note below
 .github/workflows/auto-merge.yml merge a PR once both platforms pass
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
 android/                         the app
@@ -260,12 +262,19 @@ BOTH `android` and `ios` pass and nothing else on the commit has failed. Label a
 - `android.yml`'s `pull_request` trigger is deliberately not path-filtered. A
   filtered run that doesn't match never reports at all, and auto-merge waits
   for it — a docs-only PR would never merge.
-- The publish it dispatches afterwards IS filtered, by hand, to the same paths
-  the `push` trigger uses. `workflow_dispatch` ignores path filters, so every
-  merge used to publish — a docs-only PR shipped a new `versionCode` to every
-  installed device for an update containing nothing. If the file list can't be
-  read it publishes anyway: the wrong direction to be wrong in is the one where
-  an app change silently never ships.
+- The publishes it dispatches afterwards ARE filtered, by hand, to the same
+  paths each `push` trigger uses. `workflow_dispatch` ignores path filters, so
+  every merge used to publish — a docs-only PR shipped a new `versionCode` to
+  every installed device for an update containing nothing. If the file list
+  can't be read it publishes anyway: the wrong direction to be wrong in is the
+  one where an app change silently never ships.
+- **There are two publishes now, one per platform**, and each is dispatched
+  only for a merge that touched its half. It also has to hand each one the
+  right RUN to reuse, which it looks up by workflow NAME rather than taking
+  from the event: `github.event.workflow_run.id` is whichever workflow tripped
+  auto-merge, so half the time offering it to the iOS publish would name a run
+  with no IPA in it. That is not a wrong build — the tree check refuses it —
+  but it is a full macOS build bought for nothing on every second merge.
 
 The publish `android.yml` runs after that merge reuses the pull request's own
 APK when `git rev-parse HEAD:android` — the SHA of the `android/` subtree — is
@@ -278,6 +287,25 @@ that stops emitting them silently disables the fast path. And the tests run on
 *every* build that happens, including a publish: reaching the compiler on a
 publish means the reuse was refused, which means no run has tested this tree.
 Don't "optimise" the tests back out of that path.
+
+`ios.yml` does the same thing against `git rev-parse HEAD:ios`, and the same
+three consequences hold — but it makes the decision in a DIFFERENT PLACE, and
+that difference is the point rather than an inconsistency. Android decides
+inside `build`, which is an ordinary runner it was going to start anyway. iOS
+decides in `changes`, on ubuntu, BEFORE `ios-app` is allowed to run, because
+`ios-app` is macOS: starting it merely to discover there was nothing to compile
+would spend about ten minutes of a ~200-minute monthly budget on every iOS
+merge. So the reuse path never touches a Mac at all — `publish` is an ubuntu
+job that downloads the IPA and uploads it to `ios-latest`.
+
+Two traps that placement creates, both already sprung once elsewhere in this
+file. `publish` needs `always()` in its `if`, because a skipped `ios-app` — the
+reuse case, the one where publishing matters most — would otherwise skip it
+too. And `ios-app`'s own `if` must stay false-on-pull-requests for the reuse
+half: `reuse_run_id` is a dispatch input a PR run cannot have, so PRs always
+build. If that ever stops being true, `ios-app` starts reporting `skipped` on
+pull requests, and auto-merge counts a skip as a pass — the iOS gate would
+switch itself off silently.
 
 `claude-autofix.yml` does the reverse: a red `android` run on a PR gets read,
 fixed and pushed, so the retry goes green and auto-merge takes it. It has the
@@ -520,7 +548,17 @@ stops, green publishes.
   that list rather than tuning to a screenshot.
 - **`version.json` is published last, in its own upload.** It is what tells an
   app a new build exists; landing it before the APK advertises a version that
-  can't be downloaded.
+  can't be downloaded. `ios.yml` follows the same order even though nothing on
+  iOS polls its copy — there is no self-update — because the habit is worth
+  more than the exception, and the file is read by a person asking which build
+  the download link is serving.
+- **The Worker's release routes are a fixed table of path → {tag, name}**, and
+  `/app/version.json` and `/app/app-release.apk` are compiled into installed
+  Android apps. Renaming either strands every phone: the update mechanism is
+  the thing that would be broken, so nothing on the device could recover. The
+  `/ios/…` paths carry no such weight — a browser reads them — but they are
+  still spelled out one at a time rather than assembled, because that is what
+  keeps `GH_TOKEN` unreachable from anything a caller sends.
 - **The old name is gone from this repository, and two of the places it lived
   were not text.** Both were renamed properly rather than edited, and both
   would have broken installed phones SILENTLY if they had been edited:
