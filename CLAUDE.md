@@ -28,6 +28,7 @@ android/                         the app
     Chrome.kt       pure: find the seek bar in pixels    (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
     ChannelFeeds.kt per-channel uploads + cache
+    BlockHeightStore.kt the measured player inset, per display
     MainActivity.kt the grid + the read-only Channels tab
     BottomTabs.kt   the two-tab bottom bar, shared by the child's screens
     PlayerActivity.kt the locked-down WebView
@@ -134,14 +135,17 @@ stops, green publishes.
   the method that made it, and nothing is written, passed on or sent. Don't
   widen the captured rectangle, don't keep the bitmap, and don't add a caller
   that wants the image rather than the number.
-- **The player's pixel geometry is dp, never a fraction of the screen.**
-  YouTube's chrome is a fixed physical size, so `player_chrome_max` and the
-  touch margin live in `dimens.xml` and the fractions in `PlayerActivity` are
-  only floors for an unusually squat display. A fraction-shaped limit is a
-  quarter of a landscape phone's height and a tenth of a tablet's, which is how
-  the first version worked on one device and no others. `ChromeTest` builds the
-  same layout at seven device geometries; add to that list rather than tuning
-  to a screenshot.
+- **The player's geometry is measured, never written down.** Where YouTube's
+  seek bar is, how thick it is, how much room to leave under it and what counts
+  as an implausible answer all come out of the captured pixels. `Chrome` takes
+  its scale from the bar's own drawn thickness — about 3dp — so every figure in
+  it is a RATIO, holding at any resolution without anyone converting dp to
+  pixels or knowing the density. Two earlier versions put those numbers in
+  code, first as fractions of the screen and then as dp in `dimens.xml`; both
+  were tuned to a single screenshot and both were wrong elsewhere. Don't
+  reintroduce either. `ChromeTest` builds the same layout at seven device
+  geometries and asserts doubling the resolution doubles the answer; add to
+  that list rather than tuning to a screenshot.
 - **`version.json` is published last, in its own upload.** It is what tells an
   app a new build exists; landing it before the APK advertises a version that
   can't be downloaded.
