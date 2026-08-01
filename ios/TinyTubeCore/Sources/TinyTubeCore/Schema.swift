@@ -22,15 +22,10 @@ public enum Schema {
     public static let database = "tinytube.sqlite"
     public static let version = 5
 
-    /* Schema.kt carries two more constants than this — SUFFIX and
-       CARRIED_SUFFIXES — and their absence here is deliberate rather than a
-       gap in the port.
-     *
-     * They exist for Android's one-time migration: a device that ran an earlier
-     * build holds this database under the name that build used, so
-     * ChannelStore.get moves the file before anything opens it. iOS has never
-     * shipped under any name, so there is no file to move and nothing to find.
-     * Adding the constants here would be dead weight that reads as parity. */
+    /* Android renamed its database file and carried nothing across; a device
+       updating into that build finds an empty approved list. Nothing equivalent
+       is needed here — no iOS build has ever shipped, so there is no earlier
+       file to lose. See the note on Schema.kt's DATABASE. */
 
     public static let channels = "channels"
     public static let videos = "videos"

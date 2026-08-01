@@ -493,15 +493,13 @@ stops, green publishes.
   were not text.** Both were renamed properly rather than edited, and both
   would have broken installed phones SILENTLY if they had been edited:
   - **The database filename.** `Schema.DATABASE` is the address of the SQLite
-    file on every device that has run the app. Changing the constant alone
-    makes the app open a new empty one: the approved channels, the grid and the
-    watch history all still on disk and simply never looked for — no crash, no
-    error, a child shown an empty grid and the parental control reset. So
-    `ChannelStore.get` MOVES the file before anything opens it, and it finds the
-    old one by looking rather than by naming it: the app's database directory
-    has only ever held one database, so the single `.db` that is not the current
-    name is it. Don't delete that migration — a device that skips a version and
-    updates later still needs it.
+    file on a device, so renaming it means an existing install opens a NEW,
+    empty database — the approved channels, the grid and the watch history all
+    still on disk under the old name and never looked for again. No crash, no
+    error: a parent finds an empty grid and approves their channels again.
+    That cost was accepted deliberately. A migration was written and removed on
+    request, so its absence is a decision rather than an oversight, and adding
+    one now would only help devices that have not yet run the renamed build.
   - **The keystore.** `storePassword` / `keyAlias` / `keyPassword` are
     `signing.p12`'s real credentials, not labels, so the KEYSTORE was re-keyed
     with `keytool -changealias` and `-storepasswd`. That alters the container,
