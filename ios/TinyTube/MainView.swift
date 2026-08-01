@@ -263,7 +263,7 @@ struct MainView: View {
         guard let sortWindow, ChannelSort.windowsInDays.indices.contains(sortWindow) else {
             return "Most watched — no history yet, showing A–Z"
         }
-        return "Most watched — last \(ChannelSort.windowsInDays[sortWindow]) days"
+        return "Most watched"
     }
 
     private func channelRow(_ channel: Channel) -> some View {

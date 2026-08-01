@@ -81,12 +81,14 @@
     <string name="install_retry">Install again</string>
 
     <string name="parent_sort">Change the order</string>
-    <string name="parent_sort_last_added">Last added first</string>
+    <string name="parent_sort_last_added">Recently added</string>
     <string name="parent_sort_a_z">A–Z</string>
-    <!-- Names the window that actually applied, because "most watched" over an
-         empty history quietly means A–Z and a list that looks unsorted is
-         indistinguishable from one that is broken. -->
-    <string name="parent_sort_watched_days">Most watched · last %d days</string>
+    <!-- The window that applied used to be named here ("Most watched · last 7
+         days"), which was noise on the ordinary case. What still has to be said
+         is the case below: "most watched" over an empty history quietly means
+         A–Z, and a list that looks unsorted is indistinguishable from one that
+         is broken. -->
+    <string name="parent_sort_watched_days">Most watched</string>
     <string name="parent_sort_watched_none">Most watched · nothing watched yet, so A–Z</string>
 
     <string name="settings_title">Settings</string>

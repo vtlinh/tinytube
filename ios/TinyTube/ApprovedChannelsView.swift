@@ -59,13 +59,13 @@ struct ApprovedChannelsView: View {
        from a broken sort. */
     private var header: String {
         switch mode {
-        case .lastAdded: return "Last added first"
+        case .lastAdded: return "Recently added"
         case .aToZ: return "A–Z"
         case .mostWatched:
             guard let window, ChannelSort.windowsInDays.indices.contains(window) else {
                 return "Most watched — no history yet, showing A–Z"
             }
-            return "Most watched — last \(ChannelSort.windowsInDays[window]) days"
+            return "Most watched"
         }
     }
 

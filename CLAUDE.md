@@ -385,6 +385,14 @@ stops, green publishes.
   the lock screen, where a child can reach it, so `Updater`'s content intent
   opens the grid rather than Settings — where the hold duration now lives. The
   Install action still does the useful thing in one tap.
+- **Removing a channel removes everything it put on the device**, and that is
+  one call on each platform rather than a checklist at every call site. Its
+  row, its videos, its watch history AND its cached pictures — the last of
+  which is the one that gets forgotten, because it is not in the database: the
+  database holds the URLs, and the images live in an image cache. On iOS that
+  cache is disk-backed (`AsyncImage` uses the shared `URLCache`), on Android it
+  is memory only. Read the URLs BEFORE deleting the rows; afterwards there is
+  nothing left to read and every picture stays.
 - **Watch history never leaves the device, and stays small.** It exists for one
   feature — ordering the approved list by what is actually being watched — and
   is one row per play in the same SQLite file. Nothing uploads it, the Worker is
@@ -396,8 +404,11 @@ stops, green publishes.
   window of zeroes counts as empty; otherwise one stale row pins the ladder to
   its rung forever. The final fallback is A-Z rather than last-added on purpose:
   an absent answer must not masquerade as the default one having agreed with it.
-  And the list has to SAY which rung applied, or "most watched" over an empty
-  history is indistinguishable from a broken sort.
+  The list no longer names which rung applied — "Most watched · last 7 days"
+  was noise on the ordinary case — but it MUST still say when the ladder fell
+  all the way through, because "most watched" over an empty history quietly
+  means A-Z and a list that looks unsorted is indistinguishable from a broken
+  one. That one string is the part of this rule that survives.
 - **Nothing inside parent mode needs its own gate.** `ParentActivity` is only
   reachable through a `RESULT_OK` from `ChallengeActivity`, so the approved
   list and the settings open straight from its bar. Adding a second challenge

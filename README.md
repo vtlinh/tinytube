@@ -439,6 +439,7 @@ match, so anything that can only exist on one platform belongs in it.
 | **Approving from your own subscriptions** | Yes — sign in to Google inside parent mode | **Best-effort, and expected to break** | Google blocks account sign-in from embedded webviews. Android evades the check by dropping one user-agent token; the iOS equivalent is adding two. Same workaround, same fragility, and no sanctioned replacement — see the spike below. |
 | **App lifetime before it stops launching** | Indefinite | **7 days** | Free-tier provisioning profiles expire after a week. Re-sideload to reset it. |
 | **How many can be installed** | No limit | **3 sideloaded apps** at once, across all apps | A free Apple ID limit, not something this app can spend. |
+| **Where poster frames live** | Memory only, re-fetched each launch | Memory **and disk**, in the app's Caches directory | Fell out of the platforms' defaults rather than a decision: Android's loader is a hand-written `LruCache` over an uncached HTTP client, iOS's `AsyncImage` uses the shared `URLCache`. Removing a channel clears its pictures on both. |
 
 ### The two spikes that shaped the iOS app
 
