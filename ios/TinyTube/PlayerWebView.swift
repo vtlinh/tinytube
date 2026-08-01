@@ -55,23 +55,19 @@ struct PlayerWebView: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
 
-        /* The signed-in session, so a Premium account plays without ads.
+        /* The default store, said out loud — and no longer load-bearing.
          *
-         * `.default()` is a PERSISTENT store shared by every WKWebView that
-         * asks for it, which is how the session parent mode established reaches
-         * the player. That is already what an unconfigured
-         * WKWebViewConfiguration gives you — this says it out loud because the
-         * player now DEPENDS on it. Someone setting `.nonPersistent()` here for
-         * tidiness would silently take Premium away again, and the symptom
-         * would be ads in front of a child rather than an error.
+         * This line arrived as half of signing the player in for Premium: it is
+         * the PERSISTENT store shared by every WKWebView that asks for it, so
+         * parent mode's session reaches the player through it. The other half
+         * was Player.origin on youtube.com, and that half is reverted — it
+         * stopped every video playing — so this carries no session anywhere
+         * useful now: youtube-nocookie.com is unauthenticated by design.
          *
-         * The other half is Player.origin, which is youtube.com rather than
-         * youtube-nocookie.com — the nocookie domain carries no session by
-         * design, so cookies alone would have changed nothing.
-         *
-         * This lets the player AUTHENTICATE. It does not let it NAVIGATE
-         * anywhere new: Player.isPlayerURL is unchanged and www.youtube.com was
-         * always on it. */
+         * Kept rather than removed because `.default()` is what an unconfigured
+         * WKWebViewConfiguration already uses, so this states the status quo
+         * rather than choosing anything. Don't read it as the Premium wiring
+         * still being here; see Player.origin. */
         config.websiteDataStore = .default()
 
         let controller = WKUserContentController()

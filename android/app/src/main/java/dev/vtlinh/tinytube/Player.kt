@@ -57,26 +57,34 @@ object Player {
         return host.ifEmpty { null }
     }
 
-    /* The origin the player document runs on — and the reason a YouTube
-       Premium account sees no ads here.
+    /* The origin the player document runs on.
      *
-     * It was www.youtube-nocookie.com, YouTube's privacy-enhanced embed domain,
-     * which is DELIBERATELY UNAUTHENTICATED: it carries no Google session, so
-     * the player was always signed out and always ad-supported no matter who
-     * had signed in to parent mode. Premium is a property of the signed-in
-     * account, so it could never apply.
+     * BACK ON www.youtube-nocookie.com, AND IT HAS TO STAY THERE. It was moved
+     * to www.youtube.com so that a signed-in YouTube Premium account would play
+     * without ads — the nocookie domain is deliberately unauthenticated, so the
+     * player was always signed out and always ad-supported, and same-origin
+     * with parent mode's session was the only way Premium could ever apply.
      *
-     * On youtube.com the player document is same-origin with the session parent
-     * mode established, so a Premium account plays without ads. That was asked
-     * for explicitly, and it is a trade rather than a free win — what it costs
-     * is written up in README under "Signed in, and what that costs".
+     * It was asked for explicitly, it shipped to both platforms, and it broke
+     * playback on both: every video came up "Video unavailable". The page is a
+     * SYNTHETIC DOCUMENT — loadDataWithBaseURL on Android, loadHTMLString on
+     * iOS — so claiming to be www.youtube.com means claiming an origin the
+     * document cannot actually prove it has, and YouTube's embed refuses to
+     * serve a player to it. youtube-nocookie tolerates exactly that, which is
+     * what a privacy-enhanced embed domain is FOR: being embedded by pages that
+     * are not YouTube.
      *
-     * This does NOT widen where the player may navigate: www.youtube.com was
-     * already in ALLOWED_HOSTS above, because the IFrame API script is served
-     * from it. What changed is what a navigation would SHOW — signed in rather
-     * than signed out — which is why the overlay and the allowlist matter more
-     * now, not less. */
-    const val ORIGIN = "https://www.youtube.com"
+     * So the trade was not "ads versus no ads". It was "a player that works
+     * versus a player that plays nothing", and there is only one answer to
+     * that. Don't reinstate this constant on its own — it is not a
+     * configuration choice, it is the bug. Getting Premium back needs the
+     * player to stop being a synthetic page at all: navigate the WebView
+     * straight to https://www.youtube.com/embed/<id>, which is a real
+     * first-party document with the real session, and hook the <video>
+     * element's own events instead of the IFrame API's. That is a different
+     * design, not a different string. See README's "Signed in, and what that
+     * cost". */
+    const val ORIGIN = "https://www.youtube-nocookie.com"
 
     /* The document loaded into the WebView, built around one approved id.
 

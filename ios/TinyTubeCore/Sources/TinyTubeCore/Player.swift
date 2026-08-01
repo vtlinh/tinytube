@@ -76,15 +76,20 @@ public enum Player {
         return host.isEmpty ? nil : host
     }
 
-    /* The origin the player document runs on — and the reason a YouTube
-       Premium account sees no ads here. Ported from Player.kt, where the whole
-       reasoning is written out; the short version is that
-       www.youtube-nocookie.com is deliberately unauthenticated, so the player
-       was always signed out and always ad-supported.
+    /* The origin the player document runs on.
 
-       www.youtube.com was already in `allowedHosts`, so this does not widen
-       where the player may navigate — only what a navigation would show. */
-    public static let origin = "https://www.youtube.com"
+       BACK ON www.youtube-nocookie.com, AND IT HAS TO STAY THERE. Ported from
+       Player.kt, where the whole reasoning is written out; the short version is
+       that moving it to www.youtube.com to pick up a Premium session broke
+       playback on BOTH platforms — every video came up "Video unavailable" —
+       because this page is a synthetic document (`loadHTMLString` here,
+       `loadDataWithBaseURL` on Android) claiming an origin it cannot prove, and
+       YouTube's embed refuses to serve a player to it. The nocookie domain
+       exists precisely to be embedded by pages that are not YouTube.
+
+       Don't reinstate the other value on its own: it is not a configuration
+       choice, it is the bug. */
+    public static let origin = "https://www.youtube-nocookie.com"
 
     /* The page loaded into the player's web view.
      *

@@ -320,34 +320,44 @@ constant.
 This is a lock on the front door, not a guarantee about YouTube itself. The
 videos are served by YouTube.
 
-### Signed in, and what that costs
+### Signed in — tried, and reverted
 
-The player runs on `www.youtube.com` and shares the app's cookie store, so
-**whatever account you signed in with in parent mode is the account the player
-uses** — and a YouTube Premium subscription therefore plays without ads. For a
-child that is the difference between a video and a video with an advert in
-front of it, which is why it works this way.
+The player runs on `www.youtube-nocookie.com`, YouTube's privacy-enhanced embed
+domain, which is *deliberately unauthenticated*: it carries no Google session,
+so the player is signed out and **ads play even if you have YouTube Premium**.
 
-It did not always. The player used to run on `www.youtube-nocookie.com`,
-YouTube's privacy-enhanced embed domain, which is *deliberately
-unauthenticated*: it carries no Google session at all, so the player was signed
-out and ad-supported no matter what. Premium is a property of the account, so
-nothing short of moving off that domain could have applied it.
+That was worth trying to change, and it was changed. The player moved to
+`www.youtube.com` and shared the app's cookie store, which made it same-origin
+with whatever account was signed in during parent mode — the only arrangement
+in which Premium could ever apply, since Premium is a property of the account.
 
-Two things follow, and both are the price rather than a side effect:
+**It broke playback on both platforms.** Every video came up *"Video
+unavailable"*. The reason is that the player page is a **synthetic document**:
+the app builds the HTML itself and hands it to the web view with a base URL
+(`loadDataWithBaseURL` on Android, `loadHTMLString` on iOS). Naming
+`www.youtube.com` there claims an origin the document cannot actually prove it
+has, and YouTube's embed declines to serve a player to it. The nocookie domain
+tolerates precisely that, because being embedded by pages that are not YouTube
+is what it exists for.
 
-- **YouTube sees what your child watches**, under your account, and it shapes
-  that account's recommendations. The app's own watch history is still
-  device-only and still never uploaded — but "the Worker is never told" was
-  never the same as "nobody knows", and now it is plainly not.
-- **A navigation that got past the overlay would land on a signed-in page**
-  rather than a signed-out one. Nothing about *where* the player may navigate
-  changed — `www.youtube.com` was always on its allowlist, because the IFrame
-  API is served from it — but what such a page would show is different, so the
-  overlay and the allowlist carry more weight than before.
+So this is not a knob with ads on one side and no ads on the other. One side is
+a player that plays nothing, and `Player.ORIGIN` / `Player.origin` is pinned by
+a unit test on both platforms now — there was no test before, which is how one
+constant reached a phone and stopped every video.
 
-If you would rather have the ads than the account, one constant reverses it:
-`Player.ORIGIN` back to `https://www.youtube-nocookie.com` on both platforms.
+**Premium is still reachable, but it is a different design rather than a
+different string.** The player would have to stop being a synthetic page:
+navigate the web view straight at `https://www.youtube.com/embed/<id>`, which
+is a real first-party document carrying the real session, and hook the `<video>`
+element's own events in place of the IFrame API's. That gives up the `Bridge`
+contract the shared page is built on — what plays next, ad detection, the state
+callbacks — so it is a rewrite of the player's plumbing on both platforms
+rather than an afternoon.
+
+Which leaves the honest summary of today: **what a child watches is not
+attached to your Google account**, because the player has no account, and the
+app's own watch history is device-only and never uploaded. Parent mode is the
+part that browses YouTube signed in.
 
 ## Automated, signed updates
 

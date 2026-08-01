@@ -10,6 +10,25 @@ import org.junit.Test
    and the open web. Every case here is a URL that has to be refused. */
 class PlayerTest {
 
+    /* THE PLAYER RUNS ON THE NOCOOKIE DOMAIN, and this pins it because moving
+       it cost both apps their playback.
+     *
+     * It was set to https://www.youtube.com so a signed-in Premium account
+     * would play without ads. That shipped, and every video on both platforms
+     * came up "Video unavailable": the page is a synthetic document built by
+     * loadDataWithBaseURL, so claiming youtube.com claims an origin it cannot
+     * prove, and YouTube's embed refuses to serve a player to it. The nocookie
+     * domain exists to be embedded by pages that are not YouTube, which is
+     * exactly what this is.
+     *
+     * Nothing failed when that constant changed, which is why it reached a
+     * phone. Now something does. If you are here because this test is red,
+     * read the comment on Player.ORIGIN before changing the expectation. */
+    @Test fun `the player's origin is the embeddable one`() {
+        assertEquals("https://www.youtube-nocookie.com", Player.ORIGIN)
+        assertTrue(Player.isPlayerURL(Player.ORIGIN + "/embed/aaaaaaaaaaa"))
+    }
+
     @Test fun `allows the player's own origins`() {
         val ok = listOf(
             "https://www.youtube-nocookie.com/embed/aaaaaaaaaaa",
