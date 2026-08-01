@@ -76,7 +76,10 @@ public enum Player {
         return host.isEmpty ? nil : host
     }
 
-    /* The origin the player document runs on.
+    /* The origin the WRAPPER document runs on — NOT where the player is served
+       from. The embed iframe has always been www.youtube.com: `YT.Player` only
+       points at the nocookie domain when passed `host:`, and the page below
+       never has.
 
        BACK ON www.youtube-nocookie.com, AND IT HAS TO STAY THERE. Ported from
        Player.kt, where the whole reasoning is written out; the short version is
@@ -88,7 +91,11 @@ public enum Player {
        exists precisely to be embedded by pages that are not YouTube.
 
        Don't reinstate the other value on its own: it is not a configuration
-       choice, it is the bug. */
+       choice, it is the bug — and it was never the Premium lever either, which
+       is the cookie policy on the third-party iframe rather than this string.
+       Android probes that with setAcceptThirdPartyCookies; WKWebView has no
+       equivalent, so iOS needs the wrapper served from a real origin. See
+       README. */
     public static let origin = "https://www.youtube-nocookie.com"
 
     /* The page loaded into the player's web view.

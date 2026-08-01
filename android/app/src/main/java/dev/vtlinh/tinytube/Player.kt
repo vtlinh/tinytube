@@ -57,7 +57,13 @@ object Player {
         return host.ifEmpty { null }
     }
 
-    /* The origin the player document runs on.
+    /* The origin the WRAPPER document runs on — NOT where the player is
+     * served from, which is the distinction that made a mess of this.
+     *
+     * The embed iframe has always been www.youtube.com. YT.Player only points
+     * at the nocookie domain when passed `host:`, and the page below never
+     * has. So this constant names the origin of the document that HOSTS the
+     * player, and nothing about the player itself.
      *
      * BACK ON www.youtube-nocookie.com, AND IT HAS TO STAY THERE. It was moved
      * to www.youtube.com so that a signed-in YouTube Premium account would play

@@ -320,44 +320,45 @@ constant.
 This is a lock on the front door, not a guarantee about YouTube itself. The
 videos are served by YouTube.
 
-### Signed in — tried, and reverted
+### Signed in — what actually controls it
 
-The player runs on `www.youtube-nocookie.com`, YouTube's privacy-enhanced embed
-domain, which is *deliberately unauthenticated*: it carries no Google session,
-so the player is signed out and **ads play even if you have YouTube Premium**.
+Two separate things were confused here for a while, so be precise about them:
 
-That was worth trying to change, and it was changed. The player moved to
-`www.youtube.com` and shared the app's cookie store, which made it same-origin
-with whatever account was signed in during parent mode — the only arrangement
-in which Premium could ever apply, since Premium is a property of the account.
+- **The wrapper** is the little HTML page the app builds and hands to the web
+  view. It runs on `www.youtube-nocookie.com`.
+- **The player** is a YouTube `/embed/` iframe inside that page, and it has
+  always been on `www.youtube.com`. The IFrame API only points at the nocookie
+  domain if you pass it `host:`, and neither platform ever has.
 
-**It broke playback on both platforms.** Every video came up *"Video
-unavailable"*. The reason is that the player page is a **synthetic document**:
-the app builds the HTML itself and hands it to the web view with a base URL
-(`loadDataWithBaseURL` on Android, `loadHTMLString` on iOS). Naming
-`www.youtube.com` there claims an origin the document cannot actually prove it
-has, and YouTube's embed declines to serve a player to it. The nocookie domain
-tolerates precisely that, because being embedded by pages that are not YouTube
-is what it exists for.
+So the player is **third-party** to the wrapper, and whether it carries your
+Google session — and therefore whether YouTube Premium applies — is decided by
+**cookie policy**, not by the wrapper's origin.
 
-So this is not a knob with ads on one side and no ads on the other. One side is
-a player that plays nothing, and `Player.ORIGIN` / `Player.origin` is pinned by
-a unit test on both platforms now — there was no test before, which is how one
-constant reached a phone and stopped every video.
+That was learned the hard way. The wrapper was moved to `www.youtube.com` to
+pick up the session, which **broke playback on both platforms**: every video
+came up *"Video unavailable"*, because a synthetic document cannot prove it has
+that origin and YouTube's embed declines to serve a player to one that claims
+it. That change is reverted and pinned by a unit test on both platforms.
 
-**Premium is still reachable, but it is a different design rather than a
-different string.** The player would have to stop being a synthetic page:
-navigate the web view straight at `https://www.youtube.com/embed/<id>`, which
-is a real first-party document carrying the real session, and hook the `<video>`
-element's own events in place of the IFrame API's. That gives up the `Bridge`
-contract the shared page is built on — what plays next, ad detection, the state
-callbacks — so it is a rewrite of the player's plumbing on both platforms
-rather than an afternoon.
+**Android now opts into third-party cookies for the player**, which is the
+lever that was there all along. If your account has Premium, the player should
+play without ads. It is deliberately a probe rather than a settled feature: the
+cost — third-party cookies on the child's screen — is unconditional, and if the
+benefit does not materialise the line comes back out.
 
-Which leaves the honest summary of today: **what a child watches is not
-attached to your Google account**, because the player has no account, and the
-app's own watch history is device-only and never uploaded. Parent mode is the
-part that browses YouTube signed in.
+**iOS cannot do the same thing.** WKWebView's tracking prevention blocks
+third-party cookies for a domain like `youtube.com`, and no public API turns
+that off outside an app with browser entitlements. Getting Premium there means
+giving the wrapper a real origin — serving that page from the Worker as a URL
+rather than building it in the app — or navigating straight at
+`https://www.youtube.com/embed/<id>`, which is first-party but gives up the
+error signal the player uses to skip dead videos and makes every link YouTube
+draws a top-level navigation, so the allowlist would have to match on path as
+well as host.
+
+Either way: **what a child watches is only attached to a Google account when
+the player is signed in.** The app's own watch history is device-only and never
+uploaded, under every one of these arrangements.
 
 ## Automated, signed updates
 
