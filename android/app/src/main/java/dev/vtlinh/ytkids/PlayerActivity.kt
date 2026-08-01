@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
@@ -63,6 +64,17 @@ class PlayerActivity : AppCompatActivity() {
     private var bottomBlocker: View? = null
     private val measureRunnable = Runnable { measureBlockHeight() }
     private var measureAttempts = 0
+
+    /* What the last capture did, for the reveal toast to report.
+     *
+     * Diagnostic, and deliberately so. Two different capture APIs have now
+     * failed silently on a real device, and a failed capture is
+     * indistinguishable from "this player has no seek bar" — which is how this
+     * went two rounds without anyone being able to say which step was wrong.
+     * Guessing at a third API was the wrong move. Saying what happened costs
+     * one line on a parent-only toast, and only while the measurement has not
+     * succeeded; once it has, the toast is plain again. */
+    private var measureNote: String = "not tried"
 
     companion object {
         /* YT.PlayerState */
@@ -326,7 +338,19 @@ class PlayerActivity : AppCompatActivity() {
             /* Say so. The overlay was transparent, so lifting it changes very
                little on screen — without a word it is not obvious the three
                seconds did anything. */
-            Toast.makeText(this, R.string.player_revealed, Toast.LENGTH_SHORT).show()
+            /* Plain once the measurement has landed. Until then it says what
+               happened, because an adult looking at a strip that is obviously
+               the wrong size has no other way to find out — and that is
+               exactly the position this spent two rounds in. */
+            val text =
+                if (measuredBlockPx >= 0) getString(R.string.player_revealed)
+                else getString(
+                    R.string.player_revealed_unmeasured,
+                    bottomBlocker?.height ?: 0,
+                    measureAttempts,
+                    measureNote,
+                )
+            Toast.makeText(this, text, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -447,17 +471,47 @@ class PlayerActivity : AppCompatActivity() {
 
         try {
             PixelCopy.request(window, src, bmp, { result ->
-                val found =
-                    if (result == PixelCopy.SUCCESS) readBlockHeight(bmp, vw, stripH) else null
+                val found = if (result == PixelCopy.SUCCESS) {
+                    readBlockHeight(bmp, vw, stripH)
+                        .also { measureNote = if (it != null) "ok" else "copied, no bar" }
+                } else {
+                    measureNote = "copy failed $result"
+                    /* PixelCopy can refuse a window it considers protected, or
+                       one whose surface is not ready yet. Try the older way
+                       before giving this frame up: it comes back blank on a
+                       hardware-composited player, but not every player is
+                       one, and a second chance costs a bitmap. */
+                    drawFallback(w, vw, vh, stripH)
+                }
                 bmp.recycle()
                 if (found != null) latchBlockHeight(found) else wantMeasurement(MEASURE_RETRY_MILLIS)
             }, reveal)
         } catch (e: Throwable) {
-            /* Some devices refuse a copy of a secure or not-yet-ready surface.
-               Nothing to do but try the next frame. */
+            /* Some devices refuse a copy of a secure or not-yet-ready surface
+               loudly rather than by result code. */
+            measureNote = "copy threw"
             bmp.recycle()
             wantMeasurement(MEASURE_RETRY_MILLIS)
         }
+    }
+
+    /* The pre-PixelCopy way, kept only as a second chance when a copy is
+       refused outright. On a hardware-composited player it comes back blank,
+       which is what sent this down the wrong path to begin with. */
+    private fun drawFallback(w: WebView, vw: Int, vh: Int, stripH: Int): Int? = try {
+        val bmp = Bitmap.createBitmap(vw, stripH, Bitmap.Config.ARGB_8888)
+        try {
+            val canvas = Canvas(bmp)
+            canvas.translate(0f, -(vh - stripH).toFloat())
+            w.draw(canvas)
+            readBlockHeight(bmp, vw, stripH).also {
+                if (it != null) measureNote = "ok (drawn)"
+            }
+        } finally {
+            bmp.recycle()
+        }
+    } catch (e: Throwable) {
+        null
     }
 
     /* Nothing is passed in but the pixels. The bar's own drawn thickness is

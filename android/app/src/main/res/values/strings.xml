@@ -46,6 +46,11 @@
     <string name="parent_removed">Removed “%1$s”</string>
 
     <string name="player_revealed">YouTube controls unlocked</string>
+    <!-- Shown instead while the player's bottom strip has not been measured
+         off its own pixels yet, so a parent looking at a strip that is
+         obviously the wrong size can see which step is failing rather than
+         guessing. Goes away by itself once a measurement lands. -->
+    <string name="player_revealed_unmeasured">YouTube controls unlocked\n(strip %1$d px, %2$d tries: %3$s)</string>
 
     <string name="about_title">About</string>
     <!-- The versionCode is what the updater actually compares, but it means
