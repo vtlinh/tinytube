@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Kids Videos</string>
+    <!-- The launcher label, the grid's heading, and the name on the settings
+         screen, all from here. Note what it is NOT: the applicationId stays
+         dev.vtlinh.ytkids and the Worker stays yt-kids. Android identifies an
+         installed app by its package, so changing that would land as a second
+         app beside the first rather than as an update to it, and the Worker's
+         hostname is compiled into Endpoints — an installed copy could only
+         learn a new one through an update it would have to fetch from the old
+         one. A rename is a label; those two are addresses. -->
+    <string name="app_name">TinyTube</string>
 
     <!-- Written to be read out loud by a parent, not by the child: an empty
          grid is a setup step nobody has done yet, not a fault. It names the

@@ -239,7 +239,7 @@ jobs:
         run: |
           gh release view android-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create android-latest --repo "$GITHUB_REPOSITORY" \
-              --title "Android app (latest)" --notes "APK auto-built from main." --latest=false
+              --title "TinyTube (latest)" --notes "APK auto-built from main." --latest=false
           # version.json is what tells the app a new build exists, so it must
           # land LAST and in its own call. Uploaded together, gh sends the
           # assets concurrently and the 60-byte manifest goes live long before

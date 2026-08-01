@@ -1,10 +1,14 @@
-# yt_kids
+# TinyTube
 
-An Android app for watching YouTube videos for kids.
+An Android app for watching YouTube videos for kids. The repository is still
+`yt_kids`, the package is still `dev.vtlinh.ytkids` and the Worker is still
+`yt-kids` — see **Naming** below for why those are not the same question as
+what the app is called.
 
 ## What this is
 
-A kid-friendly viewer for a **parent-curated** set of YouTube channels. Instead
+**TinyTube** is a kid-friendly viewer for a **parent-curated** set of YouTube
+channels. Instead
 of the full YouTube interface — endless recommendations, comments, search, and
 ads for everything under the sun — a child sees a grid of big poster tiles
 holding recent uploads from the channels an adult approved, and nothing else.
@@ -350,6 +354,22 @@ The Worker's name in `wrangler.toml` decides its hostname, and the app has that
 hostname compiled in (`Endpoints.kt`). Renaming it orphans every installed copy:
 they keep asking the old hostname, and the only thing that could tell them
 otherwise is an update they can no longer find.
+
+## Naming
+
+The app is **TinyTube**. Three things deliberately did not change with it:
+
+- **`applicationId` — `dev.vtlinh.ytkids`.** Android identifies an installed app
+  by its package. A new one would install *beside* the old app rather than
+  update it, and every phone already carrying this would keep the old copy,
+  still self-updating from the old release, forever.
+- **The Worker — `yt-kids.vtlinh87.workers.dev`.** Its hostname is compiled into
+  `Endpoints.kt`. An installed copy could only learn a new one through an update
+  it would have to fetch from the old one.
+- **The repository and the Kotlin package.** Neither is user-visible, and
+  renaming them is churn that would break every link into this history.
+
+A rename is a label. Those three are addresses.
 
 ## Building locally
 
