@@ -320,7 +320,7 @@ class PlayerActivity : AppCompatActivity() {
            about to touch the player, and a touch is what brings the controls
            back. Also the only moment a scrimmed pause can be measured, since
            the scrim goes with the overlay. */
-        if (value) wantMeasurement(MEASURE_RETRY_MILLIS)
+        if (value) wantMeasurement(MEASURE_RETRY_MILLIS, freshOpportunity = true)
         if (value) {
             reveal.postDelayed(idleRunnable, IDLE_MILLIS)
             /* Say so. The overlay was transparent, so lifting it changes very
@@ -340,7 +340,7 @@ class PlayerActivity : AppCompatActivity() {
             reveal.postDelayed(idleRunnable, IDLE_MILLIS)
             /* That tap went to the player and will have brought its controls
                up — the best frame we are going to get. */
-            wantMeasurement(MEASURE_DELAY_MILLIS)
+            wantMeasurement(MEASURE_DELAY_MILLIS, freshOpportunity = true)
         }
         return super.dispatchTouchEvent(event)
     }
@@ -374,8 +374,15 @@ class PlayerActivity : AppCompatActivity() {
      * eats every touch, so a child cannot pause at all, and a parent can only
      * do it after holding the corner. On most installs the measurement simply
      * never ran. */
-    private fun wantMeasurement(delayMillis: Long) {
-        if (measuredBlockPx >= 0 || measureAttempts >= MEASURE_MAX_ATTEMPTS) return
+    private fun wantMeasurement(delayMillis: Long, freshOpportunity: Boolean = false) {
+        if (measuredBlockPx >= 0) return
+        /* The cap bounds retrying within ONE opportunity, not across them.
+           Without this reset the attempts were spent during the first seconds
+           of playback — where the controls show for about three and then hide
+           — and by the time a parent lifted the overlay, which is the best
+           frame there is, the budget was gone and nothing looked again. */
+        if (freshOpportunity) measureAttempts = 0
+        if (measureAttempts >= MEASURE_MAX_ATTEMPTS) return
         reveal.removeCallbacks(measureRunnable)
         reveal.postDelayed(measureRunnable, delayMillis)
     }
@@ -417,7 +424,13 @@ class PlayerActivity : AppCompatActivity() {
         val vh = w.height
         if (vw <= 0 || vh <= 0) return
         /* Our own scrim over the frame would be all the copy could see. */
-        if (pausedScrim?.visibility == View.VISIBLE) { wantMeasurement(MEASURE_RETRY_MILLIS); return }
+        /* isShown, not visibility: the scrim is a CHILD of the overlay, so
+           while the overlay is lifted the scrim is not on screen no matter
+           what its own visibility flag says. Testing the flag refused to
+           measure in the one state that is ideal for it — paused, overlay
+           lifted, controls up and still — which is where this sat doing
+           nothing on a real phone. */
+        if (pausedScrim?.isShown == true) { wantMeasurement(MEASURE_RETRY_MILLIS); return }
 
         val stripH = (vh * MEASURE_STRIP_FRACTION).toInt()
         if (stripH <= 0) return
