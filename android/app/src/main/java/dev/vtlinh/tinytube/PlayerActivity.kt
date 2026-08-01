@@ -14,6 +14,7 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -195,6 +196,31 @@ class PlayerActivity : AppCompatActivity() {
 
         val w = findViewById<WebView>(R.id.web)
         web = w
+
+        /* The signed-in session, so a Premium account plays without ads.
+         *
+         * WebViews share one process-wide cookie store, so the session parent
+         * mode established is already here — what was missing is that the
+         * player never opted in to using it, and that its document ran on
+         * youtube-nocookie.com, which carries no session by design. Player.ORIGIN
+         * is youtube.com now; this is the other half.
+         *
+         * Third-party cookies as well as first: the player document is
+         * youtube.com and so is the iframe inside it, but the media and API
+         * traffic underneath is spread across googlevideo and ytimg, and a
+         * partitioned store is how a "signed in" embed still plays ads.
+         *
+         * This is the child's screen, so be exact about what it does and does
+         * not open. It lets the player authenticate. It does not let the player
+         * NAVIGATE anywhere new — Player.isPlayerUrl is unchanged and
+         * www.youtube.com was always on it — and every control YouTube draws is
+         * still under the overlay. What it does mean is that a navigation that
+         * did get through would now show a signed-in page rather than a signed-
+         * out one, which is the cost written up in README. */
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(w, true)
+        }
 
         w.settings.apply {
             javaScriptEnabled = true               // the IFrame API is javascript
