@@ -23,16 +23,35 @@ import Foundation
 
    Ported from Chrome.kt, constant for constant.
 
-   ⚠️ WHETHER iOS CAN FEED IT ANYTHING IS UNRESOLVED. On Android the pixels come
-   from PixelCopy, which reads the composited window INCLUDING the hardware
-   video surface — that is precisely why WebView.draw(Canvas) failed and
-   PixelCopy did not. WKWebView.takeSnapshot and CALayer.render(in:) are the
-   obvious iOS candidates and both are reported to come back blank over video,
-   for the same compositing reason. If neither works, the iOS player falls back
-   to a fixed inset and this file is unused there — which is why it is ported
-   anyway: the logic is not the risky part, and having it ready means the answer
-   to the spike is the only thing standing between here and a working blocker.
-   See README's Platform differences. */
+   ⚠️ NOTHING ON iOS CAN FEED IT. This file is UNUSED on iOS, deliberately.
+
+   On Android the pixels come from PixelCopy, which reads the composited window
+   INCLUDING the hardware video surface — precisely why WebView.draw(Canvas)
+   failed there and PixelCopy did not. iOS has no PixelCopy, and every candidate
+   fails the same way:
+
+     - WKWebView.takeSnapshot(with:) is software-painted. WebKit's own Tim
+       Horton, on the bug that added it: "a software painted snapshot, meaning
+       that 3D transforms will be flattened and ugly, and video/WebGL
+       may-or-may-not work." That is WebView.draw(Canvas) again.
+     - CALayer.render(in:) walks the layer tree this process owns. The video
+       isn't in it.
+     - UIView.drawHierarchy(in:afterScreenUpdates:) returns black over video ON
+       DEVICES, while working in the SIMULATOR. Do not "verify" this on a
+       simulator; it will agree with you and be wrong.
+     - ReplayKit does capture the composited screen, and is refused rather than
+       unavailable: it is a recording API that yields a picture, and the rule in
+       CLAUDE.md is that this capture stays a measurement.
+
+   So the iOS player uses a fixed 16pt inset — the same constant Android's
+   player_bottom_block falls back to before it has measured.
+
+   Kept, and kept tested, for two reasons: the port was already paid for, and
+   the Kotlin counterpart it mirrors is still live, so deleting it would put a
+   hole in the line-for-line rule for no gain. If iOS ever exposes composited
+   pixels, the logic is here with its tests already around it.
+
+   See README's Platform differences and the spike written up beneath it. */
 public enum Chrome {
 
     /* How much of the space under the bar stays reachable, in bar-thicknesses.

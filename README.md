@@ -1,8 +1,9 @@
 # TinyTube
 
-An Android app for watching YouTube videos for kids. The `applicationId` is
-still `dev.vtlinh.ytkids` and the Worker is still `yt-kids` — see **Naming**
-below for why those two are not the same question as what the app is called.
+An app for watching YouTube videos for kids. Android ships; iOS is being built
+alongside it, and the rule is that a feature lands on both or it is not
+finished — see **Platform differences** for the short list of things that
+genuinely cannot.
 
 ## What this is
 
@@ -25,7 +26,7 @@ approved channels        Cloudflare Worker        the grid
                             └─► YouTube
 
 GitHub release             Cloudflare Worker
-  android-latest    ────►   (yt-kids.*.workers.dev) ────► self-update
+  android-latest    ────►   (tinytube.*.workers.dev) ────► self-update
 ```
 
 | Piece | What it does |
@@ -409,10 +410,108 @@ match, so anything that can only exist on one platform belongs in it.
 
 | | Android | iOS | why |
 | --- | --- | --- | --- |
-| **Self-update** | Yes — checks the Worker, downloads, installs on a tap | **No** | iOS has no `PackageInstaller` equivalent and a sideloaded app cannot install its successor. Builds arrive via TestFlight, which expires each one 90 days after upload. |
-| **Update notification** | Yes | No | Nothing to notify about without self-update. |
+| **Self-update** | Yes — checks the Worker, downloads, installs on a tap | **No** | iOS has no `PackageInstaller` equivalent and a sideloaded app cannot install its successor. On the free Apple ID tier there is no delivery channel at all: builds are sideloaded by hand. See **Distribution** below. |
+| **Update notification** | Yes | No | Nothing to notify about without self-update, and the free tier has no push entitlement either. |
 | **Parent gate fallback** | Device lock, arithmetic if the device has none | Device lock; arithmetic present but nearly unreachable | `LocalAuthentication`'s `deviceOwnerAuthentication` falls back to the passcode by itself, so only a device with no lock at all reaches the arithmetic. |
-| **Player bottom blocker** | Measured from the player's own pixels | **Not yet decided** | Android's `PixelCopy` reads the composited window including the hardware video surface. iOS has no equivalent that is known to work over video, so this may end up a fixed inset. Unresolved — see `Chrome.kt`. |
+| **Player bottom blocker** | Measured from the player's own pixels | **Fixed inset**, the same 16pt Android falls back to | Resolved by spike, below: no iOS API returns the composited pixels of a playing video to the app that drew them. `Chrome.swift` is ported and tested but unused on iOS. |
+| **Approving from your own subscriptions** | Yes — sign in to Google inside parent mode | **Best-effort, and expected to break** | Google blocks account sign-in from embedded webviews. Android evades the check by dropping one user-agent token; the iOS equivalent is adding two. Same workaround, same fragility, and no sanctioned replacement — see the spike below. |
+| **App lifetime before it stops launching** | Indefinite | **7 days** | Free-tier provisioning profiles expire after a week. Re-sideload to reset it. |
+| **How many can be installed** | No limit | **3 sideloaded apps** at once, across all apps | A free Apple ID limit, not something this app can spend. |
+
+### The two spikes that shaped the iOS app
+
+Both were run before any app code, because either answer would have changed the
+design. Neither could be settled by writing Swift: there is no Mac in the
+development environment, and — for the first one — a simulator would have given
+the wrong answer confidently. What follows is the evidence and what it cost.
+
+#### Can the app read back the pixels of a playing video? **No.**
+
+Android's blocker is measured because `PixelCopy` reads the *composited* window,
+hardware video surface included. That is the whole reason `WebView.draw(Canvas)`
+failed there and `PixelCopy` did not: one is a software repaint, the other is
+the real screen.
+
+iOS has no `PixelCopy`. Each candidate fails for the same reason:
+
+- **`WKWebView.takeSnapshot(with:)`** is a software-painted snapshot. WebKit's
+  Tim Horton, on the bug that introduced the API: *"a software painted snapshot,
+  meaning that 3D transforms will be flattened and ugly, and video/WebGL
+  may-or-may-not work."* That is `WebView.draw(Canvas)` by another name.
+- **`CALayer.render(in:)`** walks the layer tree the app owns. The video is not
+  in it — it is composited out of process.
+- **`UIView.drawHierarchy(in:afterScreenUpdates:)`** was meant to be the one
+  that captures special layers, and it returns black where the video is. **On
+  devices only — it works in the simulator.** Anything "verified" on a simulator
+  here is verified wrong, which is the trap this spike existed to avoid.
+- **ReplayKit** genuinely captures the composited screen, and is disqualified on
+  purpose. It is a screen *recording* API: it needs consent, shows a recording
+  indicator, and hands over the picture rather than a number. The rule in
+  `CLAUDE.md` is that the capture stays a measurement and never becomes a
+  picture; ReplayKit is the picture.
+
+So `Chrome.swift` has nothing to read on iOS, and the blocker is a fixed **16pt**
+— the same constant `player_bottom_block` gives Android before it has measured,
+chosen small on purpose because a blocker that is too tall eats the seek bar it
+exists to protect.
+
+`Chrome.swift` stays, tested, unused. It cost nothing to keep and the port is
+already paid for; if a future iOS release ever exposes composited pixels, the
+logic it would need is sitting there with 95 tests around it.
+
+#### Does Google sign-in work inside `WKWebView`? **Only by lying, same as Android.**
+
+Google blocks account sign-in from embedded webviews — you get "This browser or
+app may not be secure" instead of a login form. It has been enforced against the
+OAuth endpoint since September 2021 and against ordinary account sign-in since
+July 2023.
+
+Android already lives with this. `ParentActivity` drops the `; wv` token Android
+puts in its user agent, and the comment there is honest about what that is: *"a
+workaround for a deliberate restriction, not a supported path"*.
+
+iOS needs the mirror image. `WKWebView`'s default user agent is Safari's string
+with `Version/… Safari/…` **missing**, and that absence is the tell. Adding it
+back via `applicationNameForUserAgent` is the same evasion pointed the other
+way: Android removes a token, iOS adds one.
+
+The sanctioned alternative does not fit, and it is worth writing down why so
+nobody re-proposes it:
+
+- `SFSafariViewController` and `ASWebAuthenticationSession` are what Google tells
+  you to use. Neither lets the app read the current URL — and parent mode's whole
+  interaction is *"you are looking at a channel, here is a **+** to approve it"*.
+  A browser the app cannot see the address of cannot drive that button.
+- Signing in there does not help the webview either. `SFSafariViewController`
+  shares cookies with **Safari**; `WKWebView` has its own `WKWebsiteDataStore`.
+  The session does not cross, so this cannot even be used as a one-time
+  sign-in step.
+
+So: same trick as Android, same expectation that it stops working one day.
+**When it does, signed-out browsing still works** — every channel is reachable
+and approvable without an account. What is lost is only starting from your own
+subscriptions, which is a convenience rather than the feature. That is the
+fallback, and it needs no code.
+
+## Distribution
+
+Android publishes itself. iOS cannot, and the free Apple ID tier is what the
+owner has chosen for now, so the chore is real and worth stating plainly.
+
+CI builds an **unsigned** `.ipa` and attaches it to the run. It cannot sign:
+free provisioning is interactive-Xcode-only, so there is no credential a
+workflow could hold even in principle. The owner sideloads that artifact with
+**AltStore** or **Sideloadly**, from a Windows PC or a Mac.
+
+**Weekly**, because free-tier profiles expire after seven days and the app then
+refuses to launch until it is re-signed. Three sideloaded apps is the ceiling on
+the whole device, not just this one.
+
+If that weekly chore stops being worth it, the $99/year Apple Developer Program
+changes the shape of it rather than merely easing it: CI could sign and upload
+to TestFlight, builds would arrive over the air with no computer involved at
+all, and the cycle would go from 7 days to 90. That is the upgrade path, and
+nothing in the app has to change to take it.
 
 ## Building locally
 
