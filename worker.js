@@ -114,6 +114,11 @@ async function releaseAsset(env, name) {
 export const CHANNEL_ID = /^UC[A-Za-z0-9_-]{22}$/;
 export const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 
+/* A YouTube @handle, without the @. The third and last shape of caller input
+ * this Worker accepts, and like the other two it is a FIXED PATTERN rather
+ * than anything resembling a URL — see the note above /channel. */
+export const HANDLE = /^[A-Za-z0-9._-]{3,30}$/;
+
 /* How many ids a caller may say it already has. A hundred is the whole list;
  * the slack is for a phone that kept a few extra across a channel's edits.
  * Past that the list is truncated rather than refused — the only effect of a
@@ -265,6 +270,144 @@ async function fetchText(url, headers) {
   return r.ok ? await r.text() : null;
 }
 
+/* ---- channel resolution ---- */
+
+/* Which channel a page is FOR.
+ *
+ * A /channel/UC… URL carries the id outright, but most of YouTube doesn't —
+ * it uses an @handle, and a handle cannot be turned into an id without asking
+ * YouTube. That asking used to happen ON THE PHONE, in ChannelResolver, which
+ * meant every approval downloaded a full channel page to read one string out
+ * of it. It happens here now, for the same reason the uploads parsing moved:
+ * the device gets an answer instead of a document.
+ *
+ * Every channel page carries its id in several places; these are the two that
+ * have been stable and unambiguous. The canonical link is preferred because it
+ * is a declared identity rather than an incidental mention — "channelId" also
+ * appears in a watch page's payload referring to the uploader, which is in fact
+ * what we want there too.
+ *
+ * Returns null rather than throwing on anything unrecognised, exactly like the
+ * uploads parsers: the worst a hostile or renamed page can do is yield no
+ * answer, never a wrong one. */
+export function parseChannelId(html) {
+  const canonical = html.match(
+    /<link[^>]+rel="canonical"[^>]+href="https:\/\/www\.youtube\.com\/channel\/(UC[A-Za-z0-9_-]{22})"/,
+  );
+  if (canonical && CHANNEL_ID.test(canonical[1])) return canonical[1];
+
+  const payload = html.match(/"channelId"\s*:\s*"(UC[A-Za-z0-9_-]{22})"/);
+  if (payload && CHANNEL_ID.test(payload[1])) return payload[1];
+
+  return null;
+}
+
+/* A human name, so the approved list reads as names rather than 24-character
+ * ids. Only ever cosmetic — nothing depends on it — so any failure falls back
+ * to the id rather than blocking an approval. */
+export function parseChannelTitle(html) {
+  const og = html.match(/<meta[^>]+property="og:title"[^>]+content="([^"]{1,120})"/);
+  if (og) {
+    const t = og[1].trim();
+    if (t) return t;
+  }
+  const title = html.match(/<title>([^<]{1,120})<\/title>/);
+  if (title) {
+    /* the page title is "Name - YouTube" */
+    const t = title[1].replace(/ - YouTube$/, "").trim();
+    if (t) return t;
+  }
+  return null;
+}
+
+/* Hosts YouTube serves channel avatars from. Checked before the URL is ever
+ * handed back, because the phone stores whatever it is given and later fetches
+ * and draws it: an og:image tag is page-controlled, and "some URL a page told
+ * us about" is not something to put in a child's device database.
+ *
+ * The phone checks this again on arrival. Same reasoning as video ids — "our
+ * own server said so" is not the same assurance as a check at the point of
+ * use. */
+const AVATAR_HOSTS = new Set(["yt3.ggpht.com", "yt3.googleusercontent.com"]);
+
+export function parseChannelAvatar(html) {
+  const m = html.match(/<meta[^>]+property="og:image"[^>]+content="([^"]{1,500})"/);
+  if (!m) return null;
+  let host;
+  try {
+    host = new URL(m[1]).hostname.toLowerCase();
+  } catch (e) {
+    return null;
+  }
+  if (AVATAR_HOSTS.has(host) || host.endsWith(".googleusercontent.com")) return m[1];
+  return null;
+}
+
+/* What channel is the parent looking at?
+ *
+ * ⚠️ THIS IS THE THIRD ROUTE THAT TAKES CALLER INPUT, AND IT HAS TO MAKE THE
+ * SAME ARGUMENT THE OTHER TWO DO. It does not read env.GH_TOKEN, `env` is not
+ * even passed to it, and — the part that matters most — IT DOES NOT TAKE A URL.
+ *
+ * The obvious design would be "send me the page you're on and I'll read it",
+ * and that would put a caller-supplied string into fetch(), which is exactly
+ * what the release routes are careful never to do. So the caller sends a
+ * HANDLE, a VIDEO ID, or a CHANNEL ID — each matched against a fixed pattern —
+ * and every URL fetched here is BUILT from the validated value. A caller cannot
+ * name a host, a path or a scheme.
+ *
+ * A channel id needs no lookup to be usable, but is still fetched so the name
+ * and avatar come back with it; if that fetch fails the id alone is a perfectly
+ * good answer, so it is returned anyway. */
+async function channel(request) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (e) {
+    return json({ error: "bad json" }, 400);
+  }
+
+  const handle = typeof body?.handle === "string" ? body.handle : "";
+  const id = typeof body?.channel === "string" ? body.channel : "";
+
+  /* Two shapes, and deliberately not a third. A watch page's uploader could be
+   * resolved the same way, and the earlier on-device version did exactly that —
+   * but nothing asks for it: YouTubeUrls.isChannelPage is false for a watch
+   * page on purpose, so the approve button never lights up there, and an input
+   * shape nothing uses is surface this route has to justify for nothing. */
+  let target;
+  if (CHANNEL_ID.test(id)) {
+    target = `https://www.youtube.com/channel/${id}`;
+  } else if (HANDLE.test(handle)) {
+    target = `https://www.youtube.com/@${handle}`;
+  } else {
+    return json({ error: "bad channel or handle" }, 400);
+  }
+
+  const html = await fetchText(target, {
+    /* Desktop on purpose: the mobile pages carry the canonical link less
+     * reliably, and this is the one thing being read. */
+    "User-Agent": DESKTOP_UA,
+    "Accept-Language": "en-US,en;q=0.9",
+  });
+
+  if (!html) {
+    /* The fetch failed. If the id was in the request all along we can still
+     * answer with it — just without a name. */
+    if (CHANNEL_ID.test(id)) return json({ id, title: null, avatarUrl: null });
+    return json({ error: "could not resolve" }, 502);
+  }
+
+  const resolved = parseChannelId(html) || (CHANNEL_ID.test(id) ? id : null);
+  if (!resolved) return json({ error: "no channel here" }, 404);
+
+  return json({
+    id: resolved,
+    title: parseChannelTitle(html),
+    avatarUrl: parseChannelAvatar(html),
+  });
+}
+
 async function uploads(request) {
   let body;
   try {
@@ -346,6 +489,14 @@ export default {
     if (url.pathname === "/uploads") {
       if (request.method !== "POST") return json({ error: "use POST" }, 405);
       return uploads(request);
+    }
+
+    /* Same terms as /uploads: POST, and `env` is deliberately not passed on, so
+       nothing here can reach the GitHub credential. The input is a handle, a
+       video id or a channel id — never a URL. See the note above channel(). */
+    if (url.pathname === "/channel") {
+      if (request.method !== "POST") return json({ error: "use POST" }, 405);
+      return channel(request);
     }
 
     return new Response("not found\n", { status: 404 });

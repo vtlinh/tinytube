@@ -76,7 +76,8 @@ Two answers already bought with a spike, so don't re-derive them:
 ## Layout
 
 ```
-worker.js / wrangler.toml        Cloudflare Worker: release assets + /uploads
+worker.js / wrangler.toml        Cloudflare Worker: release assets, /uploads
+                                 and /channel — ALL the YouTube parsing
 worker.test.mjs                  its parsers, under `node --test` (CI runs it)
 ios/project.yml                  the Xcode project, as a readable file; the
                                  .xcodeproj is GENERATED, never committed
@@ -88,6 +89,7 @@ ios/TinyTube/                    the app target
   SettingsStore.swift   the parent's choices, in UserDefaults
   Endpoints.swift       the Worker's hostname — don't change it
   ChannelFeeds.swift    asks the Worker, once a day per channel
+  ChannelResolver.swift which channel a page is for; asks the Worker
   MainView.swift        the grid + the read-only Channels tab
   PlayerView.swift      overlay, reveal corner, blocker, what plays next
   PlayerWebView.swift   the locked-down WKWebView + the Bridge shim
@@ -306,6 +308,15 @@ stops, green publishes.
   new, so an ordinary refresh is about a kilobyte instead of two megabytes.
   Don't reintroduce a direct-to-YouTube uploads fetch on the device without
   saying what it is for — the data cost is the whole reason it moved.
+
+  **`/channel` is the same trade, made later.** Working out which channel a
+  page is for used to happen on the device: `ChannelResolver` downloaded a full
+  desktop channel page to read one 24-character string out of it, every time a
+  parent approved anything. `parseChannelId`, `parseChannelTitle` and
+  `parseChannelAvatar` live in `worker.js` now, with the tests that came with
+  them, and the phone sends a handle or a channel id and gets an answer. Same
+  rule follows: no direct-to-YouTube page fetch on the device without saying
+  what it is for.
 - **Refresh is at most once a day per channel.** `channels.uploads_at` is the
   clock and NULL means never, which is why a newly approved channel fetches at
   once. Mark it only after a fetch that produced something: marking a failure
@@ -473,17 +484,24 @@ stops, green publishes.
   stranded every un-migrated one: Cloudflare renames the service rather than
   adding a second, so the old hostname 404s from the moment the new one
   deploys. There is no bridge. Don't do this again.
-- **Nothing on `/uploads` may reach the GitHub token.** The release routes hold
-  a credential and are fixed — none takes a URL, repo or path from the caller,
-  which is what makes them safe unauthenticated. `/uploads` is the one route
-  that does take input, and it earns that by being separated from the
-  credential: it never reads `env.GH_TOKEN`, `env` is not even passed to it,
-  the only caller input is a channel id matched against
-  `^UC[A-Za-z0-9_-]{22}$` and a bounded list of `^[A-Za-z0-9_-]{11}$` ids, and
-  every URL it fetches is BUILT from a validated id. Don't let a caller-supplied
-  URL, host or path reach `fetch()` there, and don't put the token within reach
-  of it. A third route that takes input has to make the same argument or it
-  doesn't belong.
+- **Nothing that takes caller input may reach the GitHub token.** The release
+  routes hold a credential and are fixed — none takes a URL, repo or path from
+  the caller, which is what makes them safe unauthenticated. Two routes do take
+  input, and both earn it the same way: they never read `env.GH_TOKEN`, `env`
+  is not even passed to them, every caller input is matched against a FIXED
+  PATTERN, and every URL they fetch is BUILT from a validated value.
+
+  `/uploads` takes a channel id against `^UC[A-Za-z0-9_-]{22}$` and a bounded
+  list of `^[A-Za-z0-9_-]{11}$` ids. `/channel` takes that same channel id, or
+  a handle against `^[A-Za-z0-9._-]{3,30}$`, and nothing else — **notably not a
+  URL**, which is the obvious design ("send me the page you're on") and the one
+  that would put a caller-supplied string into `fetch()`. It does not accept a
+  video id either, though it easily could: nothing asks for it, and an input
+  shape nothing uses is surface to justify for nothing.
+
+  Don't let a caller-supplied URL, host or path reach `fetch()` in either, and
+  don't put the token within reach. A third route that takes input has to make
+  the same argument or it doesn't belong.
 - **The Worker's parsing is tested by `worker.test.mjs`, run in CI.** It reads a
   rendering of YouTube's own web app, so it breaks without anyone touching it —
   it is pinned against three entries lifted verbatim from a live page. The

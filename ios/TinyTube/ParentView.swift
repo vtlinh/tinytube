@@ -21,32 +21,41 @@ struct ParentView: View {
     let onClose: () -> Void
 
     @State private var currentURL = YouTubeUrls.parentStart
-    @State private var approvedHere = false
     @State private var showApproved = false
     @State private var showSettings = false
     @State private var reloadToken = UUID()
+    @State private var working = false
+    @State private var message: String?
+    /* Recomputed on every URL change rather than read from the database inside
+       `body` — a view's body must not do I/O on every redraw. */
+    @State private var approvedHere = false
 
-    /* The + is live only on an actual channel page — a URL starting /@handle
-       or /channel/. Anywhere else there is nothing to approve. */
-    private var channelId: String? {
-        guard YouTubeUrls.isChannelPage(currentURL) else { return nil }
-        return YouTubeUrls.channelIdFromURL(currentURL)
-    }
-
-    private var isApproved: Bool {
-        guard let channelId else { return false }
-        return ChannelStore.contains(channelId: channelId)
-    }
+    /* The + is live only on an actual channel page — a URL starting /@handle or
+       /channel/. Note what this does NOT require: a channel ID. Most of YouTube
+       uses handles, and a handle cannot be turned into an id on the device, so
+       gating the button on having an id already would hide it on nearly every
+       channel page there is. That was the bug. The id is resolved when the
+       button is TAPPED. */
+    private var onChannelPage: Bool { YouTubeUrls.isChannelPage(currentURL) }
 
     var body: some View {
         VStack(spacing: 0) {
             bar
+            if let message {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+            }
             Divider().overlay(Color.white.opacity(0.1))
             ParentWebView(startURL: YouTubeUrls.parentStart, currentURL: $currentURL)
                 .id(reloadToken)
         }
         .background(Color.black)
-        .sheet(isPresented: $showApproved) {
+        .onChange(of: currentURL) { _ in refreshApprovedState() }
+        .sheet(isPresented: $showApproved, onDismiss: refreshApprovedState) {
             ApprovedChannelsView { channel in
                 showApproved = false
                 currentURL = channel.url
@@ -63,16 +72,18 @@ struct ParentView: View {
 
             Spacer()
 
-            if let channelId {
-                Button {
-                    toggle(channelId)
-                } label: {
-                    Image(systemName: isApproved ? "minus.circle.fill" : "plus.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(isApproved ? Color.red : Color.green)
-                }
-                .accessibilityLabel(isApproved ? "Remove channel" : "Approve channel")
+            /* Always present, dimmed when it can't act. An ImageButton that
+               disappears on a non-channel page leaves nothing to explain why —
+               a parent standing on a search page would just find the control
+               gone. Android dims rather than hides for exactly this reason. */
+            Button(action: toggle) {
+                Image(systemName: approvedHere ? "minus.circle.fill" : "plus.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(approvedHere ? Color.red : Color.green)
+                    .opacity(onChannelPage && !working ? 1 : 0.35)
             }
+            .disabled(!onChannelPage || working)
+            .accessibilityLabel(approvedHere ? "Remove channel" : "Approve channel")
 
             Button { showApproved = true } label: {
                 Image(systemName: "list.bullet").font(.title3)
@@ -88,23 +99,73 @@ struct ParentView: View {
         .padding(.vertical, 10)
     }
 
-    private func toggle(_ channelId: String) {
-        if ChannelStore.contains(channelId: channelId) {
-            /* Removing takes the channel's videos and its watch history with
-               it — ChannelStore.remove does all three. */
-            ChannelStore.remove(channelId: channelId)
+    /* Whether the channel on screen is already approved.
+     *
+     * A /channel/UC… URL answers this outright. A /@handle URL does not — the
+     * id is only known after resolving — so the handle recorded at approval
+     * time is checked instead, which is exactly why `channels.handle` exists. */
+    private func refreshApprovedState() {
+        message = nil
+        if let id = YouTubeUrls.channelIdFromURL(currentURL) {
+            approvedHere = ChannelStore.contains(channelId: id)
+        } else if let handle = YouTubeUrls.handleFromURL(currentURL) {
+            approvedHere = ChannelStore.find(handle: handle) != nil
         } else {
-            /* Approving a channel approves its FUTURE uploads, which no adult
-               has seen. That is the deal this app makes and it is the weakest
-               point in it. */
-            ChannelStore.add(
-                channelId: channelId,
-                title: YouTubeUrls.handleFromURL(currentURL) ?? channelId,
-                handle: YouTubeUrls.handleFromURL(currentURL),
-                now: Int64(Date().timeIntervalSince1970 * 1000)
-            )
+            approvedHere = false
         }
-        approvedHere.toggle()
+    }
+
+    private func toggle() {
+        guard onChannelPage, !working else { return }
+
+        /* Already approved and identifiable without a round trip: remove it. */
+        if let id = YouTubeUrls.channelIdFromURL(currentURL),
+           ChannelStore.contains(channelId: id) {
+            remove(id)
+            return
+        }
+        if let handle = YouTubeUrls.handleFromURL(currentURL),
+           let existing = ChannelStore.find(handle: handle) {
+            remove(existing.id)
+            return
+        }
+
+        working = true
+        message = "Working out which channel this is…"
+        let url = currentURL
+
+        Task {
+            let resolved = await ChannelResolver.resolve(url: url)
+            await MainActor.run {
+                working = false
+                guard let resolved else {
+                    message = "Couldn't identify a channel on this page."
+                    return
+                }
+                /* Approving a channel approves its FUTURE uploads, which no
+                   adult has seen. That is the deal this app makes and it is the
+                   weakest point in it. */
+                ChannelStore.add(
+                    channelId: resolved.id,
+                    title: resolved.title,
+                    handle: YouTubeUrls.handleFromURL(url),
+                    avatarURL: resolved.avatarURL,
+                    now: Int64(Date().timeIntervalSince1970 * 1000)
+                )
+                message = "Approved \(resolved.title)."
+                /* Re-derive rather than just flipping the flag: resolving hit
+                   the network, and the parent may have navigated away while it
+                   ran. */
+                refreshApprovedState()
+            }
+        }
+    }
+
+    private func remove(_ id: String) {
+        /* Takes the channel's videos and its watch history with it. */
+        ChannelStore.remove(channelId: id)
+        refreshApprovedState()
+        message = "Removed."
     }
 }
 
@@ -125,20 +186,23 @@ struct ParentWebView: UIViewRepresentable {
            just noise and data. */
         config.mediaTypesRequiringUserActionForPlayback = .all
 
-        let web = WKWebView(frame: .zero, configuration: config)
-        web.navigationDelegate = context.coordinator
-        web.uiDelegate = context.coordinator
-        web.allowsBackForwardNavigationGestures = true
-
         /* Google refuses to sign in when it can tell it is inside a web view.
            WKWebView's default user agent is Safari's with `Version/… Safari/…`
            missing, and that absence is the tell — so add it back. Appended via
            applicationNameForUserAgent rather than replacing the whole string,
            so the OS version and WebKit build stay truthful.
 
-           A workaround for a deliberate restriction, not a supported path. See
-           BrowserUserAgent. */
-        web.configuration.applicationNameForUserAgent = BrowserUserAgent.safariSuffix
+           Set on the CONFIGURATION before the web view is created. Assigning it
+           to an existing web view's configuration has no effect — the
+           configuration is copied at init. */
+        config.applicationNameForUserAgent = BrowserUserAgent.safariSuffix
+
+        let web = WKWebView(frame: .zero, configuration: config)
+        web.navigationDelegate = context.coordinator
+        web.uiDelegate = context.coordinator
+        web.allowsBackForwardNavigationGestures = true
+
+        context.coordinator.observe(web)
 
         if let url = URL(string: startURL) {
             web.load(URLRequest(url: url))
@@ -148,10 +212,37 @@ struct ParentWebView: UIViewRepresentable {
 
     func updateUIView(_ web: WKWebView, context: Context) {}
 
+    static func dismantleUIView(_ web: WKWebView, coordinator: Coordinator) {
+        coordinator.stopObserving()
+    }
+
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         @Binding var currentURL: String
+        private var observation: NSKeyValueObservation?
 
         init(currentURL: Binding<String>) { _currentURL = currentURL }
+
+        /* YouTube's mobile site is a SINGLE-PAGE APP. Tapping a channel swaps
+           the content with pushState and never loads a page, so didFinish does
+           not fire and the tracked URL stays wherever the last real navigation
+           left it — which is why the approve button never lit up.
+
+           Observing `url` catches those history updates. It is the iOS
+           counterpart of Android's doUpdateVisitedHistory, which exists in
+           ParentActivity for precisely the same reason and says so. */
+        func observe(_ web: WKWebView) {
+            observation = web.observe(\.url, options: [.new]) { [weak self] _, change in
+                guard let url = change.newValue??.absoluteString else { return }
+                DispatchQueue.main.async { self?.currentURL = url }
+            }
+        }
+
+        func stopObserving() {
+            observation?.invalidate()
+            observation = nil
+        }
+
+        deinit { stopObserving() }
 
         func webView(
             _ webView: WKWebView,

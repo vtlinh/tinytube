@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import {
   CHANNEL_ID,
   VIDEO_ID,
+  HANDLE,
   longFormPlaylistId,
   parseUploadsPage,
   parseFeed,
@@ -26,6 +27,9 @@ import {
   xmlUnescape,
   datePositions,
   thumbnailUrl,
+  parseChannelId,
+  parseChannelTitle,
+  parseChannelAvatar,
 } from "./worker.js";
 
 const OK_CHANNEL = "UC" + "a".repeat(22);
@@ -240,3 +244,88 @@ function idAt(n) {
   const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-";
   return "vid" + alphabet[Math.floor(n / 64)] + alphabet[n % 64] + "aaaaaa";
 }
+
+/* ---- channel resolution ----
+ *
+ * Ported from YouTubeUrlsTest.kt, which is where these lived while the phone
+ * did the fetching. They came here with the code.
+ */
+
+test("reads the channel id out of a page", () => {
+  const canonical =
+    `<html><head><link rel="canonical" href="https://www.youtube.com/channel/${OK_CHANNEL}"></head></html>`;
+  assert.equal(parseChannelId(canonical), OK_CHANNEL);
+
+  /* "channelId" also appears in a watch page's payload, referring to the
+     uploader — which is the channel we want there too. */
+  const payload = `{"header":{"channelId":"${OK_CHANNEL}","title":"x"}}`;
+  assert.equal(parseChannelId(payload), OK_CHANNEL);
+
+  assert.equal(parseChannelId("<html>nothing here</html>"), null);
+  assert.equal(parseChannelId(""), null);
+});
+
+/* The canonical link is a DECLARED identity. An href carrying anything after
+   the id is not one, and must not be truncated into a match. */
+test("a canonical href with trailing junk is not an id", () => {
+  const trailing =
+    `<link rel="canonical" href="https://www.youtube.com/channel/${OK_CHANNEL}/videos">`;
+  assert.equal(parseChannelId(trailing), null);
+});
+
+test("reads the channel title, falling back to the page title", () => {
+  assert.equal(
+    parseChannelTitle(`<meta property="og:title" content="Some Channel">`),
+    "Some Channel",
+  );
+  assert.equal(
+    parseChannelTitle("<html><head><title>Some Channel - YouTube</title></head>"),
+    "Some Channel",
+  );
+  assert.equal(parseChannelTitle("<html>nothing</html>"), null);
+  assert.equal(parseChannelTitle(""), null);
+});
+
+/* Cosmetic, but the phone stores it and later fetches and draws it — so an
+   og:image pointing anywhere other than YouTube's avatar hosts is refused
+   rather than handed over. */
+test("reads the avatar, and only from youtube's image hosts", () => {
+  assert.equal(
+    parseChannelAvatar(`<meta property="og:image" content="https://yt3.googleusercontent.com/a/x=s900">`),
+    "https://yt3.googleusercontent.com/a/x=s900",
+  );
+  assert.equal(
+    parseChannelAvatar(`<meta property="og:image" content="https://yt3.ggpht.com/a/y">`),
+    "https://yt3.ggpht.com/a/y",
+  );
+  for (const bad of [
+    `<meta property="og:image" content="https://attacker.example/a.png">`,
+    `<meta property="og:image" content="https://yt3.ggpht.com.attacker.example/a">`,
+    `<meta property="og:image" content="javascript:alert(1)">`,
+    `<meta property="og:title" content="not an image">`,
+    "",
+  ]) {
+    assert.equal(parseChannelAvatar(bad), null, `should have refused: ${bad}`);
+  }
+});
+
+/* The third and last shape of caller input this Worker accepts. It is what
+   stands between /channel and a caller-supplied URL reaching fetch(). */
+test("handles are a fixed pattern, not a path", () => {
+  for (const ok of ["SomeChannel", "a.b-c_d", "abc", "a".repeat(30)]) {
+    assert.ok(HANDLE.test(ok), `should have allowed ${ok}`);
+  }
+  for (const bad of [
+    "ab",                    // too short
+    "a".repeat(31),          // too long
+    "has space",
+    "slash/es",
+    "../../etc/passwd",
+    "@leadingAt",
+    "query?x=1",
+    "a\nb",
+    "",
+  ]) {
+    assert.ok(!HANDLE.test(bad), `should have refused: ${JSON.stringify(bad)}`);
+  }
+});

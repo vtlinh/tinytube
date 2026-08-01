@@ -40,17 +40,23 @@ Curation never leaves the phone. There is no server-side list of who may watch
 what and nothing to deploy when you approve something — the approved channels
 are SQLite on the device, and so is the grid built from them.
 
-The Worker does two jobs. It re-serves the app's release assets, because the
+The Worker does three jobs. It re-serves the app's release assets, because the
 repository is private and a device with no credential would get a 404 and could
 never find an update; that path holds a read-only GitHub token and its routes
-are fixed, so the credential cannot be pointed anywhere. And it answers
-`/uploads` — what has this channel posted — so the phone doesn't download two
-megabytes of YouTube's web app per channel and parse it.
+are fixed, so the credential cannot be pointed anywhere. It answers `/uploads` —
+what has this channel posted — so the phone doesn't download two megabytes of
+YouTube's web app per channel and parse it. And it answers `/channel` — which
+channel is this page for — so approving one doesn't download a channel page just
+to read an id out of it.
 
-That second route is the only one that takes anything from the caller, so it is
-kept away from the credential: it never reads the token, the only input is a
-channel id and a bounded list of video ids matched against fixed patterns, and
-every URL it fetches is built from a validated id. Nothing a caller sends
+**All of the YouTube parsing is here, and none of it is on either phone.**
+
+The two routes that take anything from the caller are kept away from the
+credential: neither reads the token, every input is matched against a fixed
+pattern, and every URL either fetches is built from a validated value. `/channel`
+deliberately does not accept a URL — "send me the page you're on" is the obvious
+design and the one that would put a caller's string into `fetch()` — so it takes
+a handle or a channel id and builds the address itself. Nothing a caller sends
 reaches `fetch()`.
 
 ## Approving a channel
