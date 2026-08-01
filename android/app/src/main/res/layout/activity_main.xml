@@ -12,17 +12,26 @@
 
          Kept short deliberately. It is a heading on a screen whose whole
          point is the posters below it, and every dp it takes is a dp of
-         video tile — one row of a two-column grid is most of a phone. -->
+         video tile — one row of a two-column grid is most of a phone.
+
+         A FIXED height, not wrap_content, and the buttons have their minimums
+         cleared. That is what actually governs it: borderlessButtonStyle
+         carries a 48dp minHeight, so with wrap_content the bar was 48dp of
+         button plus its padding however small the text was made. Trimming the
+         padding did nothing visible, because the padding was never what was
+         setting the height.
+
+         44dp, and the buttons fill it — so the bar is shorter than a stock
+         one while what a thumb can hit is the full height of it rather than
+         the few dp the label occupies. -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="44dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@color/surface"
         android:paddingStart="20dp"
-        android:paddingEnd="8dp"
-        android:paddingTop="6dp"
-        android:paddingBottom="6dp">
+        android:paddingEnd="4dp">
 
         <TextView
             android:id="@+id/header"
@@ -30,7 +39,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="@string/app_name"
-            android:textSize="18sp"
+            android:textSize="17sp"
             android:textStyle="bold"
             android:textColor="@color/text"
             android:maxLines="1"
@@ -42,9 +51,13 @@
         <Button
             android:id="@+id/show_all"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:text="@string/show_all_videos"
             style="?android:attr/borderlessButtonStyle"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
             android:textColor="@color/accent"
             android:textSize="14sp"
             android:visibility="gone" />
@@ -52,9 +65,13 @@
         <Button
             android:id="@+id/parent_mode"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:text="@string/parent_mode"
             style="?android:attr/borderlessButtonStyle"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
             android:textColor="@color/accent"
             android:textSize="14sp" />
 
