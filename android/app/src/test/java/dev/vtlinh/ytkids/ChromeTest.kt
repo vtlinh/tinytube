@@ -9,10 +9,18 @@ import java.io.InputStream
 
 /* The pixel analysis that replaces a compiled-in guess at YouTube's inset.
 
-   Everything here is a synthetic strip: a black background, a red run where
-   the played part of the progress bar would be, and whatever else the case is
-   about. That is the whole point of keeping this pure — the alternative is
-   finding out on a device that a red jumper moved the blocker. */
+   Three kinds of case, in this order:
+
+   - synthetic strips, a few pixels of black with a red run in them, pinning
+     the logic one rule at a time;
+   - one real paused frame, which is what caught the logic being aimed at the
+     wrong thing;
+   - the same layout at seven device geometries, which is what stops it being
+     tuned to the one phone the frame came from.
+
+   All of it on a plain JVM, which is the whole point of keeping Chrome pure —
+   the alternative is finding out on a device that a red jumper moved the
+   blocker. */
 class ChromeTest {
 
     private val BLACK = 0xFF000000.toInt()
@@ -192,9 +200,16 @@ class ChromeTest {
 
     private fun realFrame() = Frame.read("/paused-player.jpg")
 
-    /* Where the app looks: the bottom 30% of the player. */
-    private fun bottomStrip(f: Frame, fraction: Float): Triple<IntArray, Int, Int> {
-        val stripH = (f.height * fraction).toInt()
+    /* This frame's density is not recorded anywhere in it. 2.75 is the most
+       likely value for a 2608x1200 panel and is what the dp figures below are
+       converted with; nothing in the test depends on it being exactly right,
+       only on it being the same everywhere. */
+    private val FRAME_DENSITY = 2.75f
+
+    /* Where the app looks, computed the way PlayerActivity computes it rather
+       than as a number chosen to fit. */
+    private fun bottomStrip(f: Frame): Triple<IntArray, Int, Int> {
+        val stripH = stripFor(f.height, FRAME_DENSITY)
         return Triple(f.pixels(f.height - stripH, stripH), f.width, stripH)
     }
 
@@ -203,19 +218,19 @@ class ChromeTest {
         assertEquals(2608, f.width)
         assertEquals(1200, f.height)
 
-        val (px, w, stripH) = bottomStrip(f, 0.30f)
+        val (px, w, stripH) = bottomStrip(f)
         val top = f.height - stripH
         val bottom = Chrome.seekBarBottom(px, w, stripH)!!
         /* The bar's last row is y=982 in the full frame. */
         assertEquals(982, top + bottom)
     }
 
-    /* The strip has to be tall enough to contain the bar in the first place.
-       At a fifth it would start at 80% of the frame and only just reach it,
-       which is why the app captures 30%. */
-    @Test fun `a thirty percent strip comfortably contains the bar`() {
+    /* The strip has to contain the bar with room over it, not catch it on the
+       edge. An early version captured the bottom fifth, which on this frame
+       would have reached the bar with 12 pixels to spare. */
+    @Test fun `the captured strip comfortably contains the bar`() {
         val f = realFrame()
-        val (px, w, stripH) = bottomStrip(f, 0.30f)
+        val (px, w, stripH) = bottomStrip(f)
         val bottom = Chrome.seekBarBottom(px, w, stripH)!!
         assertTrue("bar should not be pinned to the strip's top edge", bottom > stripH / 4)
     }
@@ -224,18 +239,21 @@ class ChromeTest {
        pixels they are on this frame. */
     @Test fun `the blocked strip covers the chrome but spares the bar`() {
         val f = realFrame()
-        val (px, w, stripH) = bottomStrip(f, 0.30f)
+        val (px, w, stripH) = bottomStrip(f)
 
-        /* 20dp of margin at this frame's density, and the same quarter-height
-           sanity limit the Activity passes. */
-        val margin = 55
-        val height = Chrome.blockHeight(px, w, stripH, 44, f.height / 4, margin)
+        val margin = (16 * FRAME_DENSITY).toInt()
+        val height = Chrome.blockHeight(
+            px, w, stripH,
+            fallbackPx = (16 * FRAME_DENSITY).toInt(),
+            maxPx = maxPxFor(f.height, FRAME_DENSITY),
+            touchMarginPx = margin,
+        )
         val blockTop = f.height - height
 
         /* Below the bar, so the bar itself stays draggable... */
         assertTrue("blocker must start below the bar's last row (982)", blockTop > 982)
         /* ...with room under it for a finger that lands low... */
-        assertTrue("at least 20dp of slack under the bar", blockTop - 982 >= 50)
+        assertTrue("at least 16dp of slack under the bar", blockTop - 982 >= margin)
         /* ...and still above the row of ways out of the app. The share button,
            "More videos" and the YouTube wordmark begin at y=1040. */
         assertTrue("blocker must cover the chrome starting at y=1040", blockTop <= 1040)
@@ -245,8 +263,11 @@ class ChromeTest {
        one pixel under the bar. */
     @Test fun `the real frame has 217 pixels under the bar`() {
         val f = realFrame()
-        val (px, w, stripH) = bottomStrip(f, 0.30f)
-        assertEquals(217, Chrome.blockHeight(px, w, stripH, 44, f.height / 4, 0))
+        val (px, w, stripH) = bottomStrip(f)
+        assertEquals(
+            217,
+            Chrome.blockHeight(px, w, stripH, 44, maxPxFor(f.height, FRAME_DENSITY), 0),
+        )
     }
 
     /* The picture is full of red — a red-lit set behind the presenter, with
@@ -256,5 +277,132 @@ class ChromeTest {
         val f = realFrame()
         /* Everything above the bar, where only video lives. */
         assertNull(Chrome.seekBarBottom(f.pixels(0, 900), f.width, 900))
+    }
+
+    /* ------------------------------------------------------------------
+       Other devices.
+
+       One real frame proves the analysis works on one phone. It cannot say
+       anything about a tablet, a 720p handset or a foldable — and the first
+       version of this code was tuned to that one frame in a way that would
+       have broken on all three: the capture and the sanity limit were
+       fractions of the player's height, when what they are measuring is a
+       fixed physical size.
+
+       YouTube's chrome under the bar is roughly 80dp on any device: a bar, a
+       gap, a row of 48dp buttons, a bottom inset. As a FRACTION that is 25% of
+       a short landscape phone and 10% of a tablet — so a fraction-shaped limit
+       is either too tight for one or useless for the other. These cases lay
+       the same dp geometry out at real device resolutions and check the
+       measurement survives all of them.
+       ------------------------------------------------------------------ */
+
+    /* A player frame with the chrome where the dp says it should be. */
+    private fun deviceFrame(
+        width: Int,
+        height: Int,
+        density: Float,
+        playedFraction: Float = 0.3f,
+        cutoutDp: Int = 0,
+    ): IntArray {
+        fun dp(v: Number) = (v.toFloat() * density).toInt()
+        val px = IntArray(width * height) { BLACK }
+        /* Distance from the bottom to the bar's last row. */
+        val below = dp(80)
+        val barBottom = height - 1 - below
+        val barTop = barBottom - dp(3).coerceAtLeast(1)
+        val from = dp(16) + dp(cutoutDp)
+        val to = from + ((width - 2 * from) * playedFraction).toInt()
+        for (y in barTop..barBottom) px.row(width, y, from, to, RED)
+        return px
+    }
+
+    /* The bounds PlayerActivity computes, restated so the tests exercise the
+       real policy rather than a number picked to pass. */
+    private fun maxPxFor(height: Int, density: Float) =
+        maxOf((200 * density).toInt(), (height * 0.30f).toInt())
+
+    private fun stripFor(height: Int, density: Float) =
+        minOf(height, maxOf(maxPxFor(height, density) + (40 * density).toInt(), (height * 0.35f).toInt()))
+
+    private data class Device(val name: String, val w: Int, val h: Int, val density: Float)
+
+    private val devices = listOf(
+        /* landscape, because the player is locked to it */
+        Device("720p handset", 1280, 720, 1.5f),
+        Device("1080p handset", 1920, 1080, 2.0f),
+        Device("tall handset", 2340, 1080, 2.75f),
+        Device("the measured frame", 2608, 1200, 2.75f),
+        Device("10in tablet", 2560, 1600, 2.0f),
+        Device("foldable inner", 2208, 1768, 3.0f),
+        Device("qHD budget phone", 960, 540, 1.5f),
+    )
+
+    @Test fun `the bar is found on every device shape`() {
+        for (d in devices) {
+            val stripH = stripFor(d.h, d.density)
+            val frame = deviceFrame(d.w, d.h, d.density)
+            /* The strip, taken off the bottom exactly as the Activity does. */
+            val strip = IntArray(d.w * stripH)
+            System.arraycopy(frame, (d.h - stripH) * d.w, strip, 0, strip.size)
+
+            val bottom = Chrome.seekBarBottom(strip, d.w, stripH)
+            assertTrue("${d.name}: no bar found", bottom != null)
+            assertEquals(
+                "${d.name}: bar in the wrong place",
+                (80 * d.density).toInt(),
+                stripH - 1 - bottom!!,
+            )
+        }
+    }
+
+    @Test fun `the blocked strip lands correctly on every device shape`() {
+        for (d in devices) {
+            fun dp(v: Number) = (v.toFloat() * d.density).toInt()
+            val stripH = stripFor(d.h, d.density)
+            val frame = deviceFrame(d.w, d.h, d.density)
+            val strip = IntArray(d.w * stripH)
+            System.arraycopy(frame, (d.h - stripH) * d.w, strip, 0, strip.size)
+
+            val height = Chrome.blockHeight(
+                strip, d.w, stripH,
+                fallbackPx = dp(16),
+                maxPx = maxPxFor(d.h, d.density),
+                touchMarginPx = dp(16),
+            )
+            assertEquals("${d.name}: wrong blocked height", dp(80) - dp(16), height)
+
+            /* And the thing that actually matters, in dp: the bar keeps its
+               16dp of slack underneath, and the chrome above the bottom edge
+               is covered. */
+            val blockTop = d.h - height
+            val barBottom = d.h - 1 - dp(80)
+            assertTrue("${d.name}: blocker sits on the bar", blockTop > barBottom)
+            assertTrue("${d.name}: too little slack under the bar", blockTop - barBottom >= dp(15))
+        }
+    }
+
+    /* A display cutout pushes YouTube's controls inwards — 9% of the width on
+       the measured frame. The left-anchored test has to survive that on a
+       device with a wider one. */
+    @Test fun `a wide display cutout does not hide the bar`() {
+        val d = Device("cutout phone", 2340, 1080, 2.75f)
+        val stripH = stripFor(d.h, d.density)
+        /* 48dp of cutout on top of the usual inset: 15% of this width. */
+        val frame = deviceFrame(d.w, d.h, d.density, cutoutDp = 48)
+        val strip = IntArray(d.w * stripH)
+        System.arraycopy(frame, (d.h - stripH) * d.w, strip, 0, strip.size)
+        assertEquals((80 * d.density).toInt(), stripH - 1 - Chrome.seekBarBottom(strip, d.w, stripH)!!)
+    }
+
+    /* A video paused seconds in has a played portion a few pixels wide. On a
+       540p screen that is genuinely tiny, and it still has to count. */
+    @Test fun `a barely-started video is found on a small screen`() {
+        val d = Device("qHD budget phone", 960, 540, 1.5f)
+        val stripH = stripFor(d.h, d.density)
+        val frame = deviceFrame(d.w, d.h, d.density, playedFraction = 0.01f)
+        val strip = IntArray(d.w * stripH)
+        System.arraycopy(frame, (d.h - stripH) * d.w, strip, 0, strip.size)
+        assertTrue("a 9-pixel played portion should still register", Chrome.seekBarBottom(strip, d.w, stripH) != null)
     }
 }

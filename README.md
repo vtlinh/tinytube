@@ -115,12 +115,19 @@ be touched; holding the top-right corner for two seconds lifts it for an adult.
 A strip along the bottom stays blocked even then, so a scrub that slides off the
 seek bar lands on nothing. Knowing how tall that strip should be means knowing
 where the seek bar is — and the player is a cross-origin iframe, so it cannot be
-asked. It can be looked at: on the first pause the app draws the bottom third
-of the player into an in-memory bitmap and finds the bar's red played portion in
-the pixels. A margin under the bar is left reachable, because the drawn line is
+asked. It can be looked at: on the first pause the app draws the bottom of the
+player into an in-memory bitmap and finds the bar's red played portion in the
+pixels. A margin under the bar is left reachable, because the drawn line is
 under 4dp and a thumb aiming at it lands around it.
 
-That capture is a measurement, not a picture. Only the bottom third is ever
+How much of the bottom is a dp figure, not a fraction of the screen. YouTube's
+chrome under the bar — a gap, a row of 48dp buttons, an inset — comes to about
+80dp on any device, which is a quarter of a short landscape phone's height and a
+tenth of a tablet's. A fraction-shaped limit is therefore either too tight for
+one or useless for the other, and the tests lay the same dp geometry out at
+seven device resolutions to keep it honest.
+
+That capture is a measurement, not a picture. Only that bottom strip is ever
 drawn, so the part of the screen with the video in it is never captured at all;
 the bitmap is read into an array and recycled inside the method that made it; it
 is never written to storage, handed to another component, or sent anywhere. It
