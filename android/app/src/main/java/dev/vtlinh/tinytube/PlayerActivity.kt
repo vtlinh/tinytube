@@ -72,8 +72,10 @@ class PlayerActivity : AppCompatActivity() {
     private var corner: View? = null
     private val fadeGlowRunnable = Runnable { fadeGlow() }
 
-    /* When the corner last lit, on the monotonic clock. See GLOW_MIN_GAP_MILLIS. */
-    private var lastGlowAt = 0L
+    /* When a TOUCH last lit the corner, on the monotonic clock. Only touch
+       glows are rationed, and only against each other — see
+       GLOW_MIN_GAP_MILLIS. */
+    private var lastTouchGlowAt = 0L
 
     /* How long the corner must be held, in milliseconds. The parent's, from
        SettingsStore — read once per video rather than per press, so changing
@@ -110,17 +112,22 @@ class PlayerActivity : AppCompatActivity() {
         private const val GLOW_IN_MILLIS = 180L
         private const val GLOW_OUT_MILLIS = 500L
 
-        /* And the shortest gap between two glows.
+        /* And the shortest gap between two TOUCH glows.
          *
          * A touch on the locked overlay glows the corner, because a child
          * pawing at a video is exactly when an adult is about to be handed the
          * phone and asked to do something — and the corner is invisible, so
          * without this they are hunting for it. But a child does not tap once,
          * they tap continuously, and a corner that lit on every one of those
-         * would be a flashing light in the corner of a video, which is both
-         * useless as a hint and an advertisement that something is there.
+         * would be a flashing light over the video: useless as a hint, and an
+         * advertisement that something is there.
          *
-         * Ten seconds means a burst of taps produces one glow. */
+         * ⚠️ IT RATIONS TOUCH GLOWS AGAINST EACH OTHER, AND NOTHING ELSE. The
+         * first version put this check inside glow() itself, so the glow that
+         * fires when a video STARTS claimed the window — and a tap in the ten
+         * seconds after a video started, which is exactly when anyone would
+         * try it, did nothing at all. The feature looked broken because the
+         * commonest case was the suppressed one. */
         private const val GLOW_MIN_GAP_MILLIS = 10_000L
 
         /* Long enough after playback starts for YouTube's controls to have
@@ -360,7 +367,7 @@ class PlayerActivity : AppCompatActivity() {
            once every ten seconds, where the way in is. Throttled inside glow(),
            so a child drumming on the screen produces one glow rather than a
            strobe. Nothing else about the tap changes; it still goes nowhere. */
-        overlay?.setOnClickListener { glow() }
+        overlay?.setOnClickListener { glowFromTouch() }
 
         corner?.setOnTouchListener { v, event ->
             when (event.actionMasked) {
@@ -401,16 +408,18 @@ class PlayerActivity : AppCompatActivity() {
      * Only the colour moves. The view keeps its size and keeps taking touches
      * at alpha 0, so the hold is available at every moment — someone who knows
      * where the corner is never has to wait for it. */
+    /* A touch on the locked overlay, rationed. Monotonic clock: this is a gap
+       between two events on one screen, and a wall clock that jumps backwards
+       would suppress the next glow for as long as the jump. */
+    private fun glowFromTouch() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastTouchGlowAt < GLOW_MIN_GAP_MILLIS) return
+        lastTouchGlowAt = now
+        glow()
+    }
+
     private fun glow() {
         val c = corner ?: return
-        /* Throttled, and deliberately in here rather than at the call sites, so
-           every reason to glow — a video starting, the overlay coming back, a
-           touch on it — passes the same rule. Monotonic clock: this is a gap
-           between two events on one screen, and a wall clock that jumps
-           backwards would suppress the next glow for as long as the jump. */
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastGlowAt < GLOW_MIN_GAP_MILLIS) return
-        lastGlowAt = now
         reveal.removeCallbacks(fadeGlowRunnable)
         c.animate().cancel()
         c.animate().alpha(1f).setDuration(GLOW_IN_MILLIS).start()

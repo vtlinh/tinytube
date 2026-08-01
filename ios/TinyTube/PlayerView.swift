@@ -29,8 +29,9 @@ struct PlayerView: View {
     @State private var overlayLifted = false
     @State private var holdProgress = 0.0
     @State private var glowing = false
-    /* When the corner last lit. See glowMinGap. */
-    @State private var lastGlowAt: Date?
+    /* When a TOUCH last lit the corner. Only touch glows are rationed, and only
+       against each other — see glowMinGap. */
+    @State private var lastTouchGlowAt: Date?
     @State private var glowedThisVideo = false
     @State private var paused = false
     @State private var showingAd = false
@@ -50,15 +51,21 @@ struct PlayerView: View {
        how long an adult presses to get IN — see restartIdleTimer. */
     private static let idleSeconds: TimeInterval = 5
 
-    /* The shortest gap between two glows. Matches GLOW_MIN_GAP_MILLIS.
+    /* The shortest gap between two TOUCH glows. Matches GLOW_MIN_GAP_MILLIS.
      *
      * A touch on the locked overlay glows the corner, because a child pawing at
      * a video is exactly when an adult is about to be handed the phone — and
      * the corner is invisible, so without this they are hunting for it. But a
      * child does not tap once, and a corner that lit on every tap would be a
      * flashing light over the video: useless as a hint, and an advertisement
-     * that something is there. Ten seconds turns a burst of taps into one
-     * glow. */
+     * that something is there. Ten seconds turns a burst of taps into one glow.
+     *
+     * ⚠️ IT RATIONS TOUCH GLOWS AGAINST EACH OTHER, AND NOTHING ELSE. The first
+     * version put this check inside glow() itself, so the glow that fires when
+     * a video STARTS claimed the window — and a tap in the ten seconds after a
+     * video started, which is exactly when anyone would try it, did nothing.
+     * The feature looked broken because the commonest case was the suppressed
+     * one. */
     private static let glowMinGap: TimeInterval = 10
 
     private var current: Video? {
@@ -81,26 +88,33 @@ struct PlayerView: View {
                     .id(current.id)
                 }
 
-                /* While an ad is playing the overlay stops intercepting, so the
-                   ad stays interactive. The reveal corner keeps working through
+                /* YouTube draws its own chrome over a paused frame, so cover it
+                   — but not during an ad, where the frame is the ad. */
+                if paused && !showingAd && !overlayLifted {
+                    Color.black.opacity(0.9).ignoresSafeArea()
+                }
+
+                /* While an ad is playing this stops intercepting, so the ad
+                   stays interactive. The reveal corner keeps working through
                    it: it is the way out of a stuck player, and an ad is exactly
-                   when a parent might want one. */
+                   when a parent might want one.
+                 *
+                 * ⚠️ ABOVE THE PAUSED SCRIM, not below it. A `Color` is
+                   hit-testable, so with the scrim on top a tap on a PAUSED
+                   video never reached this at all — and a paused video is one
+                   of the likelier moments for a child to be prodding the
+                   screen. Being above it changes nothing visually: this layer
+                   is clear. */
                 if !overlayLifted && !showingAd {
                     Color.clear
                         .contentShape(Rectangle())
                         .ignoresSafeArea()
                         /* Swallows the tap rather than passing it down — and
                            makes the swallowing say something. Whoever is
-                           prodding the video is told where the way in is, once
-                           every ten seconds; the tap itself still goes
-                           nowhere. */
-                        .onTapGesture { glow() }
-                }
-
-                /* YouTube draws its own chrome over a paused frame, so cover it
-                   — but not during an ad, where the frame is the ad. */
-                if paused && !showingAd && !overlayLifted {
-                    Color.black.opacity(0.9).ignoresSafeArea()
+                           prodding the video is told where the way in is, at
+                           most once every ten seconds; the tap itself still
+                           goes nowhere. */
+                        .onTapGesture { glowFromTouch() }
                 }
 
                 /* Above the web view so it sees touches, below nothing —
@@ -308,12 +322,15 @@ struct PlayerView: View {
         glow()
     }
 
+    /* A touch on the locked overlay, rationed. */
+    private func glowFromTouch() {
+        if let last = lastTouchGlowAt,
+           Date().timeIntervalSince(last) < Self.glowMinGap { return }
+        lastTouchGlowAt = Date()
+        glow()
+    }
+
     private func glow() {
-        /* Throttled here rather than at the call sites, so every reason to glow
-           — a video starting, the overlay coming back, a touch on it — passes
-           the same rule. */
-        if let last = lastGlowAt, Date().timeIntervalSince(last) < Self.glowMinGap { return }
-        lastGlowAt = Date()
         glowing = true
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
