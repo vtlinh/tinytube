@@ -39,8 +39,28 @@ enum ChannelFeeds {
     }()
 
     /* Whatever was last stored, with no network. What the grid draws on launch,
-       so a phone with no signal still shows something. */
-    static func cached() -> [Video] { Library.flatten(cachedByChannel()) }
+       so a phone with no signal still shows something.
+     *
+     * `flatten` then `collate`, and BOTH are needed — unlike Kotlin, where the
+     * one call does it. `flatten` concatenates per-channel lists in a given
+     * order and `collate` dedupes and sorts by upload time; the split exists
+     * because Swift dictionaries have no order and the caller has to supply it.
+     *
+     * The order it is given matters even though `collate` re-sorts. Swift's
+     * sort is NOT stable, so `newestFirst` breaks ties on the input position —
+     * which means the input position has to be something meaningful rather than
+     * whatever order a dictionary happened to enumerate in. It is the approved
+     * list's, newest-approved first. */
+    static func cached() -> [Video] {
+        Library.collate(
+            Library.flatten(byChannel: cachedByChannel(), channelOrder: channelOrder())
+        )
+    }
+
+    /* Newest-approved first, matching what ChannelStore.all() returns. Not the
+       parent's chosen sort: that orders the LIST of channels, and reordering it
+       must not silently reshuffle tiles the grid has already dated. */
+    static func channelOrder() -> [String] { ChannelStore.all().map(\.id) }
 
     /* The same, keeping which channel each video came from — the Channels tab
        needs it, and the association exists only here because a video does not
@@ -49,7 +69,10 @@ enum ChannelFeeds {
 
     @discardableResult
     static func refresh(now: Int64) async -> [Video] {
-        Library.flatten(await refreshByChannel(now: now))
+        let byChannel = await refreshByChannel(now: now)
+        return Library.collate(
+            Library.flatten(byChannel: byChannel, channelOrder: channelOrder())
+        )
     }
 
     static func refreshByChannel(now: Int64) async -> [String: [Video]] {

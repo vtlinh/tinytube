@@ -37,6 +37,12 @@ targets:
     dependencies:
       - package: TinyTubeCore
         product: TinyTubeCore
+      # `import SQLite3` resolves to a system module, but the library it maps to
+      # still has to be linked. Named explicitly rather than left to implicit
+      # linking, because when implicit linking does not happen the failure is a
+      # wall of undefined sqlite3_* symbols at the very end of a macOS build —
+      # the most expensive place in this repository to discover anything.
+      - sdk: libsqlite3.tbd
     info:
       path: TinyTube/Info.plist
       properties:
