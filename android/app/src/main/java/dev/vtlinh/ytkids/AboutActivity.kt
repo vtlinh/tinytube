@@ -49,6 +49,11 @@ class AboutActivity : AppCompatActivity() {
         notifStatus = findViewById(R.id.notif_status)
         notifAction = findViewById(R.id.notif_action)
 
+        /* Neither tab is "here", so neither is drawn as selected — both are
+           the way out. About is somewhere you arrive from the grid and leave
+           back to it. */
+        BottomTabs.bind(this, selected = -1) { BottomTabs.goToGrid(this, it) }
+
         findViewById<TextView>(R.id.version).text = getString(
             R.string.version_fmt,
             packageManager.getPackageInfo(packageName, 0).versionName,

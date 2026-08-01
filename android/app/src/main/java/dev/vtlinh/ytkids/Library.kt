@@ -23,4 +23,22 @@ object Library {
         for (v in uploads) if (seen.add(v.id)) out.add(v)
         return out
     }
+
+    /* Per-channel feeds back into one list, in the map's own order.
+     *
+     * The grid wants every approved channel's uploads together; the Channels
+     * tab wants one channel's on its own. Keeping the feeds separate and
+     * flattening here means both come from the same fetch, rather than the
+     * grid getting a flat list and the tab going back for the parts. */
+    fun flatten(byChannel: Map<String, List<Video>>): List<Video> {
+        val out = mutableListOf<Video>()
+        for ((_, videos) in byChannel) out += videos
+        return out
+    }
+
+    /* One channel's uploads, collated. An unknown id gives an empty list
+       rather than everything: a channel removed while its tab was open should
+       show nothing, not the whole library. */
+    fun forChannel(byChannel: Map<String, List<Video>>, channelId: String): List<Video> =
+        collate(byChannel[channelId].orEmpty())
 }

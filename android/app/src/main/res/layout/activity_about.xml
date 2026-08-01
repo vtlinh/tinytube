@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Wrapped so the bottom bar can sit under the scrolling content rather than
+     scroll away with it: About is short, but the bar is the app's navigation
+     and a control that comes and goes is not navigation. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="@color/bg">
+
+<ScrollView
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -84,3 +93,7 @@
     </LinearLayout>
 
 </ScrollView>
+
+    <include layout="@layout/bottom_tabs" />
+
+</LinearLayout>

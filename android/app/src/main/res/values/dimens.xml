@@ -22,4 +22,20 @@
          the one control the reveal exists to reach. -->
     <dimen name="player_bottom_block">16dp</dimen>
 
+    <!-- How much of the space under the seek bar is left reachable once the
+         bar has been found.
+
+         The drawn bar is thin — nine pixels on the frame this was measured
+         from, under 4dp — and a thumb aiming for it lands around it rather
+         than on it. Everything ABOVE the bar is reachable already, so this
+         only has to cover fingers that land low. Blocking flush to the line
+         would make the one control the reveal exists to reach the one control
+         nobody can hit.
+
+         Twenty rather than more because it has to fit: on that frame there
+         were 217 pixels under the bar and the row of ways out of the app —
+         share, "More videos", the YouTube wordmark — began 58 of them down.
+         Widening this much further starts uncovering that row. -->
+    <dimen name="player_seek_touch_margin">20dp</dimen>
+
 </resources>

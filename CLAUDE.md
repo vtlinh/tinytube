@@ -28,7 +28,8 @@ android/                         the app
     Chrome.kt       pure: find the seek bar in pixels    (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
     ChannelFeeds.kt per-channel uploads + cache
-    MainActivity.kt the grid
+    MainActivity.kt the grid + the read-only Channels tab
+    BottomTabs.kt   the two-tab bottom bar, shared by the child's screens
     PlayerActivity.kt the locked-down WebView
     ParentActivity.kt YouTube in a WebView, behind ChallengeActivity
     ApprovedChannelsActivity.kt the approved list, with open and remove
@@ -70,11 +71,20 @@ publishes a build to every installed device.
 `claude-autofix.yml` does the reverse: a red `android` run on a PR gets read,
 fixed and pushed, so the retry goes green and auto-merge takes it. It has the
 same runs-from-main property. It stops after three attempts on a branch, treats
-an empty diff as a valid outcome, and — the part that matters — pushes but
-labels `no-auto-merge` if the fix touched `android/app/src/test/**` or
-`.github/workflows/**`. **Never loosen that guard.** Making CI green by
-weakening a test is worse than leaving it red, because red merely stops; green
-publishes to every installed device. `no-autofix` on a PR opts out entirely.
+an empty diff as a valid outcome, and pushes but labels `no-auto-merge` if the
+fix touched `.github/workflows/**` — a model editing the workflow that judges
+it can switch off the judging. `no-autofix` on a PR opts out entirely.
+
+Autofix **may** change tests, and the mechanical guard that used to hold those
+PRs for review was removed on purpose: a fix that changes behaviour has to
+change the test that pinned the old behaviour, and holding every one of those
+stopped the loop on the ordinary case rather than the dangerous one. What is
+left is the instruction in the workflow's prompt, and it is now the only thing
+standing between a deleted assertion and every installed device. The line it
+draws: updating an expected value because the behaviour legitimately changed is
+fine; relaxing a matcher, deleting a case, or widening an input set until the
+failure stops is not. Green bought that way is worse than red — red merely
+stops, green publishes.
 
 ## Conventions
 
@@ -95,9 +105,15 @@ publishes to every installed device. `no-autofix` on a PR opts out entirely.
   parsed host, never a substring of the URL. If you add a host, add the
   lookalike test cases for it too.
 - **Never widen the child-facing surface.** No search, no free text entry, no
-  link that leaves the app. The grid's status bar holds exactly one control,
-  the Parent button, and everything behind it is gated by `ChallengeActivity`.
+  link that leaves the app. The status bar holds exactly one control, the
+  Parent button, and everything behind it is gated by `ChallengeActivity`.
   `AboutActivity` stays on the long-press: it is parent-facing but harmless.
+- **The Channels tab is read-only, and must stay that way.** It shows the
+  approved list and narrows the grid to one channel. It cannot remove a channel
+  and it cannot open YouTube — `ChannelStore` is the parental control and
+  editing it lives behind the gate, in `ApprovedChannelsActivity`. The two
+  screens share `item_approved_channel.xml`; the child's copy hides the remove
+  button. Don't give this one an action that changes what is approved.
 - **`ParentActivity` must never be reachable without the gate.** It is real
   YouTube. It is not exported, and the only thing that starts it is a
   `RESULT_OK` from `ChallengeActivity`. Don't add another caller.
@@ -113,8 +129,8 @@ publishes to every installed device. `no-autofix` on a PR opts out entirely.
   Anything that widens it further — auto-approving related channels, following
   playlists, surfacing recommendations — is a bigger change than it looks.
 - **The player's frame capture stays a measurement, never a picture.**
-  `PlayerActivity.measureBlockHeight` draws the bottom fifth of the WebView to
-  find the seek bar. Only that fifth is ever drawn, the bitmap is recycled in
+  `PlayerActivity.measureBlockHeight` draws the bottom third of the WebView to
+  find the seek bar. Only that third is ever drawn, the bitmap is recycled in
   the method that made it, and nothing is written, passed on or sent. Don't
   widen the captured rectangle, don't keep the bitmap, and don't add a caller
   that wants the image rather than the number.

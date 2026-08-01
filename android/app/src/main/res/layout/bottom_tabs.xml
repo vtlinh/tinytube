@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app's two places, always visible: the videos, and the channels they
+     come from.
+
+     Included rather than duplicated, because it appears on more than one
+     screen and two copies would drift. BottomTabs does the wiring.
+
+     Not on the player and not in parent mode. The player is fullscreen and
+     anything on it is another thing a child can press mid-video; parent mode
+     is behind the gate and has a bar of its own, and putting a way back to the
+     child's screens on it would blur which side of the gate you were on. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/tabs"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:background="@color/surface"
+    android:elevation="8dp">
+
+    <LinearLayout
+        android:id="@+id/tab_videos"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="?android:attr/selectableItemBackground"
+        android:clickable="true"
+        android:focusable="true"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+
+        <ImageView
+            android:id="@+id/tab_videos_icon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_tab_videos"
+            android:contentDescription="@null" />
+
+        <TextView
+            android:id="@+id/tab_videos_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="3dp"
+            android:text="@string/tab_videos"
+            android:textSize="12sp"
+            android:textColor="@color/text_muted" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/tab_channels"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="?android:attr/selectableItemBackground"
+        android:clickable="true"
+        android:focusable="true"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+
+        <ImageView
+            android:id="@+id/tab_channels_icon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_tab_channels"
+            android:contentDescription="@null" />
+
+        <TextView
+            android:id="@+id/tab_channels_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingTop="3dp"
+            android:text="@string/tab_channels"
+            android:textSize="12sp"
+            android:textColor="@color/text_muted" />
+
+    </LinearLayout>
+
+</LinearLayout>

@@ -81,10 +81,16 @@ class PlayerActivity : AppCompatActivity() {
         /* Long enough after a pause for YouTube's controls to have finished
            animating in. Measuring mid-fade reads a half-opaque bar. */
         private const val MEASURE_DELAY_MILLIS = 400L
-        /* How much of the player's bottom edge is looked at. The seek bar
-           lives in the last few percent; a fifth is generous and keeps the
-           captured rectangle — and the analysis — small. */
-        private const val MEASURE_STRIP_FRACTION = 0.2f
+        /* How much of the player's bottom edge is looked at. On a real paused
+           frame the bar sits at 82% of the height, so a fifth would only just
+           reach it; a third leaves room for a player that draws its controls
+           higher, and still captures nothing of the picture worth having. */
+        private const val MEASURE_STRIP_FRACTION = 0.3f
+
+        /* Nothing further up than this can be the seek bar. Also measured: the
+           real gap under the bar is 18% of the player, so a quarter is a real
+           limit rather than a formality. */
+        private const val MEASURE_MAX_FRACTION = 0.25f
 
         /* The measured blocker height, in pixels, or 0 for "not yet".
          *
@@ -380,7 +386,17 @@ class PlayerActivity : AppCompatActivity() {
                 w.draw(canvas)
                 val pixels = IntArray(vw * stripH)
                 bmp.getPixels(pixels, 0, vw, 0, 0, vw, stripH)
-                Chrome.blockHeight(pixels, vw, stripH, fallback)
+                Chrome.blockHeight(
+                    pixels,
+                    vw,
+                    stripH,
+                    fallbackPx = fallback,
+                    maxPx = (vh * MEASURE_MAX_FRACTION).toInt(),
+                    /* Left reachable under the bar, so a thumb aiming at a
+                       9-pixel line still lands on it. */
+                    touchMarginPx =
+                        resources.getDimensionPixelSize(R.dimen.player_seek_touch_margin),
+                )
             } finally {
                 bmp.recycle()
             }

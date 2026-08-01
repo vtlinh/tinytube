@@ -115,11 +115,12 @@ be touched; holding the top-right corner for two seconds lifts it for an adult.
 A strip along the bottom stays blocked even then, so a scrub that slides off the
 seek bar lands on nothing. Knowing how tall that strip should be means knowing
 where the seek bar is — and the player is a cross-origin iframe, so it cannot be
-asked. It can be looked at: on the first pause the app draws the bottom fifth of
-the player into an in-memory bitmap and finds the bar's red played portion in
-the pixels.
+asked. It can be looked at: on the first pause the app draws the bottom third
+of the player into an in-memory bitmap and finds the bar's red played portion in
+the pixels. A margin under the bar is left reachable, because the drawn line is
+under 4dp and a thumb aiming at it lands around it.
 
-That capture is a measurement, not a picture. Only the bottom fifth is ever
+That capture is a measurement, not a picture. Only the bottom third is ever
 drawn, so the part of the screen with the video in it is never captured at all;
 the bitmap is read into an array and recycled inside the method that made it; it
 is never written to storage, handed to another component, or sent anywhere. It
@@ -242,15 +243,25 @@ Three things stop it running away:
 - **An empty diff is a valid outcome.** Told to change nothing when the cause
   isn't clear or the failure looks infrastructural, it says so on the PR rather
   than inventing a change.
-- **A fix that touches `android/app/src/test/**` or `.github/workflows/**` is
-  pushed but labelled `no-auto-merge`.** Those are the two places where making
-  CI green can mean removing the thing that was checking — the unit tests are
-  what stand between a bad video id and the player, and this repository
-  publishes itself to a child's phone. Such a change is held for a person.
-  `no-autofix` on a PR opts out of the whole thing.
+- **A fix that touches `.github/workflows/**` is pushed but labelled
+  `no-auto-merge`.** A model editing the workflow that judges it can switch off
+  the judging, and nothing downstream would notice. `no-autofix` on a PR opts
+  out of the whole thing.
 
-That last one is the point to keep in view: everything else here is convenience,
-and that is the guard rail.
+Tests are **not** on that list. They were, and the guard was removed
+deliberately: a fix that changes behaviour has to change the test that pinned
+the old behaviour, so holding every such PR stopped the loop on the ordinary
+case rather than the dangerous one. What remains is an instruction in the
+workflow's prompt — updating an expected value because the behaviour
+legitimately changed is fine; relaxing a matcher, deleting a case, or widening
+an input set until the failure stops is not.
+
+Worth being plain about the consequence, because it is the one place this
+repository trades safety for convenience: a run that quietly weakens an
+assertion will now merge itself, and the unit tests are what stand between a
+bad video id and the player. Red merely stops; green publishes to every
+installed device. If that trade stops looking worth it, the guard is four lines
+in `claude-autofix.yml`.
 
 ---
 
