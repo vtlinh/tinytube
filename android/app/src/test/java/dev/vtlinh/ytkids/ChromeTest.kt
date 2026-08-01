@@ -210,8 +210,9 @@ class ChromeTest {
        right — reported as a success, because nothing knew the difference.
        ------------------------------------------------------------------ */
 
-    /* A bar with a knob on its head: a thin line, and a fat circle-ish blob at
-       the start of it. */
+    /* A bar with a knob on its head: a thin line from the bar's start to
+       wherever playback has reached, and a fat blob AT that head — which is
+       where YouTube draws it, and which moves right as the video plays. */
     private fun barWithKnob(
         width: Int,
         height: Int,
@@ -224,18 +225,58 @@ class ChromeTest {
         val p = strip(width, height)
         for (y in barY until barY + lineThickness) p.row(width, y, from, to, RED)
         val knobTop = barY - (knobThickness - lineThickness) / 2
-        for (y in knobTop until knobTop + knobThickness) p.row(width, y, from, from + knobThickness, RED)
+        val knobFrom = (to - knobThickness / 2).coerceAtLeast(from)
+        for (y in knobTop until knobTop + knobThickness) {
+            p.row(width, y, knobFrom, (knobFrom + knobThickness).coerceAtMost(width), RED)
+        }
         return p
     }
 
-    @Test fun `the thickness is the line, not the knob on it`() {
+    /* Once the knob has moved off the start, its own rows no longer look like
+       the bar at all — they are a short red run in the middle of the frame,
+       which the left-anchored rule already refuses — so the band is the line
+       and the thickness follows. The knob only confuses anything while it is
+       still sitting on the bar's left end. */
+    @Test fun `away from the start the band is the line itself`() {
         val w = 2322; val h = 480
         val p = barWithKnob(w, h, barY = 280, lineThickness = 9, knobThickness = 36, from = 200, to = 900)
         val band = Chrome.seekBar(p, w, h)!!
-        /* The band really is knob-tall — that part was never wrong. */
-        assertEquals(36, band.last - band.first + 1)
-        /* The line is what scales the margin. */
+        assertEquals(9, band.last - band.first + 1)
         assertEquals(9, Chrome.barThickness(p, w, h, band))
+    }
+
+    /* Wherever playback has reached. The knob starts at the left and travels
+       to the right as a video plays, and the measurement has to be the same
+       whichever end of the bar it is sitting on. */
+    @Test fun `the thickness is the line at every position of the knob`() {
+        val w = 2322; val h = 480
+        val from = 200
+        val end = 2100
+        for (percent in listOf(5, 25, 50, 75, 95, 100)) {
+            val to = from + (end - from) * percent / 100
+            val p = barWithKnob(w, h, barY = 267, lineThickness = 9, knobThickness = 36, from = from, to = to)
+            val band = Chrome.seekBar(p, w, h)!!
+            assertEquals(
+                "at $percent% played the line is still 9px",
+                9,
+                Chrome.barThickness(p, w, h, band),
+            )
+            val m = Chrome.measure(p, w, h)!!
+            assertEquals("at $percent% the margin is five lines", 45, m.below - m.blockPx)
+        }
+    }
+
+    /* The one position where there is no line to measure, because playback has
+       not produced one yet. The knob is all there is, so the thickness reads
+       as the knob — and the ceiling on the margin is what keeps the strip from
+       vanishing. That case has its own test below; this pins the boundary. */
+    @Test fun `at the very start the knob is all there is`() {
+        val w = 2322; val h = 480
+        val p = barWithKnob(w, h, barY = 267, lineThickness = 9, knobThickness = 36, from = 200, to = 205)
+        val band = Chrome.seekBar(p, w, h)!!
+        assertEquals(36, Chrome.barThickness(p, w, h, band))
+        val m = Chrome.measure(p, w, h)!!
+        assertTrue("the ceiling keeps most of the gap blocked", m.blockPx >= m.below * 3 / 4)
     }
 
     /* The device numbers, end to end. */
@@ -371,14 +412,6 @@ class ChromeTest {
         /* ...and still above the row of ways out of the app. The share button,
            "More videos" and the YouTube wordmark begin at y=1040. */
         assertTrue("blocker must cover the chrome starting at y=1040", blockTop <= 1040)
-    }
-
-    /* What the margin costs, in numbers: 217 pixels under the bar, 45 of them
-       given back. */
-    @Test fun `the real frame has 217 pixels under the bar`() {
-        val f = realFrame()
-        val (px, w, stripH) = bottomStrip(f)
-        assertEquals(217 - 45, Chrome.blockHeight(px, w, stripH, 44))
     }
 
     /* The whole measurement on the real frame, as numbers rather than as a

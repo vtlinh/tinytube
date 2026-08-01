@@ -52,7 +52,6 @@
          inside. The same figures live on the About screen. -->
     <string name="player_revealed_detail">YouTube controls unlocked\nstrip %1$d px · %2$s</string>
     <string name="player_measured_now">%1$d tries · %2$s</string>
-    <string name="player_measured_earlier">measured on an earlier video</string>
 
     <string name="about_title">About</string>
     <!-- The heading over the only part of About that does anything. -->
@@ -61,7 +60,7 @@
          exists so a fault can be reported without reproducing it live. -->
     <string name="about_player">Player</string>
     <string name="about_remeasure">Measure again</string>
-    <string name="about_measure_fmt">strip in use   %1$s\nstored*       %2$s\ndisplay       %3$s\nstored for    %4$s\nversion       %5$s\nlast capture  %6$s\n\n* written but not read back — the player\nmeasures afresh each run</string>
+    <string name="about_measure_fmt">last measured  %1$s\nstored*       %2$s\ndisplay       %3$s\nstored for    %4$s\nversion       %5$s\nlast capture  %6$s\n\n* written but not read back — every video\nmeasures for itself</string>
     <string name="about_measure_fallback">%1$d px (fallback, not measured)</string>
     <string name="about_measure_measured">%1$d px (measured)</string>
     <string name="about_measure_none">nothing stored</string>
