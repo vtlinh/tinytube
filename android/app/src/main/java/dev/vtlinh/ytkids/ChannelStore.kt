@@ -57,6 +57,29 @@ class ChannelStore private constructor(context: Context) :
         ) != -1L
     }
 
+    /* When this channel's uploads were last fetched, or null for never.
+     *
+     * The deep fetch happens at most once a day per channel; this is what
+     * remembers when. Null is deliberate rather than zero: a channel approved
+     * a moment ago has never been fetched and must fetch now, and "never" and
+     * "in 1970" should not have to be the same value for that to work.
+     *
+     * Note that add() REPLACEs the row, which clears this. Re-approving a
+     * channel therefore refetches it — which is what someone re-adding one
+     * would expect. */
+    fun uploadsFetchedAt(channelId: String): Long? =
+        readableDatabase.query(
+            Schema.CHANNELS, arrayOf("uploads_at"), "channel_id = ?", arrayOf(channelId),
+            null, null, null, "1",
+        ).use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
+        }
+
+    fun markUploadsFetched(channelId: String, nowMillis: Long) {
+        val values = ContentValues().apply { put("uploads_at", nowMillis) }
+        writableDatabase.update(Schema.CHANNELS, values, "channel_id = ?", arrayOf(channelId))
+    }
+
     /* Fill in an avatar for a row approved before we recorded them. Only ever
        adds: it never clears one, so a failed lookup leaves what was there. */
     fun setAvatar(channelId: String, avatarUrl: String) {

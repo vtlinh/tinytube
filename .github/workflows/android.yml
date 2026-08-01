@@ -194,6 +194,16 @@ jobs:
       # Reaching here on a publish means the reuse was refused, which means no
       # run has tested this exact tree, which is exactly when skipping the
       # tests would be skipping the only check there is.
+      # The Worker's parsing used to live in the app, under the Kotlin tests.
+      # It moved to worker.js to save the phone two megabytes per channel, and
+      # its tests moved with it — it is the piece most likely to break without
+      # anyone touching it, because it reads a rendering of YouTube's own web
+      # app. Run here rather than in a workflow of its own so auto-merge waits
+      # for it: it only waits for `android`.
+      - name: Worker tests
+        if: steps.reuse.outputs.reused != 'yes'
+        run: node --test
+
       - name: Unit tests and release APK
         if: steps.reuse.outputs.reused != 'yes'
         run: gradle -p android testReleaseUnitTest assembleRelease

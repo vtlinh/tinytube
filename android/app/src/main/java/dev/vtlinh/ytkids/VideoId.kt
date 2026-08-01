@@ -29,9 +29,19 @@ object VideoId {
  * gives fifteen with exact ones. Library.datePositions is what reconciles
  * those, and after it has run every video has a key. A null one sorts last,
  * which is the right place for a video nothing can date. */
-data class Video(val id: String, val title: String, val publishedAt: Long? = null) {
+data class Video(
+    val id: String,
+    val title: String,
+    val publishedAt: Long? = null,
+    /* What the Worker said the poster is, when it said. Stored rather than
+       always derived because it is what came back with the video and the
+       database is meant to hold the tile, not half of it — but it is checked
+       against the hosts below before it is kept, because whatever is here is
+       later fetched and drawn. */
+    val thumbUrl: String? = null,
+) {
     /* i.ytimg.com serves thumbnails for any public video with no key and no
        cookie. hqdefault exists for every video; maxresdefault does not, and a
        missing one 404s into an empty tile. */
-    val thumbnailUrl: String get() = "https://i.ytimg.com/vi/$id/hqdefault.jpg"
+    val thumbnailUrl: String get() = thumbUrl ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg"
 }

@@ -62,22 +62,29 @@ class SchemaTest {
        Note this is not idempotency — ALTER TABLE ADD COLUMN cannot be re-run,
        and SQLiteOpenHelper never asks it to. */
     @Test fun `a fresh install and an upgraded install agree on the schema`() {
-        val fresh = onDb { c -> apply(c, 0, Schema.VERSION); columnsOf(c) }
-        val upgraded = onDb { c ->
-            apply(c, 0, 1)
-            apply(c, 1, 2)
-            apply(c, 2, 3)
-            columnsOf(c)
+        /* Walked one version at a time up to whatever VERSION is now, rather
+           than a hand-written chain. The hand-written one silently stopped
+           checking the newest migration every time somebody added one — which
+           is precisely the migration nobody has run on a real device yet. */
+        for (table in listOf(Schema.CHANNELS, Schema.VIDEOS)) {
+            val fresh = onDb { c -> apply(c, 0, Schema.VERSION); columnsOf(c, table) }
+            val upgraded = onDb { c ->
+                for (v in 1..Schema.VERSION) apply(c, v - 1, v)
+                columnsOf(c, table)
+            }
+            assertEquals("$table drifted between fresh and upgraded", fresh, upgraded)
+            assertTrue("$table should exist in both, got $fresh", fresh.isNotEmpty())
         }
-        assertEquals(fresh, upgraded)
-        assertTrue("handle should exist in both, got $fresh", "handle" in fresh)
-        assertTrue("avatar_url should exist in both, got $fresh", "avatar_url" in fresh)
+        val channels = onDb { c -> apply(c, 0, Schema.VERSION); columnsOf(c, Schema.CHANNELS) }
+        assertTrue("handle should exist, got $channels", "handle" in channels)
+        assertTrue("avatar_url should exist, got $channels", "avatar_url" in channels)
+        assertTrue("uploads_at should exist, got $channels", "uploads_at" in channels)
     }
 
-    private fun columnsOf(c: java.sql.Connection): List<String> {
+    private fun columnsOf(c: java.sql.Connection, table: String): List<String> {
         val out = mutableListOf<String>()
         c.createStatement().use { st ->
-            val rs = st.executeQuery("PRAGMA table_info(channels)")
+            val rs = st.executeQuery("PRAGMA table_info($table)")
             while (rs.next()) out.add(rs.getString("name"))
         }
         return out.sorted()
@@ -120,4 +127,82 @@ class SchemaTest {
             assertEquals("SomeHandle", rs.getString(1))
         }
     }
+
+    /* ---- the grid ---- */
+
+    /* A channel approved before v4 has no fetch time, and that has to read as
+       "never fetched" rather than as "fetched at the epoch" — otherwise every
+       upgraded device would wait a day before it ever filled its grid. */
+    @Test fun `upgrading keeps the channels and leaves uploads_at null`() = onDb { c ->
+        apply(c, 0, 3)
+        c.createStatement().use { st ->
+            st.executeUpdate(
+                "INSERT INTO channels (channel_id, title, added_at) " +
+                    "VALUES ('UCaaaaaaaaaaaaaaaaaaaaaa', 'Approved before v4', 5)",
+            )
+        }
+        apply(c, 3, 4)
+        c.createStatement().use { st ->
+            val rs = st.executeQuery("SELECT title, uploads_at FROM channels")
+            assertTrue(rs.next())
+            assertEquals("Approved before v4", rs.getString(1))
+            rs.getLong(2)
+            assertTrue("uploads_at should be null for a pre-v4 row", rs.wasNull())
+        }
+    }
+
+    /* The same video legitimately appears in two channels' lists after a
+       collaboration. The key is the video, so the second write updates the row
+       rather than failing or duplicating the tile. */
+    @Test fun `video_id is the primary key across channels`() = onDb { c ->
+        apply(c, 0, Schema.VERSION)
+        c.createStatement().use { st ->
+            st.executeUpdate(insertVideo("aaaaaaaaaaa", "UC1", "As channel one has it", 0))
+            st.executeUpdate(insertVideo("aaaaaaaaaaa", "UC2", "As channel two has it", 0))
+            val rs = st.executeQuery("SELECT COUNT(*), MAX(channel_id) FROM videos")
+            rs.next()
+            assertEquals(1, rs.getInt(1))
+            assertEquals("UC2", rs.getString(2))
+        }
+    }
+
+    /* An undated video is stored, not refused. It sorts last; a missing
+       timestamp is not a reason to hide something a parent approved. */
+    @Test fun `published_at and thumb_url are optional`() = onDb { c ->
+        apply(c, 0, Schema.VERSION)
+        c.createStatement().use { st ->
+            st.executeUpdate(
+                "INSERT INTO videos (video_id, channel_id, title, position) " +
+                    "VALUES ('aaaaaaaaaaa', 'UC1', 'No date', 0)",
+            )
+            val rs = st.executeQuery("SELECT published_at, thumb_url FROM videos")
+            rs.next()
+            rs.getLong(1)
+            assertTrue(rs.wasNull())
+            assertEquals(null, rs.getString(2))
+        }
+    }
+
+    /* Position is upload order and the reads depend on it, so it is required
+       rather than defaulted — a row with no position is a row the grid cannot
+       place. */
+    @Test fun `a video needs a position`() = onDb { c ->
+        apply(c, 0, Schema.VERSION)
+        c.createStatement().use { st ->
+            try {
+                st.executeUpdate(
+                    "INSERT INTO videos (video_id, channel_id, title) " +
+                        "VALUES ('aaaaaaaaaaa', 'UC1', 'No position')",
+                )
+                throw AssertionError("should have refused a row with no position")
+            } catch (e: java.sql.SQLException) {
+                /* what NOT NULL is for */
+            }
+        }
+    }
+
+    private fun insertVideo(id: String, channel: String, title: String, position: Int) =
+        "INSERT OR REPLACE INTO videos " +
+            "(video_id, channel_id, title, published_at, thumb_url, position) VALUES " +
+            "('$id', '$channel', '$title', 100, 'https://i.ytimg.com/vi/$id/hqdefault.jpg', $position)"
 }
