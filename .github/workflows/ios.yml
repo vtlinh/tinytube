@@ -170,10 +170,10 @@ jobs:
           # touches them. A pure-layer test edit therefore costs a Linux minute
           # instead of ten macOS ones.
           #
-          # Neither counts ios/AppIcon: that script only regenerates a PNG that
-          # is committed under TinyTube/, so editing it cannot change an IPA
-          # until somebody runs it and commits the result — at which point the
-          # PNG itself is what shows up here.
+          # The icon generator lives in art/ rather than under ios/, so it is
+          # already outside every filter here: editing it cannot change an IPA
+          # until somebody runs it and commits the result, at which point the
+          # PNG under TinyTube/ is what shows up in this list.
           #
           # NOT narrowed to TinyTube/ and Sources/ alone, which was asked for
           # and would have gone too far: project.yml IS the Xcode project
@@ -187,7 +187,6 @@ jobs:
           IPA=false
           for f in $FILES; do
             case "$f" in
-              ios/AppIcon/*) ;;                       # a dev script; changes no build
               ios/TinyTubeCore/Tests/*) WANTED=true ;; # Linux only
               ios/*) WANTED=true; APP=true ;;
             esac

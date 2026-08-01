@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon on Android 8 and up.
+
+     The foreground is a BITMAP now rather than a vector: the icon is supplied
+     artwork, drawn once, and generated into every density by art/make-icons.py
+     from art/app-icon.png. Re-run that after replacing the master; don't edit
+     the PNGs.
+
+     The artwork sits at two thirds of the layer with its own edges extended
+     into the margin, because only the middle 72 of these 108 units survives
+     whatever mask the launcher applies — full-bleed would let a circular
+     launcher crop the TV's frame, feet and antennae. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
 </adaptive-icon>
