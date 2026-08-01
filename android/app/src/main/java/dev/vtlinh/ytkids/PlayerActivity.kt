@@ -21,7 +21,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.view.PixelCopy
 import android.widget.ProgressBar
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 /* Plays one approved video, fullscreen, and finishes when it ends.
@@ -44,9 +43,15 @@ class PlayerActivity : AppCompatActivity() {
     private var showingAd = false
 
     /* True while the overlay has been deliberately lifted, so YouTube's own
-       controls are reachable. It always comes back on its own: either the
-       video starts playing again, or nothing is touched for a few seconds. */
+       controls are reachable. It comes back on its own once the video has run
+       for a few seconds with nobody touching anything — and, whatever state it
+       is in, as soon as the activity leaves the foreground. */
     private var revealed = false
+
+    /* Whether the video is running, as the page last reported it. The idle
+       countdown that puts the overlay back is armed only while this is true —
+       see restartIdleTimer. */
+    private var playing = false
 
     private val reveal = Handler(Looper.getMainLooper())
     private val holdRunnable = Runnable { setRevealed(true) }
@@ -82,8 +87,9 @@ class PlayerActivity : AppCompatActivity() {
         /* Long enough that no thumb rests its way through by accident — four
            times Android's own long-press, which is the thing being avoided. */
         private const val HOLD_MILLIS = 2000L
-        /* And the overlay returns on its own if nothing is touched. */
-        private const val IDLE_MILLIS = 7000L
+        /* And the overlay returns on its own if nothing is touched while the
+           video is running. */
+        private const val IDLE_MILLIS = 5000L
         /* How long the corner's tint stays up after a tap. Short: it is a
            reminder of where to press, not something to watch a video through. */
         private const val TINT_MILLIS = 1000L
@@ -299,8 +305,9 @@ class PlayerActivity : AppCompatActivity() {
        While it is lifted the whole of YouTube's player is reachable, which is
        the point — an adult wanting to scrub, or to see what a video actually
        is, has no other way to do it. It is not a mode anyone can be left in by
-       accident: it ends when playback resumes, and it ends on its own after a
-       few seconds of nobody touching anything. */
+       accident: while the video is running it ends on its own after a few
+       seconds of nobody touching anything. See restartIdleTimer for why a
+       paused player is the exception. */
     private fun setRevealed(value: Boolean) {
         revealed = value
         overlay?.visibility = if (value) View.GONE else View.VISIBLE
@@ -313,27 +320,31 @@ class PlayerActivity : AppCompatActivity() {
         reveal.removeCallbacks(fadeTintRunnable)
         corner?.animate()?.cancel()
         corner?.alpha = 0f
-        reveal.removeCallbacks(idleRunnable)
         /* Lifting the overlay is the other reliable moment: the parent is
            about to touch the player, and a touch is what brings the controls
            back. Also the only moment a scrimmed pause can be measured, since
            the scrim goes with the overlay. */
         if (value) wantMeasurement(MEASURE_RETRY_MILLIS, freshOpportunity = true)
-        if (value) {
-            reveal.postDelayed(idleRunnable, IDLE_MILLIS)
-            /* Say so. The overlay was transparent, so lifting it changes very
-               little on screen — without a word it is not obvious the three
-               seconds did anything. */
-            /* Always the detail, success included.
-             *
-             * This used to go plain once a measurement landed, and that cost
-             * two rounds: a silent success and a wrong-but-confident answer
-             * look identical, so "no message" turned out to mean "the app is
-             * certain, and it is wrong". A readout that only appears when
-             * something is known to be broken cannot report the case where
-             * nothing knows it is broken. */
-            Toast.makeText(this, R.string.player_revealed, Toast.LENGTH_SHORT).show()
-        }
+        restartIdleTimer()
+    }
+
+    /* The countdown that puts the overlay back, armed only while the video is
+       actually running.
+     *
+     * A paused player does not count down at all, deliberately. Pausing is what
+     * an adult does to read something on screen, to look at where the scrubber
+     * is, or to hand the phone to someone — none of which produce touches, and
+     * all of which used to end with the overlay dropping back mid-sentence. So
+     * the timer follows playback: it runs while the video does.
+     *
+     * The trade is that a player left paused and revealed stays that way. What
+     * bounds it is the activity: onPause puts the overlay back, so leaving the
+     * screen, locking the phone, or switching apps all end the reveal. What is
+     * given up is only the case where the phone is set down, unlocked, on a
+     * paused video. */
+    private fun restartIdleTimer() {
+        reveal.removeCallbacks(idleRunnable)
+        if (revealed && playing) reveal.postDelayed(idleRunnable, IDLE_MILLIS)
     }
 
     /* Every touch in the activity passes through here before it reaches
@@ -342,8 +353,7 @@ class PlayerActivity : AppCompatActivity() {
        would expire mid-scrub. */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (revealed && event.actionMasked == MotionEvent.ACTION_DOWN) {
-            reveal.removeCallbacks(idleRunnable)
-            reveal.postDelayed(idleRunnable, IDLE_MILLIS)
+            restartIdleTimer()
             /* That tap went to the player and will have brought its controls
                up — the best frame we are going to get. */
             wantMeasurement(MEASURE_DELAY_MILLIS, freshOpportunity = true)
@@ -358,10 +368,22 @@ class PlayerActivity : AppCompatActivity() {
      * stall — including the one at the start of every video — as a pause
      * dropped the scrim over the picture each time. */
     private fun applyState(state: Int) {
-        /* Playback starting is the signal that whoever lifted the overlay is
-           done with it — they pressed play, so the video is for watching
-           again. */
-        if (state == STATE_PLAYING && revealed) setRevealed(false)
+        /* Only PLAYING and PAUSED move this. Buffering leaves it alone: a
+           stall mid-video is not a pause, and letting it read as one would
+           stop the countdown every time the network hiccuped.
+         *
+         * Pressing play used to put the overlay straight back, on the reading
+         * that whoever lifted it was done. It isn't: an adult who scrubs and
+         * then hits play is locked out of the player at the exact moment they
+         * might want to correct the scrub. Play now starts the countdown
+         * instead, so the overlay returns a few seconds later and only if
+         * nothing else happens. */
+        when (state) {
+            STATE_PLAYING -> playing = true
+            STATE_PAUSED -> playing = false
+        }
+        restartIdleTimer()
+
         /* Only a real pause draws YouTube's chrome over the frame. */
         pausedScrim?.visibility =
             if (state == STATE_PAUSED && !showingAd) View.VISIBLE else View.GONE
