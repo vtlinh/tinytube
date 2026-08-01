@@ -67,6 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       android: ${{ steps.filter.outputs.android }}
+      apk: ${{ steps.filter.outputs.apk }}
       worker: ${{ steps.filter.outputs.worker }}
     steps:
       - id: filter
@@ -82,6 +83,7 @@ jobs:
           if [ -z "${PR:-}" ]; then
             echo "Not a pull request — running everything."
             echo "android=true" >> "$GITHUB_OUTPUT"
+            echo "apk=true" >> "$GITHUB_OUTPUT"
             echo "worker=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -91,11 +93,13 @@ jobs:
           if ! FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
             echo "Could not list PR #$PR's files — running everything."
             echo "android=true" >> "$GITHUB_OUTPUT"
+            echo "apk=true" >> "$GITHUB_OUTPUT"
             echo "worker=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           ANDROID=false
+          APK=false
           WORKER=false
           for f in $FILES; do
             case "$f" in
@@ -116,12 +120,30 @@ jobs:
               # same commit, or dispatch this workflow by hand afterwards.
               android/*) ANDROID=true ;;
             esac
+            # And separately: does this change what goes INTO the APK?
+            #
+            # ANDROID above decides whether to run the unit tests, which is a
+            # different question and a cheaper one. A change under
+            # app/src/test only needs `testReleaseUnitTest`; assembling a
+            # release APK afterwards produces a binary nobody asked for and
+            # nothing will install.
+            #
+            # The gradle files and the keystore are in here even though they
+            # are not sources: they set the versionCode, the dependencies and
+            # the signature, so they change the artifact as surely as a .kt
+            # file does.
+            case "$f" in
+              android/app/src/main/*|android/app/build.gradle.kts|\
+              android/build.gradle.kts|android/gradle.properties|\
+              android/settings.gradle.kts|android/signing.p12) APK=true ;;
+            esac
             case "$f" in
               worker.js|worker.test.mjs|wrangler.toml) WORKER=true ;;
             esac
           done
-          echo "android=$ANDROID worker=$WORKER"
+          echo "android=$ANDROID (apk: $APK) worker=$WORKER"
           echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
           echo "worker=$WORKER" >> "$GITHUB_OUTPUT"
 
   # The Worker's parsers, in a job of their own.
@@ -297,9 +319,21 @@ jobs:
       # Reaching here on a publish means the reuse was refused, which means no
       # run has tested this exact tree, which is exactly when skipping the
       # tests would be skipping the only check there is.
-      - name: Unit tests and release APK
+      - name: Unit tests, and the release APK if this change can alter one
         if: steps.reuse.outputs.reused != 'yes'
-        run: gradle -p android testReleaseUnitTest assembleRelease
+        env:
+          APK: ${{ needs.changes.outputs.apk }}
+        run: |
+          set -euo pipefail
+          # ONE gradle invocation either way: it starts a daemon and configures
+          # the project per run, and doing that twice cost most of a minute.
+          TASKS="testReleaseUnitTest"
+          if [ "$APK" = "true" ]; then
+            TASKS="$TASKS assembleRelease"
+          else
+            echo "Nothing here changes the APK — running the tests only."
+          fi
+          gradle -p android $TASKS
 
       # Everything downstream reads dist/, so a reused build and a fresh one
       # are the same thing by the time anyone looks.
@@ -310,7 +344,7 @@ jobs:
       # failure the "upload version.json last" rule exists to bound. build-tree
       # records what this was made from, and is what the reuse check reads.
       - name: Collect the build outputs
-        if: steps.reuse.outputs.reused != 'yes'
+        if: steps.reuse.outputs.reused != 'yes' && needs.changes.outputs.apk == 'true'
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk dist/
@@ -318,7 +352,10 @@ jobs:
           git rev-parse HEAD:android > dist/build-tree.txt
           cat dist/version.json dist/build-tree.txt
 
+      # Nothing to upload when no APK was built. The publish path is
+      # unaffected: on main the filter above answers true for everything.
       - uses: actions/upload-artifact@v4
+        if: steps.reuse.outputs.reused == 'yes' || needs.changes.outputs.apk == 'true'
         with:
           name: tinytube-apk
           path: dist/

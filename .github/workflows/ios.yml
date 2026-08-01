@@ -121,6 +121,7 @@ jobs:
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
       app: ${{ steps.filter.outputs.app }}
+      ipa: ${{ steps.filter.outputs.ipa }}
       reuse: ${{ steps.reuse.outputs.reuse }}
       reuse_run_id: ${{ steps.reuse.outputs.run_id }}
     steps:
@@ -142,6 +143,7 @@ jobs:
             echo "Not a pull request — building."
             echo "ios=true" >> "$GITHUB_OUTPUT"
             echo "app=true" >> "$GITHUB_OUTPUT"
+            echo "ipa=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -153,10 +155,11 @@ jobs:
             echo "Could not list PR #$PR's files — building rather than risk missing a break."
             echo "ios=true" >> "$GITHUB_OUTPUT"
             echo "app=true" >> "$GITHUB_OUTPUT"
+            echo "ipa=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # TWO ANSWERS, because the two jobs cost very different amounts.
+          # THREE ANSWERS, because the two jobs cost very different amounts.
           #
           # WANTED gates ios-core, which is ubuntu and cheap: anything under
           # ios/ that a compiler or a test reads.
@@ -181,16 +184,32 @@ jobs:
           # running.
           WANTED=false
           APP=false
+          IPA=false
           for f in $FILES; do
             case "$f" in
               ios/AppIcon/*) ;;                       # a dev script; changes no build
               ios/TinyTubeCore/Tests/*) WANTED=true ;; # Linux only
               ios/*) WANTED=true; APP=true ;;
             esac
+            # And separately: does this change what goes INTO the IPA?
+            #
+            # APP above decides whether the simulator TESTS run, which is a
+            # different question. A change under TinyTubeTests has to be tested
+            # on a Mac and cannot alter the shipped binary, so archiving one
+            # afterwards is minutes spent on a build nobody will install.
+            #
+            # project.yml and Package.swift are in here even though they are
+            # not sources: they are the Xcode project and the package, so they
+            # decide what the archive even contains.
+            case "$f" in
+              ios/TinyTube/*|ios/TinyTubeCore/Sources/*|\
+              ios/project.yml|ios/TinyTubeCore/Package.swift) IPA=true ;;
+            esac
           done
-          echo "Touches the iOS sources: $WANTED (needs a Mac: $APP)"
+          echo "Touches the iOS sources: $WANTED (needs a Mac: $APP, changes the IPA: $IPA)"
           echo "ios=$WANTED" >> "$GITHUB_OUTPUT"
           echo "app=$APP" >> "$GITHUB_OUTPUT"
+          echo "ipa=$IPA" >> "$GITHUB_OUTPUT"
 
       # Can this publish just re-serve the IPA the pull request already built?
       #
@@ -300,7 +319,10 @@ jobs:
       # sign for a free Apple ID at all, because free provisioning only happens
       # inside Xcode with a human present. AltStore and Sideloadly re-sign on
       # the way in, which is the supported path for that tier.
+      # Everything from here down builds the shipped binary. A change that only
+      # touches the tests is tested above and stops here.
       - name: Archive
+        if: needs.changes.outputs.ipa == 'true'
         working-directory: ios
         run: |
           set -euo pipefail
@@ -317,6 +339,7 @@ jobs:
       # Payload/, so build that directly — which is also exactly what the
       # sideloaders expect to be handed.
       - name: Package the IPA
+        if: needs.changes.outputs.ipa == 'true'
         working-directory: ios
         run: |
           set -euo pipefail
@@ -336,6 +359,7 @@ jobs:
       # Nothing on iOS reads either one at runtime; there is no self-update. It
       # is for a person asking what the download link is currently serving.
       - name: Collect the build outputs
+        if: needs.changes.outputs.ipa == 'true'
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -345,7 +369,10 @@ jobs:
             "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/version.json
           cat dist/version.json dist/build-tree.txt
 
+      # Nothing to upload when nothing was archived. The publish path is
+      # unaffected: on main the filter above answers true for everything.
       - uses: actions/upload-artifact@v4
+        if: needs.changes.outputs.ipa == 'true'
         with:
           name: tinytube-ipa
           path: dist/
