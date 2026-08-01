@@ -413,7 +413,8 @@ match, so anything that can only exist on one platform belongs in it.
 | **Self-update** | Yes — checks the Worker, downloads, installs on a tap | **No** | iOS has no `PackageInstaller` equivalent and a sideloaded app cannot install its successor. On the free Apple ID tier there is no delivery channel at all: builds are sideloaded by hand. See **Distribution** below. |
 | **Update notification** | Yes | No | Nothing to notify about without self-update, and the free tier has no push entitlement either. |
 | **Parent gate fallback** | Device lock, arithmetic if the device has none | Device lock; arithmetic present but nearly unreachable | `LocalAuthentication`'s `deviceOwnerAuthentication` falls back to the passcode by itself, so only a device with no lock at all reaches the arithmetic. |
-| **Player bottom blocker** | Measured from the player's own pixels | **Fixed inset**, the same 16pt Android falls back to | Resolved by spike, below: no iOS API returns the composited pixels of a playing video to the app that drew them. `Chrome.swift` is ported and tested but unused on iOS. |
+| **Player bottom blocker** | Measured from the player's own pixels, silently, as often as it likes | Measured **once per install**, at the cost of one consent alert | Only ReplayKit returns the composited pixels of a playing video, and it asks the user first. So iOS captures once, stores the answer per display, and never asks again. |
+| **What the capture can see** | The bottom strip only — `PixelCopy` takes a source rectangle, so the video is never captured at all | The whole frame arrives; only the strip is read out of it | ReplayKit has no source rectangle. Weaker than Android's guarantee, and the closest iOS allows. |
 | **Approving from your own subscriptions** | Yes — sign in to Google inside parent mode | **Best-effort, and expected to break** | Google blocks account sign-in from embedded webviews. Android evades the check by dropping one user-agent token; the iOS equivalent is adding two. Same workaround, same fragility, and no sanctioned replacement — see the spike below. |
 | **App lifetime before it stops launching** | Indefinite | **7 days** | Free-tier provisioning profiles expire after a week. Re-sideload to reset it. |
 | **How many can be installed** | No limit | **3 sideloaded apps** at once, across all apps | A free Apple ID limit, not something this app can spend. |
@@ -444,20 +445,38 @@ iOS has no `PixelCopy`. Each candidate fails for the same reason:
   that captures special layers, and it returns black where the video is. **On
   devices only — it works in the simulator.** Anything "verified" on a simulator
   here is verified wrong, which is the trap this spike existed to avoid.
-- **ReplayKit** genuinely captures the composited screen, and is disqualified on
-  purpose. It is a screen *recording* API: it needs consent, shows a recording
-  indicator, and hands over the picture rather than a number. The rule in
-  `CLAUDE.md` is that the capture stays a measurement and never becomes a
-  picture; ReplayKit is the picture.
+- **ReplayKit** genuinely captures the composited screen, and is what iOS uses.
 
-So `Chrome.swift` has nothing to read on iOS, and the blocker is a fixed **16pt**
-— the same constant `player_bottom_block` gives Android before it has measured,
-chosen small on purpose because a blocker that is too tall eats the seek bar it
-exists to protect.
+That last one was written off at first, on the grounds that it hands over a
+picture rather than a number. That reasoning was wrong and is worth correcting
+rather than quietly dropping: Android's `PixelCopy` hands over a bitmap too. The
+rule is about **retention** — read it, recycle it, never store or send it — and
+a discarded ReplayKit frame satisfies that exactly as a discarded Android bitmap
+does.
 
-`Chrome.swift` stays, tested, unused. It cost nothing to keep and the port is
-already paid for; if a future iOS release ever exposes composited pixels, the
-logic it would need is sitting there with 95 tests around it.
+What is genuinely different is that ReplayKit **asks**. It shows "TinyTube would
+like to record your screen", once per app process and again after eight minutes
+in the background, and on this app a child can be the one looking at that alert.
+That is a reason to capture rarely, not never. So iOS measures **once per
+install**: the answer goes to `BlockHeightStore` keyed by display and by a
+version number, and after that no capture is ever started again. A device where
+the capture never yields a usable frame gives up after three launches rather
+than prompting on every one, and a bumped version revives it.
+
+Two rules carry over from Android unchanged, because both were paid for there. A
+failed capture **stores nothing** — `Chrome.blockHeight` returns nil for "could
+not tell" precisely so a blank frame cannot be written down as an answer, which
+is the bug that made the feature silently do nothing on a real phone. And the
+stored value is keyed by a **version**, so a fix to the measurement actually
+reaches a device that already wrote a wrong answer.
+
+One difference remains and cannot be closed. Android passes `PixelCopy` a source
+rectangle, so only the bottom strip is ever copied and the part of the screen
+with the video in it is never captured at all — true by construction. ReplayKit
+has no such parameter: whole frames arrive, and this reads only the strip's rows
+out of them. Nothing above the strip is ever copied into memory the app owns,
+and nothing is written, handed on, or sent — but the frame does exist briefly in
+a buffer the system owns, and that is weaker than Android's guarantee.
 
 #### Does Google sign-in work inside `WKWebView`? **Only by lying, same as Android.**
 

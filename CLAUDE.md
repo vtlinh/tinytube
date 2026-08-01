@@ -4,9 +4,10 @@ Guidance for Claude Code when working in this repository.
 
 ## Project
 
-**TinyTube** is an Android app for watching a parent-curated set of YouTube
-videos. A child sees a grid of approved videos and can reach nothing else. See
-`README.md` for the architecture and the approval workflow.
+**TinyTube** is an app for watching a parent-curated set of YouTube videos. A
+child sees a grid of approved videos and can reach nothing else. Android ships;
+iOS is being built alongside it under the rule below. See `README.md` for the
+architecture and the approval workflow.
 
 Everything is TinyTube: the label, the Kotlin package, the `applicationId`
 (`dev.vtlinh.tinytube`) and the Worker (`tinytube.vtlinh87.workers.dev`). The
@@ -53,14 +54,18 @@ explicitly — sort by an explicit tiebreaker rather than trusting the order in.
 
 Two answers already bought with a spike, so don't re-derive them:
 
-- **`Chrome.swift` is unused on iOS on purpose. Don't delete it as dead code.**
-  No iOS API hands the app the composited pixels of a playing video —
+- **`Chrome.swift` is fed by ReplayKit on iOS, and by nothing else.**
   `takeSnapshot` is software-painted, `CALayer.render(in:)` can't see an
-  out-of-process layer, `drawHierarchy` returns black over video on devices
-  *while working in the simulator*, and ReplayKit is a recording API that
-  yields a picture rather than a measurement. The iOS blocker is a fixed 16pt.
-  The file stays because its Kotlin counterpart is live and the line-for-line
-  rule would otherwise have a hole in it.
+  out-of-process layer, and `drawHierarchy` returns black over video on devices
+  *while working in the simulator* — don't "confirm" that one on a simulator.
+  ReplayKit reads the real screen, which is what Android's `PixelCopy` does.
+  That it hands over a frame is NOT a reason to refuse it: `PixelCopy` hands
+  over a bitmap too, and the rule below is about retention, not about pixels
+  existing. What is different on iOS is the **consent alert** — once per app
+  process, again after 8 minutes backgrounded — which a child can be the one
+  looking at. So it captures **once per install**, stores the answer per
+  display, and gives up after three fruitless launches rather than prompting
+  forever. A failure stores nothing. See `ScreenMeasurement`.
 - **Google sign-in inside a webview works only by user-agent evasion**, on both
   platforms — Android removes `; wv`, iOS adds `Version/… Safari/…`. It is
   expected to break. `SFSafariViewController` is not the fallback: the app
@@ -76,8 +81,25 @@ worker.test.mjs                  its parsers, under `node --test` (CI runs it)
 ios/project.yml                  the Xcode project, as a readable file; the
                                  .xcodeproj is GENERATED, never committed
 ios/TinyTube/                    the app target
-  PlayerChrome.swift             the fixed bottom inset (the spike's answer)
-  BrowserUserAgent.swift         the Safari suffix that lets Google sign in
+  Database.swift        the one SQLite file; RUNS Schema's ladder
+  ChannelStore.swift    approved channels — the parental control
+  VideoStore.swift      the grid; a reply REPLACES a channel's videos
+  WatchStore.swift      what was played, device-only, pruned
+  SettingsStore.swift   the parent's choices, in UserDefaults
+  Endpoints.swift       the Worker's hostname — don't change it
+  ChannelFeeds.swift    asks the Worker, once a day per channel
+  MainView.swift        the grid + the read-only Channels tab
+  PlayerView.swift      overlay, reveal corner, blocker, what plays next
+  PlayerWebView.swift   the locked-down WKWebView + the Bridge shim
+  ParentView.swift      real YouTube, only ever reached through the gate
+  ApprovedChannelsView.swift  the approved list, with open and remove
+  SettingsView.swift    the parent's choices + About; no updates on iOS
+  Gate.swift            LocalAuthentication; arithmetic only with no lock
+  ChallengeView.swift   that arithmetic fallback
+  PlayerChrome.swift    the blocker's height: measured, else 16pt
+  BlockHeightStore.swift  it, remembered — per display, per version
+  ScreenMeasurement.swift ReplayKit capture; feeds Chrome, once ever
+  BrowserUserAgent.swift  the Safari suffix that lets Google sign in
 ios/TinyTubeTests/               app-target tests; run on a simulator in CI
 ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
                                  Kotlin files; `swift test` runs it on Linux
@@ -91,7 +113,7 @@ ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
 android/                         the app
   signing.p12                    committed keystore; see README for why
-  app/src/main/java/dev/vtlinh/ytkids/
+  app/src/main/java/dev/vtlinh/tinytube/
     VideoId.kt      pure: which video ids are valid   (unit-tested)
     Player.kt       pure: page + navigation allowlist (unit-tested)
     Challenge.kt    pure: the arithmetic fallback gate (unit-tested)
@@ -135,8 +157,21 @@ commands; CI provisions it.
 avoid.** `swift test` covers `TinyTubeCore` and nothing else — that package is
 Linux-buildable on purpose. Everything under `ios/TinyTube/` needs Xcode, so the
 `ios-app` job on a macOS runner is the first thing that ever compiles it. Don't
-claim a screen is verified because the core tests are green. If you need the
-project locally on a Mac:
+claim a screen is verified because the core tests are green.
+
+One thing you CAN do here, and should before batching up a lot of app code:
+
+```bash
+for f in ios/TinyTube/*.swift ios/TinyTubeTests/*.swift; do swiftc -parse "$f"; done
+```
+
+`-parse` stops before type checking, so it never loads UIKit or ReplayKit and
+runs on Linux. It catches typos and malformed declarations; it CANNOT tell you
+an API call is wrong. `ios-core` runs the same check, so a syntax error costs a
+Linux run rather than a macOS one — but a batched PR full of app code is still
+mostly unverified until `ios-app` runs. Say so when reporting it.
+
+If you need the project locally on a Mac:
 
 ```bash
 brew install xcodegen && (cd ios && xcodegen generate)   # writes TinyTube.xcodeproj
@@ -160,8 +195,12 @@ still build; the only thing draft status changes is that auto-merge leaves them
 alone. Don't open one as a way of "saving" runs.
 
 The cost of batching is that nothing is checked until the end, so check it here
-instead. Run the three suites locally before opening anything — see Commands —
-and treat a red one exactly as you would a red CI run.
+instead. Before opening anything, run every suite that runs locally — the Gradle
+unit tests, `node --test`, `swift test`, and the `swiftc -parse` sweep over the
+app target — and treat a red one exactly as you would a red CI run. See
+**Commands**. Note what that list does NOT include: nothing under
+`ios/TinyTube/` is compiled by any of it, so a batched PR carrying app code is
+still unverified in the way that matters until `ios-app` runs.
 
 Don't leave finished work sitting on a branch with no PR either. "Everything
 that was asked" is the trigger, not "everything I can think of".
@@ -368,6 +407,16 @@ stops, green publishes.
   exclusions and the FileProvider that made it safe. Don't widen the source
   rectangle, don't keep the bitmap, and don't add a caller that wants the
   image rather than the number.
+
+  **iOS cannot keep the source-rectangle half of that promise, and says so.**
+  `PixelCopy` takes a rectangle; ReplayKit does not, so whole frames arrive and
+  `ScreenMeasurement` reads only the strip's rows out of them. Nothing above the
+  strip is ever copied into memory the app owns, nothing is written, kept or
+  sent, and capture stops the moment a measurement succeeds — but the frame does
+  exist briefly in a buffer the system owns. That is weaker than Android's
+  guarantee, it is the closest iOS allows, and it is a row in README's Platform
+  differences rather than a silent divergence. The rest of the rule binds both
+  platforms unchanged: it is a measurement, never a picture.
 - **Bump `BlockHeightStore.VERSION` whenever the measurement changes.** A
   preference file survives an app update, so a wrong answer written by one
   build is read back by every build after it — which is how fixing the latching
@@ -376,6 +425,12 @@ stops, green publishes.
   bumped once per wrong answer that got persisted: 2 when a failed capture
   could be stored as a result, 3 when the measurement moved from the red to the
   track and every number it had ever written became wrong.
+
+  iOS has its own `BlockHeightStore` with its own `version`, starting at 1 —
+  no iOS build has persisted a wrong answer yet. The NUMBERS need not agree
+  across platforms; the RULE does. On iOS the version also resets the
+  give-up counter, so a build that fixes the measurement gets another go on a
+  device that had stopped trying.
 - **A failed measurement must never be stored.** `Chrome.blockHeightOrNull`
   returns null for "could not tell" precisely so the Activity can distinguish
   it from a real answer that happens to equal the fallback. Latching on the
@@ -422,7 +477,14 @@ stops, green publishes.
 - **The Worker's parsing is tested by `worker.test.mjs`, run in CI.** It reads a
   rendering of YouTube's own web app, so it breaks without anyone touching it —
   it is pinned against three entries lifted verbatim from a live page. The
-  `node --test` step lives in `android.yml` on purpose: auto-merge waits only
-  for the `android` run, so a check anywhere else would not gate a merge.
+  `node --test` step lives in `android.yml`, and the reason once given for that
+  — "auto-merge waits only for the `android` run, so a check anywhere else
+  would not gate a merge" — **is no longer true**: auto-merge now requires
+  `build`, `ios-core` and `ios-app` by name, so a check in `ios.yml` gates a
+  merge just as well. What still argues for leaving it where it is: the Worker
+  is what feeds the grid on both platforms, `android` is the run that publishes,
+  and moving it would cost a rerun to prove nothing. If a third workflow ever
+  wants it, put it in whichever one is REQUIRED — that, not the file's name, is
+  what makes a check a gate.
 - Never commit API keys or tokens. The Worker's `GH_TOKEN` is a wrangler secret;
   `signing.p12` is committed on purpose and is not a secret (see README).

@@ -1,41 +1,57 @@
 import Foundation
+import UIKit
 
-/* How tall the player's bottom blocker is on iOS — a constant, and the reason
-   it is a constant rather than a measurement.
+/* How tall the player's bottom blocker is on iOS.
 
-   Android measures this. `PixelCopy` there reads the COMPOSITED window,
-   hardware video surface and all, so the app can look at YouTube's own seek bar
-   and work out how much room to leave under it. `Chrome.swift` is that logic,
-   ported line for line and tested, and on iOS it has nothing to read:
+   MEASURED, like Android — not the fixed inset an earlier commit here settled
+   on. That earlier answer said ReplayKit was refused because "it yields a
+   picture", and that reasoning was wrong: Android's `PixelCopy` yields a bitmap
+   too. The rule in CLAUDE.md is about RETENTION — recycle it, never store it,
+   never send it — and a discarded ReplayKit frame satisfies it exactly as a
+   discarded Android bitmap does. What is genuinely different on iOS is the
+   consent alert, and that is a reason to capture RARELY rather than never. So
+   it captures once per install. See `ScreenMeasurement` for the shape that
+   forces, and README's Platform differences for the difference that remains.
 
-     - `WKWebView.takeSnapshot(with:)` is software-painted — the same class of
-       thing as Android's `WebView.draw(Canvas)`, which is exactly what failed
-       there before `PixelCopy` replaced it.
-     - `CALayer.render(in:)` walks the layer tree this process owns; the video
-       is composited out of process and is not in it.
-     - `UIView.drawHierarchy(in:afterScreenUpdates:)` comes back black over
-       video ON DEVICES while working in the SIMULATOR. Do not "confirm" this
-       one on a simulator — it will agree with you and be wrong.
-     - ReplayKit does capture the composited screen, and is refused rather than
-       unavailable: it is a recording API that hands over a picture, and the
-       rule in CLAUDE.md is that this capture stays a measurement.
+   The other candidates really are unusable, and that half of the spike stands:
+   `takeSnapshot` is software-painted, `CALayer.render(in:)` cannot see an
+   out-of-process layer, and `drawHierarchy` returns black over video on devices
+   while working in the simulator.
 
-   So: a fixed inset, at the same 16 points Android's `player_bottom_block`
-   falls back to before it has measured. Erring small is deliberate. Too tall
-   and the blocker covers the seek bar itself, which is the one control the
-   reveal corner exists to reach — a blocker that is slightly too short leaves a
-   sliver of YouTube reachable, a blocker that is too tall makes the player
-   unusable for the adult who just unlocked it.
-
-   In POINTS, and never converted. UIKit lays out in points and the iOS blocker
-   is not derived from any pixel measurement, so there is nothing here that
-   wants a scale factor. */
+   In POINTS throughout. `ScreenMeasurement` divides the pixel answer by the
+   screen's scale on the way out, so nothing downstream converts anything. */
 enum PlayerChrome {
 
-    /* The blocked strip along the bottom of the player, in points.
+    /* What the blocker is until something better is known — on the first video
+       of a fresh install, on a device that refused the capture, and on one that
+       has used up its attempts.
      *
-     * Matches `player_bottom_block` in android/app/src/main/res/values/dimens.xml.
-     * If that number ever changes, this one changes with it — it is the same
-     * decision about the same player, and the platforms agreeing is the point. */
-    static let bottomBlockPoints: CGFloat = 16
+     * The same 16 points Android's `player_bottom_block` falls back to. Erring
+     * small is deliberate: too tall and the blocker covers the seek bar itself,
+     * which is the one control the reveal corner exists to reach. A blocker
+     * slightly too short leaves a sliver of YouTube reachable; one too tall
+     * makes the player unusable for the adult who just unlocked it. */
+    static let fallbackPoints: CGFloat = 16
+
+    /* A measured answer this far from plausible is not an answer. `Chrome`
+       already refuses implausible geometry in ratio terms; this is the outer
+       bound in points, and exists because a measurement that came back as most
+       of the screen would block most of the player.
+     *
+     * Expressed as a fraction of the screen rather than a constant, so it holds
+     * on a phone and on an iPad. */
+    static func isPlausible(_ points: CGFloat, screenHeight: CGFloat) -> Bool {
+        points > 0 && points <= screenHeight / 4
+    }
+
+    /* The height to use right now: what was measured on this display, or the
+       fallback. Never blocks on a capture — the capture, if it runs at all,
+       reports later and the blocker resizes then. */
+    static func currentPoints(_ defaults: UserDefaults = .standard,
+                              screen: UIScreen = .main) -> CGFloat {
+        guard let stored = BlockHeightStore.get(defaults, screen: screen),
+              isPlausible(stored, screenHeight: screen.bounds.height)
+        else { return fallbackPoints }
+        return stored
+    }
 }
