@@ -1,13 +1,14 @@
-/* The Worker behind the Android app.
+/* The Worker behind both apps.
  *
- * Two jobs, and they are kept apart on purpose.
+ * Three jobs, and the credential is kept apart from two of them on purpose.
  *
  * RELEASE ASSETS. The repository is private, so its release assets answer 404
  * to anyone without a credential and an installed app could never discover an
  * update — nothing on the device could recover from that, the update mechanism
  * being the thing that broke. This holds a read-only GitHub token and re-serves
  * them. Those routes are fixed: none takes a URL, a repo or a path from the
- * caller, so the credential cannot be pointed anywhere.
+ * caller, so the credential cannot be pointed anywhere. (Android only; there is
+ * no self-update on iOS.)
  *
  * UPLOADS. /uploads answers "what has this channel posted" so the phone does
  * not have to download two megabytes of YouTube's web app and parse it. It
@@ -15,25 +16,38 @@
  * answers with the current list — full details for what is new, bare ids for
  * what the caller already knows. Measured against a live channel: 1.4 KB when
  * the caller is up to date, 19 KB for a channel it has never seen, against two
- * megabytes of markup before.
+ * megabytes of markup before. This is the route called daily per channel, and
+ * the known-id list is the whole reason it is cheap.
  *
- * That route DOES take input from the caller, which every other route here
- * deliberately does not, so it is worth being exact about what that means:
+ * CHANNEL. /channel answers "which channel is this page, and what has it
+ * posted" — the id, the name, the avatar and the first hundred uploads, in one
+ * reply. Reading a channel page used to happen on the device, which meant every
+ * approval downloaded a full page to read one 24-character string out of it.
+ * It sends no known-id list because nothing is ever known at approval time.
  *
- *   - It never reads env.GH_TOKEN. The credential is in the release path and
- *     nothing on this path can reach it.
- *   - The only thing taken from the caller is a channel id matched against
- *     ^UC[A-Za-z0-9_-]{22}$ and a bounded list of ids matched against
- *     ^[A-Za-z0-9_-]{11}$. Every URL fetched is BUILT here from a validated
- *     id — no caller-supplied URL, host or path reaches fetch(), so this
- *     cannot be used to make the Worker retrieve something else.
+ * ALL THE YOUTUBE PARSING IS HERE. Neither app reads a byte of YouTube's markup.
+ *
+ * The two YouTube routes DO take input from the caller, which the release
+ * routes deliberately do not, so it is worth being exact about what that means:
+ *
+ *   - Neither reads env.GH_TOKEN. `env` is not even passed to them; the
+ *     credential is in the release path and nothing on these can reach it.
+ *   - /uploads takes a channel id matched against ^UC[A-Za-z0-9_-]{22}$ and a
+ *     bounded list of ids matched against ^[A-Za-z0-9_-]{11}$.
+ *   - /channel takes a URL, and that is NOT the exception it looks like. The
+ *     caller's string is never fetched: channelTargetFromUrl parses it, demands
+ *     a host in PAGE_HOSTS and a path of exactly /channel/UC… or /@handle, and
+ *     REBUILDS the address from what it extracted. The most a caller can name
+ *     is a different YouTube channel, which is the point of the route.
+ *   - So every URL fetched here is BUILT from a validated value. The rule is
+ *     not "never accept a URL", it is never fetch() a string a caller supplied.
  *   - The known-id list is capped, and it only ever makes the response
  *     smaller. A caller that lies about what it has gets fewer details, not
  *     someone else's.
  *
  * Curation is still not served from here. Which channels a child may watch
- * lives in SQLite on the device and nothing about this route can change it —
- * this answers a question about a channel the parent already approved.
+ * lives in SQLite on the device and nothing about these routes can change it —
+ * they answer questions about channels, not about who may watch them.
  *
  * One-time setup, from this directory:
  *   npx wrangler deploy                  # if the git-connected build isn't on
@@ -441,10 +455,18 @@ async function channel(request) {
   }
 
   /* The uploads come back with it: one round trip for the whole approval,
-   * rather than resolve-then-fetch with the parent watching. `known` is empty
-   * in practice — a channel being approved has nothing stored yet — but it is
-   * honoured so re-approving one doesn't re-send a hundred titles. */
-  const videos = await uploadsFor(resolved, knownIds(body));
+   * rather than resolve-then-fetch with the parent watching.
+   *
+   * Nothing is ever "already known" here, so this route does not accept a
+   * `known` list. A channel being approved has nothing stored, and removing one
+   * deletes its videos — so a re-approval has nothing stored either. It read
+   * such a list briefly and no caller ever sent one; an input shape nothing
+   * uses is surface to justify for nothing, which is the same reason /channel
+   * doesn't take a video id.
+   *
+   * The known-id optimisation is /uploads' and stays there: that is the route
+   * called every day per channel, where it turns a 19 KB reply into 1.4 KB. */
+  const videos = await uploadsFor(resolved, EMPTY);
 
   return json({
     id: resolved,
@@ -488,6 +510,10 @@ async function uploadsFor(channelId, known) {
       : { id: v.id, title: v.title, published: v.published, thumb: thumbnailUrl(v.id) },
   );
 }
+
+/* Nothing is known. Named rather than inlined so the /channel path reads as a
+ * deliberate choice instead of an oversight. */
+const EMPTY = new Set();
 
 /* The ids a caller says it already has. Only ever shrinks the response: a
  * caller that lies about what it has gets fewer details, never someone

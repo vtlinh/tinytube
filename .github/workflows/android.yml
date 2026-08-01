@@ -31,9 +31,16 @@ on:
 
 # contents: write publishes the release. actions: read is what lets this run
 # download an artifact belonging to a DIFFERENT run — the reuse path below.
+# A permissions block REPLACES the defaults rather than adding to them, so every
+# scope any job here touches has to be listed. Leaving one out does not fail
+# loudly — the call 403s and, because the `changes` job below fails OPEN, the
+# only symptom is that everything builds as if nothing were filtered. That is
+# exactly what happened on the first run after the filtering landed, and it is
+# the same way `checks` went missing from auto-merge.yml for four runs.
 permissions:
   contents: write
   actions: read
+  pull-requests: read   # the `changes` job asks which files a PR touched
 
 # main: only one publish at a time. Two overlapping runs both clobber the fixed
 # android-latest release, so a slower older run can land its APK on top of a
