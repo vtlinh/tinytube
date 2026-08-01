@@ -84,31 +84,44 @@ class YouTubeUrlsTest {
 
     @Test fun `builds a feed url only for a valid id`() {
         assertEquals(
-            "https://www.youtube.com/feeds/videos.xml?channel_id=$ok",
+            "https://www.youtube.com/feeds/videos.xml?playlist_id=UULF${ok.substring(2)}",
             YouTubeUrls.feedUrl(ok),
         )
         assertNull(YouTubeUrls.feedUrl("nope"))
         assertNull(YouTubeUrls.feedUrl("UC" + "a".repeat(21) + "&x=1"))
     }
 
-    /* UC to UU, and nothing else touched. The id keeps its 22 characters, so
-       a valid channel id always makes a valid playlist id. */
-    @Test fun `derives the uploads playlist id`() {
-        assertEquals("UU" + ok.substring(2), YouTubeUrls.uploadsPlaylistId(ok))
-        assertEquals(24, YouTubeUrls.uploadsPlaylistId(ok)!!.length)
-        assertEquals("UUx_-yZ0123456789abcdefg", YouTubeUrls.uploadsPlaylistId("UCx_-yZ0123456789abcdefg"))
+    /* UC to UULF, and nothing else touched. */
+    @Test fun `derives the long-form uploads playlist id`() {
+        assertEquals("UULF" + ok.substring(2), YouTubeUrls.longFormPlaylistId(ok))
+        assertEquals(26, YouTubeUrls.longFormPlaylistId(ok)!!.length)
+        assertEquals(
+            "UULFx_-yZ0123456789abcdefg",
+            YouTubeUrls.longFormPlaylistId("UCx_-yZ0123456789abcdefg"),
+        )
+    }
+
+    /* The whole of how Shorts stay off a child's screen is that every URL
+       here names UULF rather than UU. A UU anywhere in this file would put
+       them back, silently, with nothing else to notice. */
+    @Test fun `every uploads url names the long-form playlist, never the plain one`() {
+        for (url in listOf(YouTubeUrls.feedUrl(ok)!!, YouTubeUrls.uploadsUrl(ok)!!)) {
+            assertTrue("$url should name UULF", url.contains("UULF${ok.substring(2)}"))
+            assertFalse("$url must not name the UU playlist", url.contains("=UU${ok.substring(2)}"))
+        }
     }
 
     /* Same gate as feedUrl, and for the same reason: this string is fetched.
        An unvalidated id here is a query parameter someone else chose. */
     @Test fun `builds an uploads url only for a valid id`() {
         assertEquals(
-            "https://www.youtube.com/playlist?list=UU${ok.substring(2)}&hl=en",
+            "https://www.youtube.com/playlist?list=UULF${ok.substring(2)}&hl=en",
             YouTubeUrls.uploadsUrl(ok),
         )
         for (bad in listOf("nope", "", "UC" + "a".repeat(21) + "&x=1", "UU" + "a".repeat(22))) {
-            assertNull("should have refused: $bad", YouTubeUrls.uploadsPlaylistId(bad))
+            assertNull("should have refused: $bad", YouTubeUrls.longFormPlaylistId(bad))
             assertNull("should have refused: $bad", YouTubeUrls.uploadsUrl(bad))
+            assertNull("should have refused: $bad", YouTubeUrls.feedUrl(bad))
         }
     }
 

@@ -69,6 +69,14 @@
             android:exported="false"
             android:label="@string/parent_approved_title" />
 
+        <!-- Same rule as ParentActivity: not exported, and started only by a
+             RESULT_OK from ChallengeActivity. A setting a child can reach is
+             not a parental control. -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="@string/settings_title" />
+
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false">

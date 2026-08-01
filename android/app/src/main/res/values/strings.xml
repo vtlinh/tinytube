@@ -76,4 +76,13 @@
          session can stall or its confirmation be dismissed, and then this tap
          is the only way out. -->
     <string name="install_retry">Install again</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_next_video">When a video ends</string>
+    <string name="settings_next_video_explain">Another video starts automatically. Choose which one.</string>
+    <string name="settings_next_in_order">Play the next one down the list</string>
+    <string name="settings_next_random">Play a random one</string>
+    <!-- Says where "the list" is, because the answer depends on where the
+         child tapped and that is not obvious from either label. -->
+    <string name="settings_next_scope_explain">Either way it comes from whatever was on screen: everything, or just that channel if you opened one. Playing in order stops at the end of the list.</string>
 </resources>

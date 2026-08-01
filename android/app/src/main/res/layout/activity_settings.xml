@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Parent settings. Reached only through ChallengeActivity, so nothing here
+     needs a gate of its own — see MainActivity.
+
+     Laid out like About: cards on a plain background, so a setting reads as a
+     thing you press rather than as a line of prose. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_tile"
+            android:padding="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_next_video"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@color/text" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="@string/settings_next_video_explain"
+                android:textSize="14sp"
+                android:textColor="@color/text_muted"
+                android:lineSpacingExtra="2dp" />
+
+            <!-- A radio group rather than a switch: there are two named
+                 choices and neither is an "off". -->
+            <RadioGroup
+                android:id="@+id/next_mode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="vertical">
+
+                <RadioButton
+                    android:id="@+id/next_in_order"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_next_in_order"
+                    android:textSize="16sp"
+                    android:textColor="@color/text" />
+
+                <RadioButton
+                    android:id="@+id/next_random"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:text="@string/settings_next_random"
+                    android:textSize="16sp"
+                    android:textColor="@color/text" />
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/settings_next_scope_explain"
+                android:textSize="13sp"
+                android:textColor="@color/text_muted"
+                android:lineSpacingExtra="2dp" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

@@ -71,6 +71,13 @@ class MainActivity : AppCompatActivity() {
             parentGate.launch(Intent(this, ChallengeActivity::class.java))
         }
 
+        /* And the settings, behind the same lock. Two buttons on the bar now,
+           and the rule they are both under is unchanged: neither opens
+           anything without a RESULT_OK from ChallengeActivity first. */
+        findViewById<View>(R.id.settings).setOnClickListener {
+            settingsGate.launch(Intent(this, ChallengeActivity::class.java))
+        }
+
         /* About stays on the long press. It is parent-facing but harmless —
            a version number and an update button — so it does not need the
            gate, and keeping it off the bar keeps the bar to one choice. */
@@ -145,6 +152,17 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
                 startActivity(Intent(this, ParentActivity::class.java))
+            }
+        }
+
+    /* A gate of its own rather than a flag on the one above: two launchers
+       cannot be confused about which one a result belongs to, and "which
+       screen was I trying to open" is not state worth keeping across a
+       process death. */
+    private val settingsGate =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                startActivity(Intent(this, SettingsActivity::class.java))
             }
         }
 
@@ -265,7 +283,13 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            holder.itemView.setOnClickListener { PlayerActivity.start(this@MainActivity, v) }
+            /* The whole visible list goes with the tap, not just this video.
+               What plays after it has to come from the same place — which on
+               a grid narrowed to one channel is that channel, with no rule
+               here saying so. See PlayerActivity.start. */
+            holder.itemView.setOnClickListener {
+                PlayerActivity.start(this@MainActivity, videos.toList(), holder.bindingAdapterPosition)
+            }
         }
     }
 

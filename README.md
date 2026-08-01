@@ -10,8 +10,9 @@ ads for everything under the sun — a child sees a grid of big poster tiles
 holding recent uploads from the channels an adult approved, and nothing else.
 
 There is no search box, no menu, no text entry, and no way to navigate out of
-the app. Tapping a tile plays that video; when it ends the player closes and the
-child is back at the grid.
+the app. Tapping a tile plays that video, and when it ends the next one starts —
+from the same list that was on screen when they tapped. Open a channel first and
+the whole session stays inside it.
 
 ## How it fits together
 
@@ -58,12 +59,29 @@ Removing a channel drops its videos from the grid immediately.
 > channel-level approval means rather than a gap in the implementation — so
 > choose channels you'd trust unattended, and check back on them.
 
-The grid holds each channel's **latest 100 uploads**. Those come from the
-channel's uploads playlist page, whose first response lists exactly a hundred —
-about 300 KB gzipped per channel per refresh. If that page comes back empty for
-any reason, the channel falls back to YouTube's published Atom feed, which needs
-nothing and carries roughly the latest 15. Fifteen videos is a thinner grid; an
-empty one is a broken app.
+The grid holds each channel's **latest 100 uploads**, ordered by upload time,
+newest first, across every approved channel together.
+
+Two requests per channel make that. The **uploads playlist page** lists exactly
+a hundred videos in upload order and carries no dates; the **Atom feed** for the
+same playlist carries the newest fifteen with real timestamps, in ten kilobytes.
+Videos the feed dates keep those dates; everything below is placed one second
+apart in the page's order — a sort key that preserves what is actually known,
+not a claim about when something was posted. About 150 KB gzipped per channel
+per refresh.
+
+If the page comes back empty for any reason the feed is the whole answer, at
+fifteen videos. Fifteen is a thinner grid; an empty one is a broken app.
+
+**No Shorts, ever.** Both requests name the channel's `UULF` playlist — its
+uploads with Shorts removed, by YouTube's own classification — rather than the
+plain `UU` one. Nothing in this app decides what a Short is, because nothing in
+the data says: the page reports every entry as a video either way, and duration
+is not the rule. YouTube sorts by aspect ratio, so filtering by length would
+drop exactly the short, wide videos a children's channel posts while keeping
+three-minute vertical Shorts. Measured against a live channel: `UU` held 100
+videos of which 48 were on the channel's Shorts tab; `UULF` held 100 with an
+intersection of zero.
 
 The gate is the device's own lock, so this app never invents or stores a secret
 of its own — it only learns whether the platform's check passed. On a device
@@ -72,6 +90,22 @@ back to arithmetic: given `X + Y` and `X − Y`, name both `X` and `Y`, with the
 numbers re-rolled on every wrong answer so guesses can't converge. That
 fallback is a speed bump rather than a lock — if it is what your device gets,
 setting a screen lock is the fix.
+
+## Settings
+
+The gear next to **Parent** in the status bar goes through the same lock and
+holds the parent's choices. There is one so far: what plays when a video ends.
+
+- **Play the next one down the list** — walks the grid in order and stops at the
+  end of it. A session has an edge.
+- **Play a random one** — picks another video from the same list, never the one
+  that just played.
+
+Either way "the list" is whatever was on screen when the child tapped: every
+approved channel's uploads, or one channel's if they opened it from the Channels
+tab. A video started inside a channel cannot lead out of it. That falls out of
+how the player is started rather than from a rule inside it — it is handed the
+list it should be walking, so there is nothing for a bug to get wrong.
 
 ## How the safety boundary works
 
@@ -83,11 +117,12 @@ before anything is published:
 | --- | --- |
 | `VideoId.kt` | which video ids are usable at all |
 | `Player.kt` | where the player's WebView may navigate |
-| `YouTubeUrls.kt` | channel ids, and where parent mode may browse |
-| `Feed.kt` | what comes out of a channel's upload feed |
+| `YouTubeUrls.kt` | channel ids, which playlist is fetched, where parent mode may browse |
+| `Feed.kt` | what comes out of a channel's uploads |
 | `Challenge.kt` | the arithmetic fallback gate |
 | `Schema.kt` | the SQL behind the approved list |
-| `Library.kt` | how feeds become the grid |
+| `Library.kt` | how uploads become the grid, and its order |
+| `Playlist.kt` | what plays after a video ends |
 | `Chrome.kt` | where YouTube's seek bar is, from the pixels |
 
 Two of them matter most:
@@ -119,8 +154,9 @@ from a live page, so a rename shows up as a failing test rather than as an empty
 grid.
 
 On top of that the player disables the long-press context menu, popups, file and
-content access, and closes itself the moment the video ends, before the
-end-screen grid of related videos can be tapped.
+content access, and acts the moment a video ends — loading the next one, or
+closing if there is none — before the end-screen grid of related videos can be
+tapped.
 
 `Chrome.kt` is the odd one on that list, and worth a word because of how it gets
 its input. A native overlay covers the player so none of YouTube's controls can

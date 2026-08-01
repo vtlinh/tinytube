@@ -114,27 +114,61 @@ class PlayerActivity : AppCompatActivity() {
            and still leaves the picture out of it. */
         private const val MEASURE_STRIP_FRACTION = 0.4f
 
-        private const val EXTRA_ID = "id"
-        private const val EXTRA_TITLE = "title"
+        /* Unplayable videos in a row before the player gives up and goes back
+           to the grid. A few, because a removed video next to a private one is
+           ordinary; not unbounded, because a black screen that silently walks
+           a hundred entries is worse than a grid. */
+        private const val MAX_CONSECUTIVE_FAILURES = 3
 
-        fun start(context: Context, video: Video) {
+        private const val EXTRA_IDS = "ids"
+        private const val EXTRA_INDEX = "index"
+
+        /* The whole list the child was looking at, and which of it they
+           tapped. Not one video: what plays next has to come from the same
+           place this one did, and the only thing that knows where that was is
+           the screen they tapped on. A grid narrowed to one channel therefore
+           cannot lead out of that channel, with no rule here to say so.
+
+           Ids only. Titles are not needed once the player is open — it shows
+           YouTube's own — and a hundred of them is a hundred strings across a
+           binder transaction for nothing. */
+        fun start(context: Context, videos: List<Video>, index: Int) {
+            if (index < 0 || index >= videos.size) return
             context.startActivity(
                 Intent(context, PlayerActivity::class.java)
-                    .putExtra(EXTRA_ID, video.id)
-                    .putExtra(EXTRA_TITLE, video.title),
+                    .putExtra(EXTRA_IDS, videos.map { it.id }.toTypedArray())
+                    .putExtra(EXTRA_INDEX, index),
             )
         }
     }
+
+    /* The list this player is walking, and where in it we are. */
+    private var ids: List<String> = emptyList()
+    private var index = 0
+
+    /* Unplayable videos in a row. Reset by anything actually playing, so it
+       counts a run of dead entries rather than a total. */
+    private var failures = 0
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val id = intent.getStringExtra(EXTRA_ID).orEmpty()
-        /* The id arrives through an Intent, which any app on the device can
-           send. Validate it here rather than trusting that it came from our own
-           grid — pageFor refuses too, and this is the cheaper refusal. */
-        val page = Player.pageFor(id)
+        /* The ids arrive through an Intent, which any app on the device can
+           send. Validated here rather than trusted for having come from our own
+           grid — pageFor refuses too, and this is the cheaper refusal. Filtered
+           rather than rejected wholesale, so one bad id in a hundred costs that
+           video and not the tap. */
+        val sent = intent.getStringArrayExtra(EXTRA_IDS).orEmpty().toList()
+        val tapped = sent.getOrNull(intent.getIntExtra(EXTRA_INDEX, 0))
+        ids = sent.filter { VideoId.isValid(it) }
+        /* Found by identity rather than kept as a number: dropping a bad id
+           shifts every index after it, and a silently shifted index plays a
+           video nobody tapped. If the tapped one was itself refused there is
+           nothing to play and we leave. */
+        index = ids.indexOf(tapped)
+
+        val page = ids.getOrNull(index)?.let { Player.pageFor(it) }
         if (page == null) { finish(); return }
 
         setContentView(R.layout.activity_player)
@@ -380,7 +414,7 @@ class PlayerActivity : AppCompatActivity() {
            countdown every time the network hiccuped. */
         val resumed = state == STATE_PLAYING && !playing
         when (state) {
-            STATE_PLAYING -> playing = true
+            STATE_PLAYING -> { playing = true; failures = 0 }
             STATE_PAUSED -> playing = false
         }
         /* Pause to play is somebody pressing play, and that is the clearest
@@ -578,18 +612,54 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    /* The video finished: play the next one from the same list, or leave.
+     *
+     * Either way this happens AT ONCE, before YouTube's end-screen grid of
+     * related videos can be looked at, let alone tapped. That grid is the
+     * reason the player closed itself on every ended video before there was a
+     * next one, and loading over it serves the same purpose.
+     *
+     * Which list, and therefore what can play next, was decided by the screen
+     * the child tapped on — see start(). Whether it is the following video or
+     * a random one is the parent's, from SettingsActivity. */
+    private fun playNext() {
+        val next = Playlist.next(
+            count = ids.size,
+            current = index,
+            mode = SettingsStore.nextMode(this),
+            roll = { n -> java.util.concurrent.ThreadLocalRandom.current().nextInt(n) },
+        )
+        val page = next?.let { Player.pageFor(ids[it]) }
+        if (next == null || page == null) { finish(); return }
+
+        index = next
+        /* The overlay goes back over the new video whatever state it was in.
+           A parent who lifted it to scrub the last one has not asked for the
+           next one to arrive unprotected. */
+        if (revealed) setRevealed(false)
+        playing = false
+        web?.loadDataWithBaseURL(Player.ORIGIN, page, "text/html", "utf-8", null)
+    }
+
     private inner class Bridge {
-        /* The video finished. Close the player before the end-screen grid of
-           related videos can be looked at, let alone tapped. */
+        /* The video finished. */
         @JavascriptInterface
-        fun onEnded() = runOnUiThread { finish() }
+        fun onEnded() = runOnUiThread { playNext() }
 
         /* The IFrame API reports an unplayable video — removed, made private,
            or embedding disabled by its owner. Nothing to show and nothing the
-           child can do, so return to the grid rather than sit on a black
-           rectangle. */
+           child can do, so move on rather than sit on a black rectangle.
+         *
+         * Moving on rather than leaving, now that there is a list: one video
+         * an uploader made private should not end an afternoon. What stops it
+         * running away is the counter — a list where everything fails would
+         * otherwise be walked end to end in a second, or in RANDOM's case
+         * never stop at all. */
         @JavascriptInterface
-        fun onError(code: String) = runOnUiThread { finish() }
+        fun onError(code: String) = runOnUiThread {
+            failures++
+            if (failures > MAX_CONSECUTIVE_FAILURES) finish() else playNext()
+        }
 
         @JavascriptInterface
         fun onState(state: Int) = runOnUiThread { applyState(state) }

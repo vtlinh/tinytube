@@ -20,7 +20,16 @@ object VideoId {
     fun isValid(id: String): Boolean = PATTERN.matches(id)
 }
 
-data class Video(val id: String, val title: String) {
+/* One tile.
+ *
+ * publishedAt is epoch seconds, and is what the grid sorts on — newest first,
+ * across every approved channel rather than one channel after another. It is
+ * nullable because the two sources know different things: the playlist page
+ * gives a hundred videos in upload order and no dates at all, the Atom feed
+ * gives fifteen with exact ones. Library.datePositions is what reconciles
+ * those, and after it has run every video has a key. A null one sorts last,
+ * which is the right place for a video nothing can date. */
+data class Video(val id: String, val title: String, val publishedAt: Long? = null) {
     /* i.ytimg.com serves thumbnails for any public video with no key and no
        cookie. hqdefault exists for every video; maxresdefault does not, and a
        missing one 404s into an empty tile. */

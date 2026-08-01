@@ -14,12 +14,13 @@ class FeedTest {
         </feed>
     """.trimIndent()
 
-    private fun entry(id: String, title: String) = """
+    private fun entry(id: String, title: String, published: String? = null) = """
         <entry>
           <id>yt:video:$id</id>
           <yt:videoId>$id</yt:videoId>
           <yt:channelId>UCaaaaaaaaaaaaaaaaaaaaaa</yt:channelId>
           <title>$title</title>
+          ${published?.let { "<published>$it</published>" } ?: ""}
         </entry>
     """.trimIndent()
 
@@ -81,6 +82,39 @@ class FeedTest {
         )) {
             assertTrue("should have been empty for '$junk'", Feed.parse(junk).isEmpty())
         }
+    }
+
+    /* ---- upload times ---- */
+
+    /* The feed is the only source that dates anything, and the dates are what
+       the grid sorts on. The format is RFC 3339 with an offset, always. */
+    @Test fun `reads the published time`() {
+        val v = Feed.parse(feed(entry("aaaaaaaaaaa", "One", "2026-07-29T15:58:06+00:00")))
+        assertEquals(1785340686L, v.single().publishedAt)
+    }
+
+    @Test fun `reads a published time in another offset`() {
+        val utc = Feed.parse(feed(entry("aaaaaaaaaaa", "One", "2026-07-29T15:58:06+00:00")))
+            .single().publishedAt
+        val plusTwo = Feed.parse(feed(entry("aaaaaaaaaaa", "One", "2026-07-29T17:58:06+02:00")))
+            .single().publishedAt
+        assertEquals("the same instant either way", utc, plusTwo)
+    }
+
+    /* An undated entry is still a video. It sorts last rather than vanishing —
+       a missing timestamp is not a reason to hide something a parent
+       approved. */
+    @Test fun `an entry with no published time still parses`() {
+        val v = Feed.parse(feed(entry("aaaaaaaaaaa", "One")))
+        assertEquals("aaaaaaaaaaa", v.single().id)
+        assertEquals(null, v.single().publishedAt)
+    }
+
+    @Test fun `an unparseable published time is null rather than a crash`() {
+        for (bad in listOf("", "yesterday", "2026-13-45T99:99:99Z", "1785340686")) {
+            assertEquals(null, Feed.epochSeconds(bad))
+        }
+        assertEquals(1785340686L, Feed.epochSeconds("2026-07-29T15:58:06Z"))
     }
 
     /* ---- the uploads playlist page ---- */
@@ -220,11 +254,26 @@ class FeedTest {
 
     @Test fun `encodes and decodes a list unchanged`() {
         val videos = listOf(
-            Video("aaaaaaaaaaa", "First"),
-            Video("bbbbbbbbbbb", "Ten & Two \"quoted\""),
-            Video("ccccccccccc", "café"),
+            Video("aaaaaaaaaaa", "First", 1785340686L),
+            Video("bbbbbbbbbbb", "Ten & Two \"quoted\"", 1L),
+            Video("ccccccccccc", "café", null),
         )
         assertEquals(videos, Feed.decode(Feed.encode(videos)))
+    }
+
+    /* A title with a tab in it must not read back as a timestamp field, and a
+       cache written by the build before timestamps existed must still read. */
+    @Test fun `decodes the two-field lines an older build wrote`() {
+        val v = Feed.decode("aaaaaaaaaaa\tAn older cache line")
+        assertEquals("aaaaaaaaaaa", v.single().id)
+        assertEquals("An older cache line", v.single().title)
+        assertEquals(null, v.single().publishedAt)
+    }
+
+    @Test fun `an unreadable timestamp reads as no timestamp, not as a title`() {
+        val v = Feed.decode("aaaaaaaaaaa\tnot-a-number\tThe title")
+        assertEquals("The title", v.single().title)
+        assertEquals(null, v.single().publishedAt)
     }
 
     @Test fun `encodes an empty list to something decode reads back as empty`() {
