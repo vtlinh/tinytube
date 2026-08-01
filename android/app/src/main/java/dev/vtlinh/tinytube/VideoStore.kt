@@ -78,6 +78,28 @@ object VideoStore {
     fun replace(context: Context, channelId: String, videos: List<Video>) {
         if (videos.isEmpty()) return
         val d = db(context)
+
+        /* What this channel's posters were BEFORE the reply, so the ones that
+           do not survive it can be deleted from the phone.
+         *
+         * Thumbnails never expires — a URL fetched once is kept for good — so
+         * removal is the only thing that reclaims anything. A channel that
+         * posts daily pushes a video off the end of its hundred every day, and
+         * without this each one leaves a poster on disk for the life of the
+         * install. Read here rather than after the write, for the same reason
+         * ChannelStore.remove reads before deleting: afterwards there is
+         * nothing left to read. */
+        val before = mutableListOf<String>()
+        try {
+            d.rawQuery(
+                "SELECT thumb_url FROM ${Schema.VIDEOS} WHERE channel_id = ?",
+                arrayOf(channelId),
+            ).use { c ->
+                while (c.moveToNext()) c.getString(0)?.let { before.add(it) }
+            }
+        } catch (e: Exception) {}
+
+        var wrote = false
         try {
             d.beginTransaction()
             d.delete(Schema.VIDEOS, "channel_id = ?", arrayOf(channelId))
@@ -100,12 +122,20 @@ object VideoStore {
                 )
             }
             d.setTransactionSuccessful()
+            wrote = true
         } catch (e: Exception) {
             /* Leaves whatever was there. An empty grid is worse than a stale
                one. */
         } finally {
             try { d.endTransaction() } catch (e: Exception) {}
         }
+
+        /* Only after the write actually landed. Dropping the pictures for a
+           transaction that rolled back would blank tiles the grid is still
+           showing. */
+        if (!wrote) return
+        val kept = videos.mapNotNull { it.thumbUrl }.toSet()
+        Thumbnails.forget(before.filterNot { it in kept })
     }
 
     /* A channel is no longer approved: its videos go with it, at once, rather
