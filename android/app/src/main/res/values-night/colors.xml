@@ -19,6 +19,9 @@
     <color name="on_accent">#062033</color>
 
     <color name="text">#E9F1F8</color>
+    <!-- See values/colors.xml. Lighter than the surface rather than darker:
+         down here a darker line reads as a gap in the card. -->
+    <color name="divider">#24E9F1F8</color>
     <color name="text_muted">#9DB0C4</color>
     <color name="black">#000000</color>
 

@@ -35,7 +35,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var channelList: RecyclerView
     private lateinit var empty: TextView
     private lateinit var header: TextView
-    private lateinit var showAll: View
+    private lateinit var back: View
 
     private val videos = mutableListOf<Video>()
     private val adapter = VideoAdapter()
@@ -59,7 +59,7 @@ class MainActivity : AppCompatActivity() {
         channelList = findViewById(R.id.channels)
         empty = findViewById(R.id.empty)
         header = findViewById(R.id.header)
-        showAll = findViewById(R.id.show_all)
+        back = findViewById(R.id.back)
 
         grid.layoutManager = GridLayoutManager(this, spanCount())
         grid.adapter = adapter
@@ -79,7 +79,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
-        showAll.setOnClickListener { showChannel(null) }
+        back.setOnClickListener { showChannel(null) }
 
         BottomTabs.bind(this, tab) { selected ->
             /* Tapping Videos is also how you get back to all of them. There is
@@ -186,6 +186,16 @@ class MainActivity : AppCompatActivity() {
         (grid.layoutManager as GridLayoutManager).spanCount = spanCount()
     }
 
+    /* Back leaves a channel's videos for all of them, so the system button
+       agrees with the arrow in the bar. Anywhere else it does what it always
+       does — the tabs are tabs, not a stack, and consuming back on one of
+       those is how an app becomes impossible to leave. */
+    @Suppress("OverridingDeprecatedMember", "DEPRECATION")
+    override fun onBackPressed() {
+        if (tab == BottomTabs.VIDEOS && filter != null) showChannel(null)
+        else super.onBackPressed()
+    }
+
     /* An empty catalog is a normal state, not an error — it is what a fresh
        install looks like before anything is approved. Say so in words a parent
        can act on rather than leaving a blank screen. */
@@ -208,7 +218,19 @@ class MainActivity : AppCompatActivity() {
             f != null -> getString(R.string.showing_channel, f.title)
             else -> getString(R.string.app_name)
         }
-        showAll.visibility = if (!onChannels && f != null) View.VISIBLE else View.GONE
+        val showBack = !onChannels && f != null
+        back.visibility = if (showBack) View.VISIBLE else View.GONE
+        /* With the arrow up, the title sits where a title sits next to a nav
+           control. Without it, the title carries the bar's start inset itself
+           — the alternative is a permanently reserved blank 40dp, which reads
+           as a missing button rather than as a heading. */
+        (header.layoutParams as android.view.ViewGroup.MarginLayoutParams).let {
+            val start = if (showBack) 0 else (16 * resources.displayMetrics.density).toInt()
+            if (it.marginStart != start) {
+                it.marginStart = start
+                header.layoutParams = it
+            }
+        }
     }
 
     private inner class VideoAdapter : RecyclerView.Adapter<VideoHolder>() {

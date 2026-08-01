@@ -26,6 +26,9 @@ class AboutActivity : AppCompatActivity() {
     private lateinit var action: Button
     private lateinit var notifStatus: TextView
     private lateinit var notifAction: Button
+    /* The hairline above the notification block, so it appears and disappears
+       with it rather than leaving a rule under nothing. */
+    private lateinit var notifDivider: View
 
     /* One at a time, so an impatient double-tap on Install queues instead of
        racing two PackageInstaller commits. */
@@ -48,6 +51,7 @@ class AboutActivity : AppCompatActivity() {
         action = findViewById(R.id.action)
         notifStatus = findViewById(R.id.notif_status)
         notifAction = findViewById(R.id.notif_action)
+        notifDivider = findViewById(R.id.notif_divider)
 
         /* Neither tab is "here", so neither is drawn as selected — both are
            the way out. About is somewhere you arrive from the grid and leave
@@ -80,10 +84,12 @@ class AboutActivity : AppCompatActivity() {
                    cases where an update could otherwise go unnoticed */
                 notifStatus.visibility = View.GONE
                 notifAction.visibility = View.GONE
+                notifDivider.visibility = View.GONE
             }
             Notifications.State.ASKABLE -> {
                 notifStatus.visibility = View.VISIBLE
                 notifAction.visibility = View.VISIBLE
+                notifDivider.visibility = View.VISIBLE
                 notifStatus.setText(R.string.notif_off_explain)
                 notifAction.setText(R.string.notif_turn_on)
                 notifAction.setOnClickListener {
@@ -94,6 +100,7 @@ class AboutActivity : AppCompatActivity() {
             Notifications.State.BLOCKED -> {
                 notifStatus.visibility = View.VISIBLE
                 notifAction.visibility = View.VISIBLE
+                notifDivider.visibility = View.VISIBLE
                 notifStatus.setText(R.string.notif_blocked_explain)
                 notifAction.setText(R.string.notif_open_settings)
                 notifAction.setOnClickListener { openNotificationSettings() }
