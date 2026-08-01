@@ -24,6 +24,23 @@ channels. Don't do it again:
   and every installed app lost its uploads and updates at once. There was no
   bridge and no way to build one after the fact.
 
+## Both platforms, always
+
+A feature lands on Android AND iOS, or it is not finished. If something can
+only exist on one — self-update is the standing example, and there is no iOS
+equivalent — the difference goes in README's **Platform differences** table
+with the reason. Silence there means the two apps agree, and that has to stay
+true or the table is worse than nothing.
+
+The shared logic is duplicated, not shared: `android/.../*.kt` and
+`ios/TinyTubeCore/Sources/` are line-for-line counterparts, and so are their
+tests. Change one, change the other, in the same commit. The Swift tests run on
+Linux under `swift test`, so CI checks both.
+
+One language difference bit already and will again: **Kotlin wraps on integer
+overflow, Swift traps.** A line that produces a wrong answer on Android is a
+crash on iOS. Bound before you add, not after.
+
 ## Layout
 
 ```
