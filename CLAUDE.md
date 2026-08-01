@@ -56,6 +56,10 @@ worker.js / wrangler.toml        Cloudflare Worker: release assets + /uploads
 worker.test.mjs                  its parsers, under `node --test` (CI runs it)
 ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
                                  Kotlin files; `swift test` runs it on Linux
+  Sources/TinyTubeCore/          VideoId Player Uploads Library Playlist
+                                 ChannelSort HoldTime Challenge YouTubeUrls
+                                 Schema Chrome — the whole pure layer
+  Tests/                         the Kotlin tests, ported alongside
 .github/workflows/android.yml    build, sign, publish to the android-latest release
 .github/workflows/auto-merge.yml merge a PR once android passes
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
