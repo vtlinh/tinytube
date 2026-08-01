@@ -343,22 +343,73 @@ export function parseChannelAvatar(html) {
   return null;
 }
 
-/* What channel is the parent looking at?
+/* A channel URL, taken apart and REBUILT.
  *
- * ⚠️ THIS IS THE THIRD ROUTE THAT TAKES CALLER INPUT, AND IT HAS TO MAKE THE
- * SAME ARGUMENT THE OTHER TWO DO. It does not read env.GH_TOKEN, `env` is not
- * even passed to it, and — the part that matters most — IT DOES NOT TAKE A URL.
+ * ⚠️ THIS IS WHAT LETS /channel ACCEPT A URL AT ALL. The caller's string is
+ * never fetched. It is parsed, its host is checked against the pages YouTube
+ * serves channels from, its path must be exactly /channel/UC… or /@handle, and
+ * the address that actually gets fetched is BUILT here from the extracted
+ * value. A caller cannot name a host, a port, a scheme or a path — the most it
+ * can do is name a different YouTube channel, which is the entire point of the
+ * route.
  *
- * The obvious design would be "send me the page you're on and I'll read it",
- * and that would put a caller-supplied string into fetch(), which is exactly
- * what the release routes are careful never to do. So the caller sends a
- * HANDLE, a VIDEO ID, or a CHANNEL ID — each matched against a fixed pattern —
- * and every URL fetched here is BUILT from the validated value. A caller cannot
- * name a host, a path or a scheme.
+ * The apps used to do this splitting themselves and send the pieces. They send
+ * the URL now: reading YouTube is this Worker's job, and a URL is something to
+ * read. What did NOT move is the checking — both apps still validate the id
+ * that comes back, because it becomes a database key and a request parameter.
  *
- * A channel id needs no lookup to be usable, but is still fetched so the name
- * and avatar come back with it; if that fetch fails the id alone is a perfectly
- * good answer, so it is returned anyway. */
+ * Returns { id } or { handle }, plus the built target. Null for anything else:
+ * a watch page, a search, the home feed. */
+export function channelTargetFromUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(String(url).trim());
+  } catch (e) {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+
+  const host = parsed.hostname.toLowerCase();
+  if (!PAGE_HOSTS.has(host)) return null;
+
+  const parts = parsed.pathname.split("/").filter(Boolean);
+
+  /* /channel/UC… — the id is right there. */
+  if (parts.length >= 2 && parts[0] === "channel" && CHANNEL_ID.test(parts[1])) {
+    return { id: parts[1], url: `https://www.youtube.com/channel/${parts[1]}` };
+  }
+
+  /* /@handle — anchored at the FIRST segment. A watch page mentions its
+   * uploader and a search result lists a dozen channels, but neither IS a
+   * channel, and approving from one would be a guess. */
+  if (parts.length >= 1 && parts[0].startsWith("@")) {
+    const handle = parts[0].slice(1);
+    if (HANDLE.test(handle)) {
+      return { handle, url: `https://www.youtube.com/@${handle}` };
+    }
+  }
+
+  return null;
+}
+
+/* Hosts that serve channel pages. Narrower than everything else YouTube
+ * serves — an image or media host is never somewhere a channel is approved
+ * from. Mirrors YouTubeUrls.PAGE_HOSTS on both apps. */
+const PAGE_HOSTS = new Set(["www.youtube.com", "m.youtube.com", "youtube.com"]);
+
+/* What channel is the parent looking at, and what has it posted?
+ *
+ * ⚠️ THIS IS THE THIRD ROUTE THAT TAKES CALLER INPUT AND IT MAKES THE SAME
+ * ARGUMENT THE OTHER TWO DO. It does not read env.GH_TOKEN, `env` is not even
+ * passed to it, and although it now accepts a URL, that URL is never fetched:
+ * channelTargetFromUrl above takes it apart and builds the address from the
+ * validated pieces.
+ *
+ * The reply carries the VIDEOS TOO. Approving a channel needs its id, its name
+ * and its first hundred uploads, and asking for those separately meant two
+ * round trips and two waits at the one moment a parent is watching a spinner.
+ * One request now. A refresh of an already-approved channel still uses
+ * /uploads, which does not need the name again. */
 async function channel(request) {
   let body;
   try {
@@ -367,67 +418,50 @@ async function channel(request) {
     return json({ error: "bad json" }, 400);
   }
 
-  const handle = typeof body?.handle === "string" ? body.handle : "";
-  const id = typeof body?.channel === "string" ? body.channel : "";
+  /* The app sends the URL it is standing on. It does NOT send HTML, and it
+   * does not have to pick the id or handle out of the address first — reading
+   * YouTube is this Worker's job, and that includes reading its URLs. */
+  const target = channelTargetFromUrl(
+    typeof body?.url === "string" ? body.url : "",
+  );
+  if (!target) return json({ error: "not a channel url" }, 400);
 
-  /* Two shapes, and deliberately not a third. A watch page's uploader could be
-   * resolved the same way, and the earlier on-device version did exactly that —
-   * but nothing asks for it: YouTubeUrls.isChannelPage is false for a watch
-   * page on purpose, so the approve button never lights up there, and an input
-   * shape nothing uses is surface this route has to justify for nothing. */
-  let target;
-  if (CHANNEL_ID.test(id)) {
-    target = `https://www.youtube.com/channel/${id}`;
-  } else if (HANDLE.test(handle)) {
-    target = `https://www.youtube.com/@${handle}`;
-  } else {
-    return json({ error: "bad channel or handle" }, 400);
-  }
-
-  const html = await fetchText(target, {
+  const html = await fetchText(target.url, {
     /* Desktop on purpose: the mobile pages carry the canonical link less
      * reliably, and this is the one thing being read. */
     "User-Agent": DESKTOP_UA,
     "Accept-Language": "en-US,en;q=0.9",
   });
 
-  if (!html) {
-    /* The fetch failed. If the id was in the request all along we can still
-     * answer with it — just without a name. */
-    if (CHANNEL_ID.test(id)) return json({ id, title: null, avatarUrl: null });
-    return json({ error: "could not resolve" }, 502);
+  /* An id that came out of the URL needs no page to be usable. A handle does —
+   * there is nothing else that turns one into an id. */
+  const resolved = (html && parseChannelId(html)) || target.id || null;
+  if (!resolved) {
+    return json({ error: html ? "no channel here" : "could not resolve" }, html ? 404 : 502);
   }
 
-  const resolved = parseChannelId(html) || (CHANNEL_ID.test(id) ? id : null);
-  if (!resolved) return json({ error: "no channel here" }, 404);
+  /* The uploads come back with it: one round trip for the whole approval,
+   * rather than resolve-then-fetch with the parent watching. `known` is empty
+   * in practice — a channel being approved has nothing stored yet — but it is
+   * honoured so re-approving one doesn't re-send a hundred titles. */
+  const videos = await uploadsFor(resolved, knownIds(body));
 
   return json({
     id: resolved,
-    title: parseChannelTitle(html),
-    avatarUrl: parseChannelAvatar(html),
+    title: html ? parseChannelTitle(html) : null,
+    avatarUrl: html ? parseChannelAvatar(html) : null,
+    /* null, not [] — "we could not tell" and "this channel has nothing" must
+     * not look alike to a caller that REPLACES its stored list with this. */
+    videos,
   });
 }
 
-async function uploads(request) {
-  let body;
-  try {
-    body = await request.json();
-  } catch (e) {
-    return json({ error: "bad json" }, 400);
-  }
-
-  const channel = typeof body?.channel === "string" ? body.channel : "";
-  if (!CHANNEL_ID.test(channel)) return json({ error: "bad channel" }, 400);
-
-  /* Only ever shrinks the response. A caller that lies about what it has gets
-   * fewer details, never someone else's. */
-  const known = new Set(
-    (Array.isArray(body?.known) ? body.known : [])
-      .slice(0, MAX_KNOWN)
-      .filter(v => typeof v === "string" && VIDEO_ID.test(v)),
-  );
-
-  const playlist = longFormPlaylistId(channel);
+/* A channel's uploads, as the reply's `videos` array — shared by /uploads and
+ * /channel so approving a channel and refreshing one go down the same path.
+ * Returns null when nothing upstream answered, which both callers turn into
+ * "changed nothing" rather than "empty". */
+async function uploadsFor(channelId, known) {
+  const playlist = longFormPlaylistId(channelId);
   const [html, xml] = await Promise.all([
     fetchText(`https://www.youtube.com/playlist?list=${playlist}&hl=en`, {
       "User-Agent": DESKTOP_UA,
@@ -446,13 +480,39 @@ async function uploads(request) {
   if (ordered.length === 0) {
     ordered = [...dated.entries()].map(([id, d]) => ({ id, title: d.title || id }));
   }
-  if (ordered.length === 0) return json({ error: "nothing upstream" }, 502);
+  if (ordered.length === 0) return null;
 
-  const videos = datePositions(ordered, dated, Math.floor(Date.now() / 1000)).map(v =>
+  return datePositions(ordered, dated, Math.floor(Date.now() / 1000)).map(v =>
     known.has(v.id)
       ? v.id
       : { id: v.id, title: v.title, published: v.published, thumb: thumbnailUrl(v.id) },
   );
+}
+
+/* The ids a caller says it already has. Only ever shrinks the response: a
+ * caller that lies about what it has gets fewer details, never someone
+ * else's. */
+function knownIds(body) {
+  return new Set(
+    (Array.isArray(body?.known) ? body.known : [])
+      .slice(0, MAX_KNOWN)
+      .filter(v => typeof v === "string" && VIDEO_ID.test(v)),
+  );
+}
+
+async function uploads(request) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (e) {
+    return json({ error: "bad json" }, 400);
+  }
+
+  const channel = typeof body?.channel === "string" ? body.channel : "";
+  if (!CHANNEL_ID.test(channel)) return json({ error: "bad channel" }, 400);
+
+  const videos = await uploadsFor(channel, knownIds(body));
+  if (videos === null) return json({ error: "nothing upstream" }, 502);
 
   return json({ channel, videos });
 }

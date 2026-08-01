@@ -37,7 +37,17 @@ object ChannelResolver {
 
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
-    data class Resolved(val id: String, val title: String, val avatarUrl: String?)
+    data class Resolved(
+        val id: String,
+        val title: String,
+        val avatarUrl: String?,
+        /* The channel's uploads, in the same reply. Approving needs the id, the
+           name AND the first hundred videos, and asking for those separately
+           meant two round trips with a parent watching a spinner through both.
+           Empty means the Worker could not tell — which VideoStore.replace
+           treats as "change nothing", not as "this channel has none". */
+        val videos: List<Video> = emptyList(),
+    )
 
     /* Null when this page isn't a channel we can identify — a search results
        page, the home feed, a settings screen. The caller says so rather than
@@ -45,18 +55,21 @@ object ChannelResolver {
     suspend fun resolve(url: String): Resolved? = withContext(Dispatchers.IO) {
         if (!YouTubeUrls.isParentBrowsable(url)) return@withContext null
 
-        val direct = YouTubeUrls.channelIdFromUrl(url)
-        val handle = YouTubeUrls.handleFromUrl(url)
+        /* THE URL GOES AS-IS. The app does not pick the handle or id out of it
+           first — reading YouTube is the Worker's job, and an address is
+           something to read. The Worker validates the host and path and REBUILDS
+           what it fetches, so nothing sent from here reaches fetch() verbatim.
 
-        val request = when {
-            direct != null -> JSONObject().put("channel", direct)
-            handle != null -> JSONObject().put("handle", handle)
-            else -> return@withContext null
-        }.toString()
+           The id that comes back is still checked below. That has not moved and
+           should not: it becomes a database primary key and a request
+           parameter. */
+        val direct = YouTubeUrls.channelIdFromUrl(url)
+        val request = JSONObject().put("url", url).toString()
 
         val body = post(request) ?: run {
             /* The Worker was unreachable, but if the id was in the URL all
-               along we can still approve it — just without a nice name. */
+               along we can still approve it — just without a name or videos.
+               The daily refresh will fill them in. */
             return@withContext direct?.let { Resolved(it, it, null) }
         }
 
@@ -76,7 +89,10 @@ object ChannelResolver {
         val avatar = json.optString("avatarUrl")
             .takeIf { it.isNotBlank() && YouTubeUrls.isAllowedAvatar(it) }
 
-        Resolved(id, title, avatar)
+        /* Straight through the same parser the uploads reply uses, so every id
+           and thumbnail host is re-validated exactly as it would be there.
+           `known` is empty: a channel being approved has nothing stored yet. */
+        Resolved(id, title, avatar, Uploads.parse(body, emptyMap()))
     }
 
     private fun post(body: String): String? = try {

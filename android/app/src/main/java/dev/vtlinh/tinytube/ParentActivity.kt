@@ -263,6 +263,7 @@ class ParentActivity : AppCompatActivity() {
                 return@launch
             }
             val store = ChannelStore.get(this@ParentActivity)
+            val now = System.currentTimeMillis()
             store.add(
                 channelId = resolved.id,
                 title = resolved.title,
@@ -270,8 +271,20 @@ class ParentActivity : AppCompatActivity() {
                    recognise this page again without a network call */
                 handle = YouTubeUrls.handleFromUrl(url),
                 avatarUrl = resolved.avatarUrl,
-                nowMillis = System.currentTimeMillis(),
+                nowMillis = now,
             )
+
+            /* The videos came back with the resolution, so the grid is full
+               before the parent has closed this screen rather than empty until
+               the next refresh. Marked as fetched only because it PRODUCED
+               something: marking a failure would buy the outage a full day, and
+               an empty list here means the Worker could not tell rather than
+               that the channel has nothing. */
+            if (resolved.videos.isNotEmpty()) {
+                VideoStore.replace(this@ParentActivity, resolved.id, resolved.videos)
+                store.markUploadsFetched(resolved.id, now)
+            }
+
             say(getString(R.string.parent_approved, resolved.title))
             updateApproveButton(web?.url)
         }

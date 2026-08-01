@@ -237,11 +237,18 @@ BOTH `android` and `ios` pass and nothing else on the commit has failed. Label a
   trigger only watches `main` — so the commits sit there looking pushed and
   never get built. Start a fresh branch from `main` and open a new PR. This has
   already stranded four commits once.
-- It requires the check runs `build` (android.yml's job), `ios-core` and
-  `ios-app` (both ios.yml's) BY NAME. Renaming any of them silently stops it
-  waiting for that platform. A required check that hasn't reported counts as
-  not-yet rather than as absent, so whichever workflow finishes last is the one
-  that merges.
+- It requires the check runs `build` and `worker` (android.yml's jobs) and
+  `ios-core` and `ios-app` (ios.yml's) BY NAME. Renaming any of them silently
+  stops it waiting for that half. A required check that hasn't reported counts
+  as not-yet rather than as absent, so whichever workflow finishes last is the
+  one that merges.
+- **All four skip themselves when their half of the repository is untouched**,
+  each via a cheap `changes` job and a job-level `if`. A Worker-only pull
+  request spends no Gradle build and no macOS runner; a docs-only one spends
+  neither and no Swift either. `worker` exists as a job at all because of this:
+  `node --test` used to be a step inside `build`, so gating `build` on
+  `android/**` would have silently stopped testing the Worker on exactly the
+  changes that touch it.
 - `ios-app` is the macOS job, and it is required despite costing 10x minutes
   because it is SLOW. Left merely informational it would report after the merge
   every time rather than occasionally, which is not a gate at all. It pays for
@@ -312,11 +319,19 @@ stops, green publishes.
   **`/channel` is the same trade, made later.** Working out which channel a
   page is for used to happen on the device: `ChannelResolver` downloaded a full
   desktop channel page to read one 24-character string out of it, every time a
-  parent approved anything. `parseChannelId`, `parseChannelTitle` and
-  `parseChannelAvatar` live in `worker.js` now, with the tests that came with
-  them, and the phone sends a handle or a channel id and gets an answer. Same
-  rule follows: no direct-to-YouTube page fetch on the device without saying
-  what it is for.
+  parent approved anything. `parseChannelId`, `parseChannelTitle`,
+  `parseChannelAvatar` and `channelTargetFromUrl` live in `worker.js` now, with
+  the tests that came with them. The app sends the URL it is standing on and
+  gets an answer. Same rule follows: no direct-to-YouTube page fetch on the
+  device without saying what it is for.
+
+  **`/channel` answers with the VIDEOS too**, from the same `uploadsFor` the
+  `/uploads` route uses. Approving needs the id, the name and the first hundred
+  uploads, and asking for those separately was two round trips at the one
+  moment a parent is watching a spinner. A refresh of an already-approved
+  channel still uses `/uploads`, which doesn't need the name again. An empty
+  `videos` means "could not tell" and must not be stored as "this channel has
+  none" — `VideoStore.replace` already refuses an empty list for that reason.
 - **Refresh is at most once a day per channel.** `channels.uploads_at` is the
   clock and NULL means never, which is why a newly approved channel fetches at
   once. Mark it only after a fetch that produced something: marking a failure
@@ -492,27 +507,28 @@ stops, green publishes.
   PATTERN, and every URL they fetch is BUILT from a validated value.
 
   `/uploads` takes a channel id against `^UC[A-Za-z0-9_-]{22}$` and a bounded
-  list of `^[A-Za-z0-9_-]{11}$` ids. `/channel` takes that same channel id, or
-  a handle against `^[A-Za-z0-9._-]{3,30}$`, and nothing else — **notably not a
-  URL**, which is the obvious design ("send me the page you're on") and the one
-  that would put a caller-supplied string into `fetch()`. It does not accept a
-  video id either, though it easily could: nothing asks for it, and an input
-  shape nothing uses is surface to justify for nothing.
+  list of `^[A-Za-z0-9_-]{11}$` ids.
 
-  Don't let a caller-supplied URL, host or path reach `fetch()` in either, and
-  don't put the token within reach. A third route that takes input has to make
-  the same argument or it doesn't belong.
+  `/channel` takes **a URL**, which looks like the exact thing this rule
+  forbids and isn't — the distinction is worth being precise about, because
+  getting it wrong either way costs something. The caller's string is never
+  fetched. `channelTargetFromUrl` parses it, requires a host in `PAGE_HOSTS`
+  and a path of exactly `/channel/UC…` or `/@handle`, and **rebuilds** the
+  address from the extracted value. The most a caller can name is a different
+  YouTube channel, which is the whole point of the route. Reading YouTube —
+  including reading its URLs — is the Worker's job; the apps send what they
+  are standing on.
+
+  So the rule is not "never accept a URL", it is **never `fetch()` a string a
+  caller supplied**. Don't let a caller-supplied host, port, scheme or path
+  through, and don't put the token within reach. A route that takes input has
+  to make that argument or it doesn't belong.
 - **The Worker's parsing is tested by `worker.test.mjs`, run in CI.** It reads a
   rendering of YouTube's own web app, so it breaks without anyone touching it —
-  it is pinned against three entries lifted verbatim from a live page. The
-  `node --test` step lives in `android.yml`, and the reason once given for that
-  — "auto-merge waits only for the `android` run, so a check anywhere else
-  would not gate a merge" — **is no longer true**: auto-merge now requires
-  `build`, `ios-core` and `ios-app` by name, so a check in `ios.yml` gates a
-  merge just as well. What still argues for leaving it where it is: the Worker
-  is what feeds the grid on both platforms, `android` is the run that publishes,
-  and moving it would cost a rerun to prove nothing. If a third workflow ever
-  wants it, put it in whichever one is REQUIRED — that, not the file's name, is
-  what makes a check a gate.
+  it is pinned against three entries lifted verbatim from a live page, plus the
+  channel-page readers that arrived with `/channel`. It runs in the `worker`
+  job of `android.yml`, which auto-merge requires BY NAME, so it gates a merge.
+  What makes a check a gate is being in that REQUIRED list — not which file it
+  sits in.
 - Never commit API keys or tokens. The Worker's `GH_TOKEN` is a wrangler secret;
   `signing.p12` is committed on purpose and is not a secret (see README).
