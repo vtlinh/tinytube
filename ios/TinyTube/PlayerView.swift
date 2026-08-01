@@ -29,6 +29,8 @@ struct PlayerView: View {
     @State private var overlayLifted = false
     @State private var holdProgress = 0.0
     @State private var glowing = false
+    /* When the corner last lit. See glowMinGap. */
+    @State private var lastGlowAt: Date?
     @State private var glowedThisVideo = false
     @State private var paused = false
     @State private var showingAd = false
@@ -47,6 +49,17 @@ struct PlayerView: View {
        IDLE_MILLIS in PlayerActivity. Distinct from the hold duration, which is
        how long an adult presses to get IN — see restartIdleTimer. */
     private static let idleSeconds: TimeInterval = 5
+
+    /* The shortest gap between two glows. Matches GLOW_MIN_GAP_MILLIS.
+     *
+     * A touch on the locked overlay glows the corner, because a child pawing at
+     * a video is exactly when an adult is about to be handed the phone — and
+     * the corner is invisible, so without this they are hunting for it. But a
+     * child does not tap once, and a corner that lit on every tap would be a
+     * flashing light over the video: useless as a hint, and an advertisement
+     * that something is there. Ten seconds turns a burst of taps into one
+     * glow. */
+    private static let glowMinGap: TimeInterval = 10
 
     private var current: Video? {
         videos.indices.contains(index) ? videos[index] : nil
@@ -76,8 +89,12 @@ struct PlayerView: View {
                     Color.clear
                         .contentShape(Rectangle())
                         .ignoresSafeArea()
-                        /* Swallows the tap rather than passing it down. */
-                        .onTapGesture {}
+                        /* Swallows the tap rather than passing it down — and
+                           makes the swallowing say something. Whoever is
+                           prodding the video is told where the way in is, once
+                           every ten seconds; the tap itself still goes
+                           nowhere. */
+                        .onTapGesture { glow() }
                 }
 
                 /* YouTube draws its own chrome over a paused frame, so cover it
@@ -292,6 +309,11 @@ struct PlayerView: View {
     }
 
     private func glow() {
+        /* Throttled here rather than at the call sites, so every reason to glow
+           — a video starting, the overlay coming back, a touch on it — passes
+           the same rule. */
+        if let last = lastGlowAt, Date().timeIntervalSince(last) < Self.glowMinGap { return }
+        lastGlowAt = Date()
         glowing = true
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_000_000_000)

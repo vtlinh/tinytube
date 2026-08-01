@@ -250,11 +250,7 @@ struct SettingsView: View {
        same reason, in thumbs rather than in code. */
     private func row(_ channel: Channel) -> some View {
         HStack(spacing: 12) {
-            /* scaledToFill for the same reason as the grid's posters: a bare
-               resizable stretches a non-square image instead of cropping it. */
-            AsyncImage(url: channel.avatarURL.flatMap(URL.init(string:))) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+            CachedImage(url: channel.avatarURL) {
                 Circle().fill(Color.secondary.opacity(0.2))
             }
             .frame(width: 36, height: 36)

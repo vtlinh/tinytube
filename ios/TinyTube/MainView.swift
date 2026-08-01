@@ -203,9 +203,7 @@ struct MainView: View {
             Color.clear
                 .aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .overlay {
-                    AsyncImage(url: URL(string: video.thumbnailURL)) { image in
-                        image.resizable().scaledToFill()
-                    } placeholder: {
+                    CachedImage(url: video.thumbnailURL) {
                         Rectangle().fill(Color.white.opacity(0.06))
                     }
                 }
@@ -271,9 +269,7 @@ struct MainView: View {
             /* scaledToFill, not a bare resizable: an avatar that is not
                square would otherwise be stretched into the circle rather than
                cropped to it. Same bug the posters had. */
-            AsyncImage(url: channel.avatarURL.flatMap(URL.init(string:))) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+            CachedImage(url: channel.avatarURL) {
                 Circle().fill(Color.white.opacity(0.08))
             }
             .frame(width: 40, height: 40)

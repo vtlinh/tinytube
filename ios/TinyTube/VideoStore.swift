@@ -72,6 +72,22 @@ enum VideoStore {
      * one — which is also what a phone with no signal gets. */
     static func replace(channelId: String, videos: [Video]) {
         guard !videos.isEmpty else { return }
+
+        /* What this channel's posters were BEFORE the reply, so the ones that
+           do not survive it can be deleted from the phone.
+         *
+         * ImageStore never expires — a URL fetched once is kept for good — so
+         * removal is the only thing that reclaims anything. A channel that
+         * posts daily pushes a video off the end of its hundred every day, and
+         * without this each one leaves a poster on disk for the life of the
+         * install. Read here rather than after the write: afterwards there is
+         * nothing left to read. */
+        let before: [String] = (try? Database.shared.read(
+            "SELECT thumb_url FROM videos WHERE channel_id = ?",
+            [.text(channelId)],
+            row: { $0.stringOrNil(0) }
+        ))?.compactMap { $0 } ?? []
+
         do {
             try Database.shared.transaction {
                 try Database.shared.write(
@@ -102,8 +118,14 @@ enum VideoStore {
             }
         } catch {
             /* Leaves whatever was there. An empty grid is worse than a stale
-               one, so a failed replace is not allowed to become a deletion. */
+               one, so a failed replace is not allowed to become a deletion.
+               Nothing is pruned either — dropping the pictures for a write that
+               rolled back would blank tiles the grid is still showing. */
+            return
         }
+
+        let kept = Set(videos.compactMap { $0.thumbURL })
+        ImageStore.forget(before.filter { !kept.contains($0) })
     }
 
     /* A channel is no longer approved: its videos go with it, at once, rather

@@ -26,6 +26,10 @@ class App : Application() {
            is still DayNight, so MODE_NIGHT_FOLLOW_SYSTEM here is all it takes
            to hand the choice back to the phone. */
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+        /* Where the poster frames and avatars live. Before any screen can ask
+           for one — this runs first, and a picture requested without it would
+           silently fall back to memory-and-network. */
+        Thumbnails.init(this)
         /* if we're now running the version we had cached, the update went
            through — delete the leftover APK (kept otherwise for a retry) */
         try { Updater.cleanupIfInstalled(applicationContext) } catch (e: Exception) {}
