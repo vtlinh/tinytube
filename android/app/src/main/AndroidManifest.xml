@@ -18,34 +18,23 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false">
 
-        <!-- Not exported, and carrying no launcher filter of its own: the
-             alias below is what the launcher sees. -->
+        <!-- No alias under the old class name here, and that is deliberate.
+             One existed for exactly one build, to keep already-placed
+             home-screen icons working across the Kotlin package move. The
+             applicationId has since moved too, which makes this a different
+             app rather than an update to that one — there is no icon of its to
+             preserve, and an alias naming a package this app no longer has
+             would be a fossil. -->
         <activity
             android:name=".MainActivity"
-            android:exported="false"
-            android:launchMode="singleTop" />
-
-        <!-- The launcher entry, under the class name this activity had before
-             the Kotlin package was renamed to match the app.
-
-             A home-screen icon is a pinned COMPONENT NAME, not an app. Moving
-             MainActivity from dev.vtlinh.ytkids to dev.vtlinh.tinytube would
-             therefore have left every already-placed icon pointing at a class
-             that no longer exists — the app still installed, still in the
-             drawer, and its icon on the home screen dead. The applicationId
-             never moved, so this alias is a real, resolvable name and costs
-             nothing but its own four lines.
-
-             Don't "tidy" this into .MainActivity. The old name is the point. -->
-        <activity-alias
-            android:name="dev.vtlinh.ytkids.MainActivity"
-            android:targetActivity=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity-alias>
+        </activity>
+
 
         <!-- Not exported: nothing outside the app has any business starting a
              player, and an exported one would let any installed app hand this
@@ -95,7 +84,7 @@
             android:name=".UpdateReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="dev.vtlinh.ytkids.INSTALL_UPDATE" />
+                <action android:name="dev.vtlinh.tinytube.INSTALL_UPDATE" />
             </intent-filter>
         </receiver>
 

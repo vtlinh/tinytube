@@ -8,21 +8,18 @@ Guidance for Claude Code when working in this repository.
 videos. A child sees a grid of approved videos and can reach nothing else. See
 `README.md` for the architecture and the approval workflow.
 
-The app's NAME is TinyTube and so is the Kotlin package, `dev.vtlinh.tinytube`.
-Its ADDRESSES are not: `applicationId` stays `dev.vtlinh.ytkids` and the Worker
-stays `yt-kids`. Renaming the applicationId would install a second app beside
-the first on every phone that already has this one; renaming the Worker would
-strand installed copies on a hostname they can only be told about by an update
-they would fetch from it.
+Everything is TinyTube: the label, the Kotlin package, the `applicationId`
+(`dev.vtlinh.tinytube`) and the Worker (`tinytube.vtlinh87.workers.dev`). The
+last two were renamed once, together, and that pairing was the only way it could
+be done — see README's **Naming**. It cost every installed phone its approved
+channels. Don't do it again:
 
-Two consequences of the package move, both load-bearing:
-
-- `MainActivity` keeps its OLD class name as an `activity-alias`, and the alias
-  carries the launcher filter. A home-screen icon is a pinned component name, so
-  without it every already-placed icon would point at a class that no longer
-  exists. Don't collapse it into `.MainActivity`.
-- `Updater.ACTION_INSTALL_UPDATE` stays `dev.vtlinh.ytkids.INSTALL_UPDATE`. A
-  notification from the previous build holds a `PendingIntent` naming it.
+- The `applicationId` is how Android identifies an install. Change it and the
+  build cannot update what is on a phone; it installs beside it with its own
+  data directory, and the approved channels and watch history are gone.
+- The Worker's hostname is compiled into `Endpoints.kt`, so a renamed Worker
+  cannot tell an installed app where it went. The old `yt-kids` Worker stays
+  deployed for exactly that reason — don't delete it.
 
 ## Layout
 
@@ -293,9 +290,15 @@ stops, green publishes.
 - **`version.json` is published last, in its own upload.** It is what tells an
   app a new build exists; landing it before the APK advertises a version that
   can't be downloaded.
-- **Don't rename the Worker.** Its hostname is compiled into `Endpoints.kt`, and
-  installed copies can only learn a new one via an update they'd fetch from the
-  old one.
+- **Don't rename the Worker or the `applicationId`.** The Worker's hostname is
+  compiled into `Endpoints.kt` and installed copies can only learn a new one via
+  an update they'd fetch from the old one; the `applicationId` is how Android
+  identifies an install, so changing it installs a second app rather than
+  updating the first. They were renamed once, together — that pairing is what
+  made it survivable, because the app carrying the new hostname was a fresh
+  install rather than an update. It cost every phone its approved channels. The
+  old `yt-kids` Worker stays deployed so an un-migrated phone keeps working;
+  don't delete it, and don't do this again.
 - **Nothing on `/uploads` may reach the GitHub token.** The release routes hold
   a credential and are fixed — none takes a URL, repo or path from the caller,
   which is what makes them safe unauthenticated. `/uploads` is the one route

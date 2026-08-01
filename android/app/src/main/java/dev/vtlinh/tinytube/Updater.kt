@@ -80,13 +80,11 @@ object Updater {
        the explanation of why the last install failed. */
     private const val FAILED_NOTIF_ID = 4712
     private const val REJECTED_VERSION_KEY = "rejectedUpdateCode"
-    /* Left on the old name deliberately, along with the manifest filter that
-       matches it. A notification posted by the build before an update holds a
-       PendingIntent naming this string; renaming it would leave that Install
-       button doing nothing until the notification was reposted. It is an
-       identifier rather than a label — same reason applicationId did not move
-       when the app was renamed. */
-    const val ACTION_INSTALL_UPDATE = "dev.vtlinh.ytkids.INSTALL_UPDATE"
+    /* Moved with the package. It was pinned to the old string while the
+       applicationId still was — a notification from a previous build holds a
+       PendingIntent naming it — but the applicationId has moved now, so this
+       app has no previous build and nothing is holding anything. */
+    const val ACTION_INSTALL_UPDATE = "dev.vtlinh.tinytube.INSTALL_UPDATE"
     private const val PENDING_NAME_KEY = "pendingUpdateName"
 
     fun rememberPendingName(context: Context, versionName: String) {
