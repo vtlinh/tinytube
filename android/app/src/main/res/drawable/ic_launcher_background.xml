@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- Deeper than the app's accent so the white screen reads clearly on top;
-         the accent itself is tuned for text on a dark background, not as a
-         field colour. -->
-    <path
-        android:pathData="M0,0 L108,0 L108,108 L0,108 Z"
-        android:fillColor="#2E86C8" />
-</vector>
+<!-- The adaptive icon's background layer.
+
+     Sampled from art/app-icon.png's own background so the two agree, and
+     largely academic: the foreground layer is opaque and full-bleed, so this
+     shows only in the margin a launcher's mask crops away, and during the
+     parallax some launchers apply. It has to exist regardless — an
+     adaptive-icon needs both layers — and a mismatched one would flash at the
+     edges of that animation. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:startColor="#009EFE"
+        android:endColor="#9156FC"
+        android:angle="270" />
+</shape>
