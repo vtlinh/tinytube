@@ -427,6 +427,8 @@ class PlayerActivity : AppCompatActivity() {
            Both platforms now show the same control at the same moment, rather
            than one sitting over every video a child watches. */
         backButton?.visibility = if (value) View.VISIBLE else View.GONE
+        /* Locking takes Android's own bars with it; lifting gives them back. */
+        goFullscreen()
         /* The ring has done its job either way: the hold completed, or the
            overlay came back and there is no hold in progress to show. */
         stopHoldProgress()
@@ -781,19 +783,51 @@ class PlayerActivity : AppCompatActivity() {
         fun onAd(isAd: Boolean) = runOnUiThread { setShowingAd(isAd) }
     }
 
-    private fun goFullscreen() {
+    /* The status bar and the navigation bar, gone while the overlay is locked.
+     *
+     * They are the child's other way out of the player — a clock, notifications
+     * on the shade, a home button — and the overlay covering YouTube's controls
+     * means little with Android's own sitting on top of the same screen.
+     *
+     * BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE is the whole fix on API 30+ and its
+     * absence was the bug. hide() alone leaves the default behaviour, which
+     * brings the bars back on ANY TOUCH and leaves them there — so the first
+     * tap on the overlay restored them for the rest of the video. The pre-30
+     * path had this right all along with IMMERSIVE_STICKY; the modern path lost
+     * it in translation. Now a swipe still summons them briefly, which is the
+     * most Android will allow an app to refuse, and they leave again on their
+     * own.
+     *
+     * Called on every state change rather than once, because a focus change,
+     * a rotation or a resume all put them back. */
+    private fun applySystemBars(hidden: Boolean) {
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
-            window.insetsController?.hide(android.view.WindowInsets.Type.systemBars())
+            val controller = window.insetsController ?: return
+            if (hidden) {
+                controller.systemBarsBehavior =
+                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(android.view.WindowInsets.Type.systemBars())
+            } else {
+                controller.show(android.view.WindowInsets.Type.systemBars())
+            }
         } else {
             @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility =
+            window.decorView.systemUiVisibility = if (hidden) {
                 View.SYSTEM_UI_FLAG_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            } else {
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            }
         }
     }
+
+    /* Hidden unless the overlay is lifted. Lifting it is what hands the player
+       to an adult, and an adult reaching for the system back or the shade is
+       not the case this is defending against. */
+    private fun goFullscreen() = applySystemBars(hidden = !revealed)
 
     /* Back returns to the grid. It never navigates within the WebView — going
        "back" inside the player would land on a previous YouTube page rather
@@ -829,6 +863,14 @@ class PlayerActivity : AppCompatActivity() {
         super.onResume()
         web?.onResume()
         goFullscreen()
+    }
+
+    /* A dialog, the shade, a rotation — each returns focus with the bars back
+       on. Re-hiding here is what makes "gone" mean gone rather than "gone until
+       something happens". */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) goFullscreen()
     }
 
     override fun onDestroy() {

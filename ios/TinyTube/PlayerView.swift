@@ -108,8 +108,16 @@ struct PlayerView: View {
             OrientationLock.lockToLandscape()
         }
         .onDisappear { OrientationLock.unlock() }
-        .statusBarHidden()
-        .persistentSystemOverlays(.hidden)
+        /* Gone while the overlay is locked, back when it is lifted — the same
+           rule Android applies to its status and navigation bars.
+         *
+         * They are the child's other way out: a clock, the notification shade,
+         * the home indicator. Covering YouTube's controls means little with the
+         * system's own sitting on the same screen. Lifting the overlay hands the
+         * player to an adult, and an adult reaching for the shade is not the
+         * case this defends against. */
+        .statusBarHidden(!overlayLifted)
+        .persistentSystemOverlays(overlayLifted ? .visible : .hidden)
         .onAppear { recordWatch() }
         .onChange(of: index) { _ in
             glowedThisVideo = false
