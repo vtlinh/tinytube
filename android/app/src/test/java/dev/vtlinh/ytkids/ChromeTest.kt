@@ -130,6 +130,24 @@ class ChromeTest {
         assertEquals(42, Chrome.blockHeight(p, w, h, 42))
     }
 
+    /* The distinction the Activity needs, and the one whose absence broke the
+       whole feature on a real phone: a capture that came back blank and a
+       capture that genuinely measured the fallback's worth of inset are the
+       same number. Latching on the number meant one bad frame was written to
+       storage as the answer, after which nothing ever looked again. */
+    @Test fun `says it could not tell, rather than answering the fallback`() {
+        val w = 800; val h = 100
+        /* A blank frame — which is exactly what a hardware-composited player
+           gives back to a software canvas. */
+        assertNull(Chrome.blockHeightOrNull(strip(w, h), w, h))
+        assertEquals(16, Chrome.blockHeight(strip(w, h), w, h, 16))
+
+        /* And a real one still answers. */
+        val p = strip(w, h)
+        for (y in 76..78) p.row(w, y, 12, 300, RED)
+        assertEquals(21 - 15, Chrome.blockHeightOrNull(p, w, h))
+    }
+
     @Test fun `refuses a malformed or empty strip rather than reading past it`() {
         assertNull(Chrome.seekBarBottom(IntArray(0), 0, 0))
         assertNull(Chrome.seekBarBottom(IntArray(10), 800, 100))

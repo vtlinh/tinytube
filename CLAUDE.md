@@ -130,11 +130,19 @@ stops, green publishes.
   Anything that widens it further — auto-approving related channels, following
   playlists, surfacing recommendations — is a bigger change than it looks.
 - **The player's frame capture stays a measurement, never a picture.**
-  `PlayerActivity.measureBlockHeight` draws the bottom strip of the WebView to
-  find the seek bar. Only that strip is ever drawn, the bitmap is recycled in
-  the method that made it, and nothing is written, passed on or sent. Don't
-  widen the captured rectangle, don't keep the bitmap, and don't add a caller
-  that wants the image rather than the number.
+  `PlayerActivity.measureBlockHeight` PixelCopies the bottom strip of the
+  window to find the seek bar. Only that strip is ever copied, the bitmap is
+  recycled in the callback that received it, and nothing is written, passed on
+  or sent. Don't widen the source rectangle, don't keep the bitmap, and don't
+  add a caller that wants the image rather than the number.
+- **A failed measurement must never be stored.** `Chrome.blockHeightOrNull`
+  returns null for "could not tell" precisely so the Activity can distinguish
+  it from a real answer that happens to equal the fallback. Latching on the
+  number instead meant one blank frame was persisted as the answer and nothing
+  ever looked again — the bug that made the whole feature silently do nothing
+  on a real phone. `WebView.draw(Canvas)` was the cause of the blank frames;
+  the player is composited in hardware and does not appear on a software
+  canvas. Don't go back to it.
 - **The player's geometry is measured, never written down.** Where YouTube's
   seek bar is, how thick it is, how much room to leave under it and what counts
   as an implausible answer all come out of the captured pixels. `Chrome` takes

@@ -138,11 +138,21 @@ object Chrome {
        untrustworthy: no bar, a bar on the last row, or a gap too large to be
        an inset. The fallback is the compiled-in constant the app used before
        this existed. */
-    fun blockHeight(pixels: IntArray, width: Int, height: Int, fallbackPx: Int): Int {
-        val bar = seekBar(pixels, width, height) ?: return fallbackPx
+    fun blockHeight(pixels: IntArray, width: Int, height: Int, fallbackPx: Int): Int =
+        blockHeightOrNull(pixels, width, height) ?: fallbackPx
+
+    /* The same, saying "I could not tell" rather than answering anyway.
+     *
+     * The caller needs the difference. A capture that came back blank and a
+     * capture that genuinely measured the fallback's worth of inset are the
+     * same number, and treating them alike is how one bad frame got written to
+     * storage as if it were the answer — after which nothing ever looked
+     * again. Null means try another frame. */
+    fun blockHeightOrNull(pixels: IntArray, width: Int, height: Int): Int? {
+        val bar = seekBar(pixels, width, height) ?: return null
         val thickness = bar.last - bar.first + 1
         val below = height - 1 - bar.last
-        if (below <= 0 || below > thickness * MAX_BELOW_IN_BARS) return fallbackPx
+        if (below <= 0 || below > thickness * MAX_BELOW_IN_BARS) return null
         /* A bar close enough to the bottom that the margin swallows the lot
            means there is genuinely nothing down there to block. Zero is the
            measurement, not a failure. */
