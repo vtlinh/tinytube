@@ -115,10 +115,18 @@ be touched; holding the top-right corner for two seconds lifts it for an adult.
 A strip along the bottom stays blocked even then, so a scrub that slides off the
 seek bar lands on nothing. Knowing how tall that strip should be means knowing
 where the seek bar is — and the player is a cross-origin iframe, so it cannot be
-asked. It can be looked at: on the first pause the app draws the bottom of the
-player into an in-memory bitmap and finds the bar's red played portion in the
-pixels. A margin under the bar is left reachable, because the drawn line is
+asked. It can be looked at: the app copies the bottom of the player's own
+on-screen pixels into an in-memory bitmap and finds the bar's red played portion
+in them. A margin under the bar is left reachable, because the drawn line is
 under 4dp and a thumb aiming at it lands around it.
+
+The copy is taken while the controls are actually up — a few hundred
+milliseconds after playback starts, and again after any touch while the overlay
+is lifted — retrying until a frame has a bar in it. A frame without one stores
+nothing and asks for another; only a successful measurement is kept. While the
+overlay is lifted the blocked strip tints faintly, so an adult who has just
+unlocked the controls can see where the live area ends rather than finding the
+bottom of the screen mysteriously dead.
 
 Nothing about that is written down in the app. The bar's own drawn thickness —
 about 3dp — is the scale, measured from the same pixels, so how much room to

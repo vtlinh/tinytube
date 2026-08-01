@@ -5,7 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -18,6 +18,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.view.PixelCopy
 import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -61,6 +62,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private var bottomBlocker: View? = null
     private val measureRunnable = Runnable { measureBlockHeight() }
+    private var measureAttempts = 0
 
     companion object {
         /* YT.PlayerState */
@@ -78,9 +80,16 @@ class PlayerActivity : AppCompatActivity() {
         private const val TINT_IN_MILLIS = 120L
         private const val TINT_OUT_MILLIS = 400L
 
-        /* Long enough after a pause for YouTube's controls to have finished
-           animating in. Measuring mid-fade reads a half-opaque bar. */
-        private const val MEASURE_DELAY_MILLIS = 400L
+        /* Long enough after playback starts for YouTube's controls to have
+           finished animating in. Measuring mid-fade reads a half-opaque bar. */
+        private const val MEASURE_DELAY_MILLIS = 700L
+        /* And how long before looking again when a frame had no bar in it —
+           the controls auto-hide, so most frames do not. */
+        private const val MEASURE_RETRY_MILLIS = 600L
+        /* Enough tries to cover the few seconds of controls that follow a
+           touch or the start of playback, and few enough that a device which
+           can never produce one stops asking. */
+        private const val MEASURE_MAX_ATTEMPTS = 24
         /* How much of the bottom edge is drawn. Not a statement about where
            YouTube's chrome is — Chrome works that out from the pixels — only
            about how much of the screen is worth looking at, and how much is
@@ -288,6 +297,15 @@ class PlayerActivity : AppCompatActivity() {
     private fun setRevealed(value: Boolean) {
         revealed = value
         overlay?.visibility = if (value) View.GONE else View.VISIBLE
+        /* Show the dead strip while the controls are reachable. It is the only
+           part of the screen that stays blocked, and without this an adult who
+           lifted the overlay just finds the bottom of the player not
+           responding. */
+        bottomBlocker?.animate()?.cancel()
+        bottomBlocker?.animate()
+            ?.alpha(if (value) 1f else 0f)
+            ?.setDuration(if (value) TINT_IN_MILLIS else TINT_OUT_MILLIS)
+            ?.start()
         /* The ring has done its job either way: the hold completed, or the
            overlay came back and there is no hold in progress to show. */
         stopHoldProgress()
@@ -298,6 +316,11 @@ class PlayerActivity : AppCompatActivity() {
         corner?.animate()?.cancel()
         corner?.alpha = 0f
         reveal.removeCallbacks(idleRunnable)
+        /* Lifting the overlay is the other reliable moment: the parent is
+           about to touch the player, and a touch is what brings the controls
+           back. Also the only moment a scrimmed pause can be measured, since
+           the scrim goes with the overlay. */
+        if (value) wantMeasurement(MEASURE_RETRY_MILLIS)
         if (value) {
             reveal.postDelayed(idleRunnable, IDLE_MILLIS)
             /* Say so. The overlay was transparent, so lifting it changes very
@@ -315,6 +338,9 @@ class PlayerActivity : AppCompatActivity() {
         if (revealed && event.actionMasked == MotionEvent.ACTION_DOWN) {
             reveal.removeCallbacks(idleRunnable)
             reveal.postDelayed(idleRunnable, IDLE_MILLIS)
+            /* That tap went to the player and will have brought its controls
+               up — the best frame we are going to get. */
+            wantMeasurement(MEASURE_DELAY_MILLIS)
         }
         return super.dispatchTouchEvent(event)
     }
@@ -334,76 +360,109 @@ class PlayerActivity : AppCompatActivity() {
         pausedScrim?.visibility =
             if (state == STATE_PAUSED && !showingAd) View.VISIBLE else View.GONE
 
-        /* A pause is the one moment the controls are certainly on screen and
-           certainly still, which is why the measurement waits for one. */
-        if (state == STATE_PAUSED && !showingAd && measuredBlockPx < 0) {
-            reveal.removeCallbacks(measureRunnable)
-            reveal.postDelayed(measureRunnable, MEASURE_DELAY_MILLIS)
-        }
+        /* YouTube shows its controls for a few seconds when playback starts,
+           which is the one moment guaranteed to happen on every video without
+           anybody touching anything. */
+        if (state == STATE_PLAYING && !showingAd) wantMeasurement(MEASURE_DELAY_MILLIS)
     }
 
-    /* Measure the player's bottom inset from the pixels it actually drew.
+    /* Ask for a measurement, if one is still wanted.
+     *
+     * Called at every moment YouTube's controls are likely to be on screen,
+     * because that is the only time there is a seek bar to find. The first
+     * version waited for a PAUSE, which was close to unreachable: the overlay
+     * eats every touch, so a child cannot pause at all, and a parent can only
+     * do it after holding the corner. On most installs the measurement simply
+     * never ran. */
+    private fun wantMeasurement(delayMillis: Long) {
+        if (measuredBlockPx >= 0 || measureAttempts >= MEASURE_MAX_ATTEMPTS) return
+        reveal.removeCallbacks(measureRunnable)
+        reveal.postDelayed(measureRunnable, delayMillis)
+    }
+
+    /* Measure the player's bottom inset from the pixels on screen.
      *
      * The height of the bottom blocker used to be a constant, because the
      * player is a cross-origin iframe and there is no way to ask it where its
-     * seek bar is. There is a way to LOOK, though: draw the WebView onto a
-     * bitmap and find the bar. Chrome does the finding, and is pure so it can
-     * be tested; this does the capturing.
+     * seek bar is. There is a way to LOOK. Chrome does the finding, and is
+     * pure so it can be tested; this does the capturing.
      *
-     * Three things about the capture, all deliberate:
+     * PixelCopy rather than WebView.draw(Canvas). Drawing the view to a
+     * software canvas is the obvious way and it does not work here: the player
+     * is composited in hardware, and what comes back is blank or nearly so —
+     * which looked exactly like "this device has no seek bar" and left the
+     * fallback in place forever. PixelCopy reads the surface that is actually
+     * on screen, which is the thing being measured.
      *
-     * - Nothing is saved. The bitmap exists inside this method, is read into
-     *   an int array, and is recycled before the method returns. It is never
-     *   written to storage, never handed to another component, and never
-     *   leaves the process. The pixels are a measurement, not a picture.
-     * - Only the bottom fifth is drawn at all, by translating the canvas. The
+     * Four things about the capture, all deliberate:
+     *
+     * - Nothing is saved. The bitmap is read into an int array and recycled in
+     *   the callback that received it. It is never written to storage, never
+     *   handed to another component, and never leaves the process. The pixels
+     *   are a measurement, not a picture.
+     * - Only the bottom two fifths is copied, via the source rectangle. The
      *   part of the screen with the video in it is never captured, which makes
      *   the above true by construction rather than by promise.
-     * - It happens once, ever. The answer goes to BlockHeightStore, so every
-     *   later video reuses it — including after a reboot. It is measured again
-     *   only if the display's geometry changes underneath it.
-     *
-     * Any failure leaves the compiled-in fallback in place, which is what the
-     * app used before this existed. */
+     * - Only while the picture is actually visible. If the paused scrim is up,
+     *   the copy would be a rectangle of near-black — PixelCopy sees the whole
+     *   composited window, this app's own views included.
+     * - It succeeds once, ever. The answer goes to BlockHeightStore, so every
+     *   later video reuses it, including after a reboot; it is measured again
+     *   only if the display's geometry changes underneath it. A FAILURE stores
+     *   nothing and asks for another frame. */
     private fun measureBlockHeight() {
         if (measuredBlockPx >= 0) return
         val w = web ?: return
         val vw = w.width
         val vh = w.height
         if (vw <= 0 || vh <= 0) return
+        /* Our own scrim over the frame would be all the copy could see. */
+        if (pausedScrim?.visibility == View.VISIBLE) { wantMeasurement(MEASURE_RETRY_MILLIS); return }
 
         val stripH = (vh * MEASURE_STRIP_FRACTION).toInt()
         if (stripH <= 0) return
-        val fallback = resources.getDimensionPixelSize(R.dimen.player_bottom_block)
+        measureAttempts++
 
-        val measured = try {
-            val bmp = Bitmap.createBitmap(vw, stripH, Bitmap.Config.ARGB_8888)
-            try {
-                val canvas = Canvas(bmp)
-                /* Slide the WebView up so only its last stripH rows land in
-                   the bitmap. */
-                canvas.translate(0f, -(vh - stripH).toFloat())
-                w.draw(canvas)
-                val pixels = IntArray(vw * stripH)
-                bmp.getPixels(pixels, 0, vw, 0, 0, vw, stripH)
-                /* No dimensions passed in but the fallback. The bar's own
-                   drawn thickness is the scale, and it comes out of these
-                   pixels — so nothing here has to know the device's density
-                   or trust a figure somebody eyeballed off a screenshot. */
-                Chrome.blockHeight(pixels, vw, stripH, fallbackPx = fallback)
-            } finally {
-                bmp.recycle()
-            }
+        val loc = IntArray(2)
+        w.getLocationInWindow(loc)
+        val src = Rect(loc[0], loc[1] + vh - stripH, loc[0] + vw, loc[1] + vh)
+        val bmp = try {
+            Bitmap.createBitmap(vw, stripH, Bitmap.Config.ARGB_8888)
         } catch (e: Throwable) {
-            /* OutOfMemory on a large display, or a WebView that refuses to
-               draw to a software canvas. Neither is worth crashing a video
-               over; the constant was good enough before. */
-            fallback
+            return  /* out of memory on a large display; the fallback stands */
         }
 
-        measuredBlockPx = measured
-        BlockHeightStore.put(this, measured)
-        applyBlockHeight(measured)
+        try {
+            PixelCopy.request(window, src, bmp, { result ->
+                val found =
+                    if (result == PixelCopy.SUCCESS) readBlockHeight(bmp, vw, stripH) else null
+                bmp.recycle()
+                if (found != null) latchBlockHeight(found) else wantMeasurement(MEASURE_RETRY_MILLIS)
+            }, reveal)
+        } catch (e: Throwable) {
+            /* Some devices refuse a copy of a secure or not-yet-ready surface.
+               Nothing to do but try the next frame. */
+            bmp.recycle()
+            wantMeasurement(MEASURE_RETRY_MILLIS)
+        }
+    }
+
+    /* Nothing is passed in but the pixels. The bar's own drawn thickness is
+       the scale, and it comes out of them — so nothing here has to know the
+       device's density or trust a figure somebody eyeballed off a
+       screenshot. */
+    private fun readBlockHeight(bmp: Bitmap, width: Int, height: Int): Int? = try {
+        val pixels = IntArray(width * height)
+        bmp.getPixels(pixels, 0, width, 0, 0, width, height)
+        Chrome.blockHeightOrNull(pixels, width, height)
+    } catch (e: Throwable) {
+        null
+    }
+
+    private fun latchBlockHeight(px: Int) {
+        measuredBlockPx = px
+        BlockHeightStore.put(this, px)
+        applyBlockHeight(px)
     }
 
     private fun applyBlockHeight(px: Int) {
@@ -522,6 +581,7 @@ class PlayerActivity : AppCompatActivity() {
         holdAnimator?.cancel()
         holdAnimator = null
         corner?.animate()?.cancel()
+        bottomBlocker?.animate()?.cancel()
         /* Detach before destroying: a WebView torn down while still attached
            leaks its window, and this activity is created and destroyed once per
            video watched. */

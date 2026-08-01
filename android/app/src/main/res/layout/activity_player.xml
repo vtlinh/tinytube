@@ -105,12 +105,19 @@
          the band underneath them.
 
          The height here is only where it starts: PlayerActivity measures the
-         real inset off the first paused frame and replaces it. See dimens. -->
+         real inset off the player's own pixels and replaces it. See dimens.
+
+         Invisible while a child is watching, and faintly tinted while the
+         overlay is lifted — an adult who has just unlocked the controls and
+         finds the bottom of the screen dead deserves to see why, and where the
+         live area ends. PlayerActivity fades it with the reveal. -->
     <View
         android:id="@+id/bottom_blocker"
         android:layout_width="match_parent"
         android:layout_height="@dimen/player_bottom_block"
         android:layout_gravity="bottom"
+        android:background="@color/blocked_strip"
+        android:alpha="0"
         android:clickable="true"
         android:focusable="false" />
 
