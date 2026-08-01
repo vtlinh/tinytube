@@ -398,6 +398,18 @@ below mandatory rather than tidy-up.
 The old app cannot update itself to the new one — its update check points at a
 hostname that no longer answers — so step 1 has to be a manual download.
 
+## Platform differences
+
+The two apps agree unless this table says otherwise. Silence here means they
+match, so anything that can only exist on one platform belongs in it.
+
+| | Android | iOS | why |
+| --- | --- | --- | --- |
+| **Self-update** | Yes — checks the Worker, downloads, installs on a tap | **No** | iOS has no `PackageInstaller` equivalent and a sideloaded app cannot install its successor. Builds arrive via TestFlight, which expires each one 90 days after upload. |
+| **Update notification** | Yes | No | Nothing to notify about without self-update. |
+| **Parent gate fallback** | Device lock, arithmetic if the device has none | Device lock; arithmetic present but nearly unreachable | `LocalAuthentication`'s `deviceOwnerAuthentication` falls back to the passcode by itself, so only a device with no lock at all reaches the arithmetic. |
+| **Player bottom blocker** | Measured from the player's own pixels | **Not yet decided** | Android's `PixelCopy` reads the composited window including the hardware video surface. iOS has no equivalent that is known to work over video, so this may end up a fixed inset. Unresolved — see `Chrome.kt`. |
+
 ## Building locally
 
 ```bash

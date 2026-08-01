@@ -46,6 +46,8 @@ crash on iOS. Bound before you add, not after.
 ```
 worker.js / wrangler.toml        Cloudflare Worker: release assets + /uploads
 worker.test.mjs                  its parsers, under `node --test` (CI runs it)
+ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
+                                 Kotlin files; `swift test` runs it on Linux
 .github/workflows/android.yml    build, sign, publish to the android-latest release
 .github/workflows/auto-merge.yml merge a PR once android passes
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
@@ -84,6 +86,7 @@ android/                         the app
 gradle -p android testReleaseUnitTest   # runs in CI before anything is published
 gradle -p android assembleRelease
 node --test                             # the Worker's parsers; CI runs this too
+swift test --package-path ios/TinyTubeCore   # the iOS half; CI runs this too
 npx wrangler deploy --dry-run           # validates the worker bundles
 ```
 

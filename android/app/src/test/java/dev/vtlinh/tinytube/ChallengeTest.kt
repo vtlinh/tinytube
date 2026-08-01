@@ -98,4 +98,18 @@ class ChallengeTest {
         val seen = (0 until 50).map { Challenge.generate(random) }.toSet()
         assertTrue("expected variety, got $seen", seen.size > 10)
     }
+
+    /* A leading plus is ACCEPTED, on both platforms, and that is worth pinning
+       rather than leaving to be rediscovered. Kotlin's toIntOrNull and Swift's
+       Int(_:) both take "+20" as 20 — the iOS port's test asserted it was junk
+       and was wrong about both. Neither is a problem: a parent who types it has
+       answered correctly.
+
+       Pinned because it is the kind of agreement that could silently stop being
+       one, and the gate is a place where the two apps must behave alike. */
+    @Test fun `a leading plus is accepted, matching the iOS port`() {
+        val p = Challenge.Puzzle(sum = 30, difference = 10)   // x = 20, y = 10
+        assertTrue(Challenge.isCorrect(p, "+20", "10"))
+        assertTrue(Challenge.isCorrect(p, "20", "+10"))
+    }
 }
