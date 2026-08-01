@@ -167,10 +167,10 @@ nobody will sit through is not a stronger lock, it is a control an adult gives
 up on; what keeps a child out is that the corner is invisible and somewhere
 nothing else is.
 
-The version number and the update controls are at the bottom of the same
-screen. They used to be an About screen of their own, opened by long-pressing
-the grid's title — a parent-facing screen on the child's side of the app, behind
-a gesture nobody would guess was there.
+The app's name and version lead the screen, and the update controls close it.
+Both used to be an About screen of their own, opened by long-pressing the grid's
+title — a parent-facing screen on the child's side of the app, behind a gesture
+nobody would guess was there.
 
 ## How the safety boundary works
 

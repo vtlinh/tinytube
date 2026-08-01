@@ -2,12 +2,16 @@
 <!-- Parent settings. Reached only through parent mode, which is itself behind
      ChallengeActivity, so nothing here needs a gate of its own.
 
-     The bottom two cards used to be a screen of their own, reached by
-     long-pressing the grid's title. That put a parent-facing screen on the
-     child's side of the app and hid it behind a gesture nobody would guess;
-     the settings are where an adult already is. Its "N approved channels" card
-     went at the same time — the approved list is one tap away in the bar above
-     this screen, and a count of it is not news.
+     The identity card at the top and the Updates card at the bottom used to be
+     a screen of their own, reached by long-pressing the grid's title. That put
+     a parent-facing screen on the child's side of the app and hid it behind a
+     gesture nobody would guess; the settings are where an adult already is.
+     Its "N approved channels" card went at the same time — the approved list is
+     one tap away in the bar above this screen, and a count of it is not news.
+
+     They are at opposite ends on purpose. The identity leads because it is
+     what this screen is a screen ABOUT; Updates trails because it is an
+     action, and an action belongs under the things it acts on.
 
      Cards on a plain background, so a setting reads as a thing you press
      rather than as a line of prose. -->
@@ -22,10 +26,69 @@
         android:orientation="vertical"
         android:padding="20dp">
 
+        <!-- What this is. First, because it is what the screen is a screen
+             ABOUT: a parent who opened settings to check the version should
+             not have to read past two controls to find it, and a parent who
+             opened it to change something loses nothing by scrolling past four
+             lines that never move. Updates stay at the bottom — that card is
+             an action, and actions belong under the things they act on. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/bg_tile"
+            android:padding="20dp">
+
+            <ImageView
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginEnd="16dp"
+                android:src="@mipmap/ic_launcher"
+                android:background="@drawable/bg_app_icon"
+                android:clipToOutline="true"
+                android:scaleType="centerCrop"
+                android:contentDescription="@null" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/app_name"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text" />
+
+                <TextView
+                    android:id="@+id/version"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="3dp"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_muted" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="1dp"
+                    android:text="@string/author"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_muted" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
         <!-- What plays next. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:orientation="vertical"
             android:background="@drawable/bg_tile"
             android:padding="20dp">
@@ -130,60 +193,6 @@
                 android:layout_marginTop="4dp"
                 android:max="4"
                 android:progress="0" />
-        </LinearLayout>
-
-        <!-- What this is. -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@drawable/bg_tile"
-            android:padding="20dp">
-
-            <ImageView
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:layout_marginEnd="16dp"
-                android:src="@mipmap/ic_launcher"
-                android:background="@drawable/bg_app_icon"
-                android:clipToOutline="true"
-                android:scaleType="centerCrop"
-                android:contentDescription="@null" />
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/app_name"
-                    android:textSize="20sp"
-                    android:textStyle="bold"
-                    android:textColor="@color/text" />
-
-                <TextView
-                    android:id="@+id/version"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="3dp"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_muted" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:paddingTop="1dp"
-                    android:text="@string/author"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_muted" />
-
-            </LinearLayout>
-
         </LinearLayout>
 
         <!-- Updates: the only part of this screen that reaches the network. -->
