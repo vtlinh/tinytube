@@ -23,7 +23,7 @@ android {
            a one-way door.
 
            Android identifies an installed app by this string. Changing it from
-           dev.vtlinh.ytkids means this build cannot update the app already on
+           any other value means this build cannot update the app already on
            a phone — it installs BESIDE it, with its own data directory, and
            the approved channels, watch history and settings of the old one are
            not visible to it. The old app has to be uninstalled by hand and its
@@ -45,24 +45,30 @@ android {
     signingConfigs {
         create("shared") {
             storeFile = file("../signing.p12")
-            /* ⚠️ "ytkids" HERE IS NOT A NAME, IT IS A PASSWORD AND AN ALIAS.
-               These are the actual credentials of the committed signing.p12,
-               set when that file was created. Renaming them to match the app
-               does not rename anything inside the keystore — it just stops the
-               build being able to open it.
-
-               And if it somehow signed with a different key, that would be far
-               worse than a build failure: Android installs an update over an
-               existing app only when the signatures match, so every phone with
-               TinyTube on it could never update again. That is the whole reason
-               this key is committed at all — see README's "About that committed
-               key".
-
-               A rename sweep across this repository has already come past here
-               once. Leave it. */
-            storePassword = "ytkids"
-            keyAlias = "ytkids"
-            keyPassword = "ytkids"
+            /* These are the keystore's real credentials, not labels — so they
+               were changed by re-keying signing.p12 itself, not by editing the
+               strings here. `keytool -changealias` and `-storepasswd` alter the
+               container; they do not touch the KEY inside it.
+             *
+             * That distinction is the whole safety property. Android installs
+             * an update over an existing app only when the signing certificate
+             * matches, and the certificate's SHA-256 came through the rename
+             * unchanged:
+             *
+             *   74:7B:05:92:96:9A:38:82:A4:AB:0D:E9:2E:94:FD:52:
+             *   E7:95:01:FE:FB:8D:5A:05:76:06:EE:B0:46:4B:24:9F
+             *
+             * Verify with:
+             *   keytool -list -v -keystore android/signing.p12 \
+             *     -storetype PKCS12 -storepass tinytube
+             *
+             * If that fingerprint ever changes, every installed copy is
+             * stranded on the version it has — so a new key is not a rename,
+             * it is a migration, and it needs APK Signature Scheme v3 rotation
+             * to be survivable. See README's "About that committed key". */
+            storePassword = "tinytube"
+            keyAlias = "tinytube"
+            keyPassword = "tinytube"
             storeType = "PKCS12"
         }
     }

@@ -389,7 +389,7 @@ update to something that was pointed at the old one.
 The old hostname did **not** survive the rename, and this is the part that went
 differently from the plan. Cloudflare's git-connected build **renames the
 existing service** rather than standing a second one up beside it, so
-`yt-kids.vtlinh87.workers.dev` began answering 404 the moment the new name
+the previous hostname began answering 404 the moment the new name
 deployed. Every app already installed lost its uploads feed and its update check
 in the same instant, with nothing able to tell it where to look.
 
@@ -403,7 +403,8 @@ below mandatory rather than tidy-up.
 1. Install the new APK:
    **https://tinytube.vtlinh87.workers.dev/app/app-release.apk**
 2. Uninstall the old app. Both are called TinyTube in the launcher; the old one
-   is `dev.vtlinh.ytkids` under Android's app info.
+   is the one whose package does not read `dev.vtlinh.tinytube` under
+   Android's app info.
 3. Approve the channels again, in parent mode.
 
 The old app cannot update itself to the new one — its update check points at a

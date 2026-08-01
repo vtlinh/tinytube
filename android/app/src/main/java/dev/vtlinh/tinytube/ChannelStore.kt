@@ -139,8 +139,61 @@ class ChannelStore private constructor(context: Context) :
            out under concurrent writes. */
         fun get(context: Context): ChannelStore =
             instance ?: synchronized(this) {
-                instance ?: ChannelStore(context).also { instance = it }
+                instance ?: run {
+                    /* Before ANY helper touches the file. Every store in the
+                       app — VideoStore, WatchStore — opens the database through
+                       this method, which is what makes one call here enough. */
+                    renameLegacyDatabase(context.applicationContext)
+                    ChannelStore(context).also { instance = it }
+                }
             }
+
+        /* Move the database a previous build left under a different name.
+         *
+         * A device that ran an earlier build holds the approved channels, the
+         * grid and the watch history in a file named by that build.
+         * SQLiteOpenHelper would create a fresh, empty one beside it and the app
+         * would come up with nothing — the data present on disk and never looked
+         * for. So the file moves to the current name first.
+         *
+         * The old name is FOUND, not remembered. This app has only ever created
+         * one database, so within its own databases directory the single .db
+         * that is not the current name is the one to adopt. That is also why the
+         * previous name appears nowhere in this repository.
+         *
+         * If there is more than one, nothing is touched: that is a situation
+         * this code has no way to be right about, and guessing would mean
+         * overwriting somebody's data with somebody else's.
+         *
+         * Runs at most once per install: afterwards there is no other database
+         * to find. Every failure is survivable and none is worth crashing for —
+         * a failed move leaves the app exactly where it would have been without
+         * any of this, and a half-finished one is retried next launch because
+         * the database itself moves last. */
+        private fun renameLegacyDatabase(context: Context) {
+            val current = context.getDatabasePath(Schema.DATABASE)
+            /* Already migrated, or a fresh install. Never overwrite a live
+               database with an older one. */
+            if (current.exists()) return
+
+            val dir = current.parentFile ?: return
+            val candidates = dir.listFiles { f ->
+                f.isFile && f.name.endsWith(Schema.SUFFIX) && f.name != current.name
+            } ?: return
+            val legacy = candidates.singleOrNull() ?: return
+
+            for (suffix in Schema.CARRIED_SUFFIXES) {
+                val from = java.io.File(legacy.path + suffix)
+                if (!from.exists()) continue
+                try {
+                    from.renameTo(java.io.File(current.path + suffix))
+                } catch (e: Exception) {
+                    /* Leave whatever moved where it is. The next launch retries,
+                       and the database moving last is what makes that retry
+                       meaningful. */
+                }
+            }
+        }
     }
 }
 

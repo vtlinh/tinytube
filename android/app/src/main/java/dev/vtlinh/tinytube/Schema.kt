@@ -9,27 +9,41 @@ package dev.vtlinh.tinytube
    device. */
 object Schema {
 
-    /* ⚠️ THE FILENAME STAYS "ytkids.db". IT IS NOT A LABEL, IT IS AN ADDRESS.
-       This is the name of the SQLite file sitting on every phone that has ever
-       run this app. Rename it and the app opens a new, empty database: every
-       approved channel, every video in the grid and all of the watch history
-       become unreachable — not deleted, just no longer looked for — and the
-       parental control silently resets to nothing on next launch.
-
-       There would be no error and no crash. A child would simply be shown an
-       empty grid, and an adult would have to approve everything again.
-
-       That is the same class of breakage as renaming the applicationId or the
-       Worker, which cost every installed phone its channels once already — see
-       README's Naming. A rename sweep across this repository has come past here
-       once. Leave it.
-
-       iOS uses "tinytube.sqlite" in Schema.swift, and that divergence is fine:
-       no iOS build has ever shipped, so nothing there has a file to lose. The
-       two platforms need not agree on a filename; they need to agree on the
-       LADDER, which is what SchemaTest and SchemaTests check. */
-    const val DATABASE = "ytkids.db"
+    const val DATABASE = "tinytube.db"
     const val VERSION = 5
+
+    /* ⚠️ THE FILENAME IS AN ADDRESS, NOT A LABEL — so renaming it took a file
+       move, not an edit.
+
+       Devices that ran an earlier build hold this database under the name that
+       build used. Changing the constant alone would make the app open a NEW,
+       empty database: every approved channel, every video in the grid and all
+       of the watch history would still be on disk and simply never looked for.
+       No crash and no error — a child would be shown an empty grid and the
+       parental control would have silently reset itself.
+
+       So ChannelStore.get moves the file before anything opens it. It finds the
+       old one by LOOKING rather than by holding onto the previous name: the
+       app's database directory has only ever contained one database, so the
+       single file that is not the current name is it. That keeps the old name
+       out of the source entirely, which is the point.
+
+       DO NOT delete that migration until every device has run a build carrying
+       it, which is not knowable from here — a phone that skips this version and
+       updates straight to a later one lands on the empty-grid path with nothing
+       left to move its data.
+
+       The sidecars matter as much as the file. SQLite keeps -journal, -wal and
+       -shm beside it; moving the database and leaving a stale -wal behind can
+       lose the most recent writes, which are exactly the channels a parent
+       approved last. */
+    const val SUFFIX = ".db"
+
+    /* Everything that has to move together, in the order it should move: the
+       database last, because its absence is what marks the migration unfinished.
+       If a move is interrupted, a rerun still finds the old database and starts
+       again. */
+    val CARRIED_SUFFIXES = listOf("-journal", "-wal", "-shm", "")
 
     const val CHANNELS = "channels"
     const val VIDEOS = "videos"

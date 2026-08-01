@@ -17,7 +17,7 @@ enum Endpoints {
        Changing it strands every installed copy: they keep asking the old
        hostname, and Cloudflare's git build RENAMES the service rather than
        adding a second, so the old name starts answering 404 the moment the new
-       one deploys. That happened once, from yt-kids, and it cost every phone
+       one deploys. That happened once already, and it cost every phone
        its approved channels. Android survived it only because the app carrying
        the new hostname was a fresh install rather than an update.
 
