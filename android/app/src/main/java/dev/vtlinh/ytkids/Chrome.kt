@@ -42,12 +42,14 @@ object Chrome {
        "More videos", the YouTube wordmark, every one of them a way out.
 
        On the real frame the run starts 9% of the way across, because YouTube
-       insets its controls past the display cutout. An eighth leaves room for
-       a wider inset without reaching the middle of the picture, where a red
-       jumper lives. */
+       insets its controls past the display cutout — and a cutout is exactly
+       the sort of thing that differs between devices. A sixth leaves room for
+       a wider one without reaching the middle of the picture, where the red
+       jumper lives. Proportional rather than absolute for the same reason:
+       nothing here may assume a resolution. */
     fun seekBarBottom(pixels: IntArray, width: Int, height: Int): Int? {
         if (width <= 0 || height <= 0 || pixels.size < width * height) return null
-        val startsWithin = maxOf(width / 8, 1)
+        val startsWithin = maxOf(width / 6, 1)
         val minRun = maxOf(width / 200, 4)
 
         for (y in height - 1 downTo 0) {

@@ -81,16 +81,12 @@ class PlayerActivity : AppCompatActivity() {
         /* Long enough after a pause for YouTube's controls to have finished
            animating in. Measuring mid-fade reads a half-opaque bar. */
         private const val MEASURE_DELAY_MILLIS = 400L
-        /* How much of the player's bottom edge is looked at. On a real paused
-           frame the bar sits at 82% of the height, so a fifth would only just
-           reach it; a third leaves room for a player that draws its controls
-           higher, and still captures nothing of the picture worth having. */
-        private const val MEASURE_STRIP_FRACTION = 0.3f
-
-        /* Nothing further up than this can be the seek bar. Also measured: the
-           real gap under the bar is 18% of the player, so a quarter is a real
-           limit rather than a formality. */
-        private const val MEASURE_MAX_FRACTION = 0.25f
+        /* Floors under the dp figures in dimens, for a player short enough
+           that 200dp would be most of it. Whichever is larger wins, so the
+           measurement degrades to "look at a third of the screen" rather than
+           to "look at all of it" on an unusually squat display. */
+        private const val MEASURE_MAX_FRACTION = 0.30f
+        private const val MEASURE_STRIP_FRACTION = 0.35f
 
         /* The measured blocker height, in pixels, or 0 for "not yet".
          *
@@ -372,7 +368,24 @@ class PlayerActivity : AppCompatActivity() {
         val vh = w.height
         if (vw <= 0 || vh <= 0) return
 
-        val stripH = (vh * MEASURE_STRIP_FRACTION).toInt()
+        /* Both bounds come from dp, floored by a fraction of the player.
+         *
+         * dp because YouTube's chrome is a fixed physical size — a bar, a row
+         * of buttons, an inset — and stays that size whatever the resolution
+         * or aspect ratio. The fractions are only there so an unusually squat
+         * player, where 200dp would be most of the screen, degrades to looking
+         * at a third of itself rather than at all of it. */
+        val maxPx = maxOf(
+            resources.getDimensionPixelSize(R.dimen.player_chrome_max),
+            (vh * MEASURE_MAX_FRACTION).toInt(),
+        )
+        val stripH = minOf(
+            vh,
+            maxOf(
+                maxPx + resources.getDimensionPixelSize(R.dimen.player_chrome_headroom),
+                (vh * MEASURE_STRIP_FRACTION).toInt(),
+            ),
+        )
         if (stripH <= 0) return
         val fallback = resources.getDimensionPixelSize(R.dimen.player_bottom_block)
 
@@ -391,9 +404,9 @@ class PlayerActivity : AppCompatActivity() {
                     vw,
                     stripH,
                     fallbackPx = fallback,
-                    maxPx = (vh * MEASURE_MAX_FRACTION).toInt(),
+                    maxPx = maxPx,
                     /* Left reachable under the bar, so a thumb aiming at a
-                       9-pixel line still lands on it. */
+                       line under 4dp thick still lands on it. */
                     touchMarginPx =
                         resources.getDimensionPixelSize(R.dimen.player_seek_touch_margin),
                 )

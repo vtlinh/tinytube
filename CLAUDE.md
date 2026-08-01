@@ -129,11 +129,19 @@ stops, green publishes.
   Anything that widens it further — auto-approving related channels, following
   playlists, surfacing recommendations — is a bigger change than it looks.
 - **The player's frame capture stays a measurement, never a picture.**
-  `PlayerActivity.measureBlockHeight` draws the bottom third of the WebView to
-  find the seek bar. Only that third is ever drawn, the bitmap is recycled in
+  `PlayerActivity.measureBlockHeight` draws the bottom strip of the WebView to
+  find the seek bar. Only that strip is ever drawn, the bitmap is recycled in
   the method that made it, and nothing is written, passed on or sent. Don't
   widen the captured rectangle, don't keep the bitmap, and don't add a caller
   that wants the image rather than the number.
+- **The player's pixel geometry is dp, never a fraction of the screen.**
+  YouTube's chrome is a fixed physical size, so `player_chrome_max` and the
+  touch margin live in `dimens.xml` and the fractions in `PlayerActivity` are
+  only floors for an unusually squat display. A fraction-shaped limit is a
+  quarter of a landscape phone's height and a tenth of a tablet's, which is how
+  the first version worked on one device and no others. `ChromeTest` builds the
+  same layout at seven device geometries; add to that list rather than tuning
+  to a screenshot.
 - **`version.json` is published last, in its own upload.** It is what tells an
   app a new build exists; landing it before the APK advertises a version that
   can't be downloaded.

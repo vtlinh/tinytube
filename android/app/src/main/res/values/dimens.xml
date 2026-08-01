@@ -36,6 +36,27 @@
          were 217 pixels under the bar and the row of ways out of the app —
          share, "More videos", the YouTube wordmark — began 58 of them down.
          Widening this much further starts uncovering that row. -->
-    <dimen name="player_seek_touch_margin">20dp</dimen>
+    <dimen name="player_seek_touch_margin">16dp</dimen>
+
+    <!-- How far above the bottom the seek bar could possibly be.
+
+         Expressed in dp because that is how YouTube lays its chrome out: a
+         progress bar, a gap, a row of 48dp buttons, a bottom inset. On the
+         frame this was measured from the whole lot came to about 80dp. That
+         quantity does NOT scale with the screen — it is the same handful of
+         millimetres on a 720p phone and on a tablet — which is why the earlier
+         "a quarter of the player's height" was wrong the moment the resolution
+         or aspect ratio changed. A quarter of a tablet's height is enormous; a
+         quarter of a short landscape phone's is barely the chrome itself.
+
+         Set well above the measured 80dp, because the frame it came from does
+         not report its density and the true figure could be anywhere from
+         roughly 70dp to 110dp. It only has to be small enough to stay out of
+         the picture, and 200dp on any real device is still the bottom strip. -->
+    <dimen name="player_chrome_max">200dp</dimen>
+
+    <!-- Extra captured above that limit, so the bar itself and a little of
+         what is over it land inside the rectangle rather than on its edge. -->
+    <dimen name="player_chrome_headroom">40dp</dimen>
 
 </resources>
