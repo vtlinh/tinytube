@@ -30,37 +30,39 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@color/surface"
-        android:paddingStart="20dp"
+        android:paddingStart="4dp"
         android:paddingEnd="4dp">
+
+        <!-- Only while one channel's videos are showing. An arrow at the start
+             rather than a worded button at the end: narrowing the grid to a
+             channel is a step into something, and every other app on the phone
+             says a step back out is an arrow up here. The system back button
+             does the same thing, so the two agree.
+
+             The title takes over the start inset when this is hidden, which is
+             nearly always — see MainActivity.render. -->
+        <ImageButton
+            android:id="@+id/back"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:src="@drawable/ic_back"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:scaleType="centerInside"
+            android:contentDescription="@string/show_all_videos"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/header"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:layout_marginStart="16dp"
             android:text="@string/app_name"
             android:textSize="17sp"
             android:textStyle="bold"
             android:textColor="@color/text"
             android:maxLines="1"
             android:ellipsize="end" />
-
-        <!-- Only while one channel's videos are showing: the way back to all
-             of them, and the label that says you are not looking at all of
-             them. Gone the rest of the time, which is nearly always. -->
-        <Button
-            android:id="@+id/show_all"
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:text="@string/show_all_videos"
-            style="?android:attr/borderlessButtonStyle"
-            android:minWidth="0dp"
-            android:minHeight="0dp"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:textColor="@color/accent"
-            android:textSize="14sp"
-            android:visibility="gone" />
 
         <Button
             android:id="@+id/parent_mode"
