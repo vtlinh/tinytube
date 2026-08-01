@@ -68,6 +68,12 @@ publishes a build to every installed device.
 - `android.yml`'s `pull_request` trigger is deliberately not path-filtered. A
   filtered run that doesn't match never reports at all, and auto-merge waits
   for it — a docs-only PR would never merge.
+- The publish it dispatches afterwards IS filtered, by hand, to the same paths
+  the `push` trigger uses. `workflow_dispatch` ignores path filters, so every
+  merge used to publish — a docs-only PR shipped a new `versionCode` to every
+  installed device for an update containing nothing. If the file list can't be
+  read it publishes anyway: the wrong direction to be wrong in is the one where
+  an app change silently never ships.
 
 `claude-autofix.yml` does the reverse: a red `android` run on a PR gets read,
 fixed and pushed, so the retry goes green and auto-merge takes it. It has the

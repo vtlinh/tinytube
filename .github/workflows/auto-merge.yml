@@ -138,5 +138,31 @@ jobs:
           # build and no published release — a change that never reaches a
           # single device, silently. Kick the publish off by hand; android.yml
           # carries workflow_dispatch for exactly this.
-          echo "Dispatching the publish build on main"
-          gh workflow run android.yml --repo "$REPO" --ref main
+          #
+          # But only when the app actually changed. android.yml's push trigger
+          # is path-filtered to android/**; a workflow_dispatch is not, so
+          # every merge was publishing a new build — a docs-only PR shipped a
+          # fresh versionCode to every installed device, an update with nothing
+          # in it. This applies the same filter the push trigger uses.
+          #
+          # Failing to read the file list means publishing anyway. The wrong
+          # direction to be wrong in is the one where an app change quietly
+          # never ships.
+          PUBLISH=yes
+          if FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
+            PUBLISH=no
+            for f in $FILES; do
+              case "$f" in
+                android/*|.github/workflows/android.yml) PUBLISH=yes ;;
+              esac
+            done
+          else
+            echo "Could not list PR #$PR's files; publishing rather than risk not shipping."
+          fi
+
+          if [ "$PUBLISH" = "yes" ]; then
+            echo "Dispatching the publish build on main"
+            gh workflow run android.yml --repo "$REPO" --ref main
+          else
+            echo "PR #$PR touched nothing under android/ — not publishing a build."
+          fi
