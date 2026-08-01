@@ -61,6 +61,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+          # The run that just went green. Handed to the publish dispatch below
+          # so it can republish that run's APK rather than build the same code
+          # again; android.yml decides whether it may, by comparing the tree.
+          RUN_ID: ${{ github.event.workflow_run.id }}
           # The event already names the pull requests this run belongs to, for
           # same-repo PRs. Reading it costs no API call and no permission,
           # which is the difference between working and 403 if the token turns
@@ -161,8 +165,12 @@ jobs:
           fi
 
           if [ "$PUBLISH" = "yes" ]; then
-            echo "Dispatching the publish build on main"
-            gh workflow run android.yml --repo "$REPO" --ref main
+            # Offer this run's build to the publish. It is only taken if main's
+            # tree turns out to be the tree that run built — i.e. if nothing
+            # else merged in between — so passing it is never wrong, only
+            # sometimes ignored.
+            echo "Dispatching the publish build on main, offering run $RUN_ID's APK"
+            gh workflow run android.yml --repo "$REPO" --ref main -f reuse_run_id="$RUN_ID"
           else
             echo "PR #$PR touched nothing under android/ — not publishing a build."
           fi

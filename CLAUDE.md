@@ -59,12 +59,10 @@ Green CI is part of "finished", not a separate step to skip — the unit tests a
 what stand between a bad video id and the player, and merging past a red run
 publishes a build to every installed device.
 
-The publish run itself does not re-run them: auto-merge only merges a green PR
-and then dispatches the publish, so the same question has already been asked.
-A `push` to main still runs them, because a hand-push has passed nothing. The
-gap that leaves is merge skew — the PR was tested against main as it stood when
-its run started — which one branch at a time makes unlikely rather than
-impossible.
+The publish run doesn't usually run them again, but not by skipping them: it
+usually doesn't build at all, republishing the APK the PR's own run made. When
+it does build — because the code moved and the reuse was refused — it tests,
+because that is precisely the case where nothing has tested what is shipping.
 
 `auto-merge.yml` does the merging: a PR that isn't a draft merges itself once
 `android` passes and nothing else on the commit has failed. Label a PR
@@ -81,6 +79,18 @@ impossible.
   installed device for an update containing nothing. If the file list can't be
   read it publishes anyway: the wrong direction to be wrong in is the one where
   an app change silently never ships.
+
+The publish `android.yml` runs after that merge reuses the pull request's own
+APK when `git rev-parse HEAD:android` — the SHA of the `android/` subtree — is
+what that build recorded. Three things follow. The hash covers `android/` and
+only `android/`, so anything the APK depends on has to live there; a build input
+put anywhere else would be invisible to the check and could change without
+forcing a rebuild. Every build must keep writing `dist/version.json` and
+`dist/build-tree.txt` beside the APK — the reuse check reads them, and a build
+that stops emitting them silently disables the fast path. And the tests run on
+*every* build that happens, including a publish: reaching the compiler on a
+publish means the reuse was refused, which means no run has tested this tree.
+Don't "optimise" the tests back out of that path.
 
 `claude-autofix.yml` does the reverse: a red `android` run on a PR gets read,
 fixed and pushed, so the retry goes green and auto-merge takes it. It has the

@@ -19,9 +19,21 @@ on:
   # wasted minutes; not building them costs a PR that can never land.
   pull_request:
   workflow_dispatch:
+    inputs:
+      reuse_run_id:
+        description: >-
+          A previous android run whose APK to publish as-is instead of building
+          a new one. Honoured only if that run recorded building the exact tree
+          this run checks out; otherwise it is ignored and the build runs
+          normally. auto-merge.yml passes the run that just passed on the PR.
+        required: false
+        default: ""
 
+# contents: write publishes the release. actions: read is what lets this run
+# download an artifact belonging to a DIFFERENT run — the reuse path below.
 permissions:
   contents: write
+  actions: read
 
 # main: only one publish at a time. Two overlapping runs both clobber the fixed
 # android-latest release, so a slower older run can land its APK on top of a
@@ -44,7 +56,85 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Publishing a merge normally means building code that has already been
+      # built, minutes earlier, by the run that let it merge. This step looks
+      # for that build and takes it, turning a ~2m30 publish into about half a
+      # minute.
+      #
+      # Whether it is the same code is decided by a CONTENT HASH, not by
+      # versions or timestamps or which commits are involved. Every build
+      # records the hash of the source it was made from; if that matches what
+      # is checked out here, the two builds would be identical in every way
+      # that matters, and the tests that ran on it ran on this. If main moved
+      # between the PR build and the merge, the hash differs and this falls
+      # through to a full build — which is also exactly when the tests need
+      # running again, because no run has seen the combined tree.
+      #
+      # So it can only ever skip work that was demonstrably already done. The
+      # failure mode of the check is a needless rebuild, never a stale publish.
+      #
+      # The hash is git's own: `git rev-parse HEAD:android` is the SHA of the
+      # android/ subtree, which git already computed and stored. Nothing has to
+      # be committed to hold it and nothing has to be excluded from it, because
+      # untracked files aren't in a tree in the first place — the two things
+      # that make a checksum-file-in-the-repo version of this awkward.
+      #
+      # The SUBTREE rather than the whole repo, because android/ is everything
+      # the APK and the tests are made from — build.gradle.kts and the keystore
+      # included. A pull request that merges in between touching only README or
+      # a workflow cannot change the APK, and shouldn't cost a rebuild.
+      #
+      # Trust boundary worth naming: this downloads an artifact produced by
+      # another run of this repo, and takes that run's word for which tree it
+      # built. On a repo whose workflows can be edited by a pull request from
+      # outside — a fork PR, say — that word is worth what the fork's copy of
+      # this file says it is. This repo doesn't take those, and dispatching
+      # this workflow at all needs write access; if either ever changes, this
+      # step needs to verify the run's own head commit rather than a file it
+      # uploaded.
+      - name: Reuse this tree's existing build, if there is one
+        id: reuse
+        if: github.event_name == 'workflow_dispatch' && inputs.reuse_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ inputs.reuse_run_id }}
+        run: |
+          set -uo pipefail
+          say() { echo "$*"; echo "$*" >> "$GITHUB_STEP_SUMMARY"; }
+          give_up() { say "$*"; rm -rf dist; exit 0; }
+
+          if ! gh run download "$RUN_ID" --repo "$REPO" --name yt-kids-apk --dir dist; then
+            give_up "Run $RUN_ID has no yt-kids-apk artifact — building instead."
+          fi
+
+          BUILT=$(cat dist/build-tree.txt 2>/dev/null || true)
+          HERE=$(git rev-parse HEAD:android)
+          if [ -z "$BUILT" ] || [ "$BUILT" != "$HERE" ]; then
+            give_up "Run $RUN_ID built android/ ${BUILT:-<unrecorded>}; main has $HERE — building instead."
+          fi
+
+          # The updater compares versionCode and nothing else, so the one thing
+          # a reused APK must not do is carry a code that is already out there.
+          # It is a run number, so it only fails to be higher if something odd
+          # happened — but "something odd happened" is precisely when you want
+          # the guard, and the cost of it firing is a rebuild.
+          NEW=$(sed -n 's/.*"versionCode"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' dist/version.json)
+          OLD=0
+          if gh release download android-latest --repo "$REPO" \
+               --pattern version.json --output published.json --clobber 2>/dev/null; then
+            OLD=$(sed -n 's/.*"versionCode"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' published.json)
+            rm -f published.json
+          fi
+          if [ -z "$NEW" ] || [ "$NEW" -le "${OLD:-0}" ]; then
+            give_up "Run $RUN_ID's build is versionCode ${NEW:-<unreadable>}, but ${OLD:-0} is already published — building instead."
+          fi
+
+          say "Reusing run $RUN_ID's build: versionCode $NEW, tree $HERE. No rebuild needed."
+          echo "reused=yes" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-java@v4
+        if: steps.reuse.outputs.reused != 'yes'
         with:
           distribution: temurin
           java-version: "17"
@@ -52,7 +142,14 @@ jobs:
       # Caches the whole Gradle user home, which is where both the downloaded
       # 8.9 distribution and the local build cache live. Writes entries from
       # main and restores them on pull requests, so a PR build starts warm.
+      #
+      # Note that a publish which reuses an APK never reaches this step, so it
+      # neither reads nor refreshes the cache. Main still writes it on every
+      # rebuild — a merge that raced another, or a hand push — and GitHub only
+      # evicts an entry after a week untouched, so the cost of a quiet week is
+      # one cold build, not a permanent regression.
       - uses: gradle/actions/setup-gradle@v4
+        if: steps.reuse.outputs.reused != 'yes'
         with:
           gradle-version: "8.9"
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
@@ -67,6 +164,7 @@ jobs:
       # the in-app updater compares, so this string is display-only and may
       # reset freely.
       - name: Compute version name
+        if: steps.reuse.outputs.reused != 'yes'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -89,30 +187,38 @@ jobs:
       # the project per invocation, and doing that twice was costing most of a
       # minute for nothing.
       #
-      # The publish run skips the tests, because they have already passed on
-      # this code: auto-merge only merges a PR whose android run was green, and
-      # then dispatches this. Running them again asks the same question twice.
-      #
-      # Only on the dispatch, though. A `push` to main reaches here having
-      # passed nothing — GITHUB_TOKEN pushes trigger no workflows, so the only
-      # thing that arrives by push is a person pushing to main by hand, which
-      # is exactly when the tests are the only check there is.
-      #
-      # What this gives up, and it is not nothing: the PR was tested against
-      # main as it stood WHEN THE RUN STARTED. If another PR merges in between,
-      # what lands is a tree no run has tested. It cannot conflict — git would
-      # have refused the merge — but two independently correct changes can
-      # still disagree. One branch at a time makes that unlikely rather than
-      # impossible. If it ever bites, dropping the condition below is the fix.
+      # The tests run on every build that happens at all, including a publish.
+      # That reads like duplicated work — auto-merge only merges a PR whose
+      # android run was green — but the reuse step above is what removes the
+      # duplication, and it removes the whole build rather than half of it.
+      # Reaching here on a publish means the reuse was refused, which means no
+      # run has tested this exact tree, which is exactly when skipping the
+      # tests would be skipping the only check there is.
       - name: Unit tests and release APK
-        env:
-          TASKS: ${{ github.event_name == 'workflow_dispatch' && 'assembleRelease' || 'testReleaseUnitTest assembleRelease' }}
-        run: gradle -p android $TASKS
+        if: steps.reuse.outputs.reused != 'yes'
+        run: gradle -p android testReleaseUnitTest assembleRelease
+
+      # Everything downstream reads dist/, so a reused build and a fresh one
+      # are the same thing by the time anyone looks.
+      #
+      # version.json is written HERE, next to the APK it describes, rather than
+      # at publish time. That is the point: the pair travels together, so a
+      # publish cannot pick up one build's APK and another's manifest — the
+      # failure the "upload version.json last" rule exists to bound. build-tree
+      # records what this was made from, and is what the reuse check reads.
+      - name: Collect the build outputs
+        if: steps.reuse.outputs.reused != 'yes'
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk dist/
+          echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"${APP_VERSION_NAME}\"}" > dist/version.json
+          git rev-parse HEAD:android > dist/build-tree.txt
+          cat dist/version.json dist/build-tree.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: yt-kids-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: dist/
 
       # main builds publish to a fixed release so the Worker always has a stable
       # asset to re-serve to installed apps.
@@ -121,7 +227,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "{\"versionCode\": ${GITHUB_RUN_NUMBER}, \"versionName\": \"${APP_VERSION_NAME}\"}" > version.json
           gh release view android-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create android-latest --repo "$GITHUB_REPOSITORY" \
               --title "Android app (latest)" --notes "APK auto-built from main." --latest=false
@@ -131,5 +236,5 @@ jobs:
           # the APK finishes going up — a window on every release where every
           # app that checks is told about a version it then fails to download.
           gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber \
-            android/app/build/outputs/apk/release/app-release.apk
-          gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber version.json
+            dist/app-release.apk
+          gh release upload android-latest --repo "$GITHUB_REPOSITORY" --clobber dist/version.json
