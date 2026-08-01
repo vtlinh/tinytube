@@ -120,8 +120,8 @@ setting a screen lock is the fix.
 
 ## Settings
 
-The gear next to **Parent** in the status bar goes through the same lock and
-holds the parent's choices. There is one so far: what plays when a video ends.
+The gear in parent mode's bar, next to the approved-list button, holds the
+parent's choices. There is one so far: what plays when a video ends.
 
 - **Play the next one down the list** — walks the grid in order and stops at the
   end of it. A session has an edge.

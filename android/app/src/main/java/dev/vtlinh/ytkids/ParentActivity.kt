@@ -59,6 +59,13 @@ class ParentActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.approved).setOnClickListener {
             approvedList.launch(Intent(this, ApprovedChannelsActivity::class.java))
         }
+        /* No gate of its own: getting here already required one. This is the
+           same reason ApprovedChannelsActivity opens straight from the button
+           next to it — everything on this side of ChallengeActivity is already
+           past it. */
+        findViewById<ImageButton>(R.id.settings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
         /* Nothing is loaded yet, so there is certainly no channel to approve.
            This also installs the button's click listener. */
         updateApproveButton(null)

@@ -29,7 +29,7 @@ android/                         the app
     Playlist.kt     pure: what plays next             (unit-tested)
     Chrome.kt       pure: find the seek bar's track     (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
-    SettingsStore.kt the parent's choices; SettingsActivity edits them, behind the gate
+    SettingsStore.kt the parent's choices; SettingsActivity edits them, inside parent mode
     ChannelFeeds.kt asks the Worker, once a day per channel
     VideoStore.kt   the grid, in SQLite
     BlockHeightStore.kt the measured player inset, per display
@@ -175,12 +175,17 @@ stops, green publishes.
   channel-filtered grid cannot lead out of that channel — and there is no rule
   in the player saying so, which is the point. Don't give the player its own
   idea of what is playable; the screen that was on is the authority.
-- **Both status bar controls are gated.** The bar holds the Parent button and
-  the Settings button, and neither opens anything without a `RESULT_OK` from
-  `ChallengeActivity` first. That is the invariant — not the number of buttons.
-  A control that reaches anything without the gate does not belong there,
-  whatever it does. `AboutActivity` remains the exception, on the long-press:
-  parent-facing but harmless.
+- **The child's status bar holds exactly one control**, the Parent button, and
+  everything behind it is gated by `ChallengeActivity`. Settings had a second
+  button there for one build; it lives in parent mode now, next to the approved
+  list, where every other parent control already is. Anything reachable from
+  that bar without the gate does not belong on it. `AboutActivity` remains the
+  exception, on the long-press: parent-facing but harmless.
+- **Nothing inside parent mode needs its own gate.** `ParentActivity` is only
+  reachable through a `RESULT_OK` from `ChallengeActivity`, so the approved
+  list and the settings open straight from its bar. Adding a second challenge
+  there would be asking the same question twice; adding an entry point to
+  either from the child's side would be skipping it once.
 - **Curation is channel-level and on the device.** There is no hand-listed
   video catalog and no server-side list; `ChannelStore` is the parental
   control. Don't reintroduce a remote source of approvals without saying what
@@ -189,8 +194,8 @@ stops, green publishes.
   parsed host, never a substring of the URL. If you add a host, add the
   lookalike test cases for it too.
 - **Never widen the child-facing surface.** No search, no free text entry, no
-  link that leaves the app. Every control on the status bar is parent-facing
-  and behind `ChallengeActivity` — see the gating rule below.
+  link that leaves the app. The status bar holds one control — see the gating
+  rule below.
 - **The Channels tab is read-only, and must stay that way.** It shows the
   approved list and narrows the grid to one channel. It cannot remove a channel
   and it cannot open YouTube — `ChannelStore` is the parental control and
