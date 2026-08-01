@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- The launcher label, the grid's heading, and the name on the settings
-         screen, all from here. Note what it is NOT: the applicationId stays
-         dev.vtlinh.ytkids and the Worker stays yt-kids. Android identifies an
-         installed app by its package, so changing that would land as a second
-         app beside the first rather than as an update to it, and the Worker's
-         hostname is compiled into Endpoints — an installed copy could only
-         learn a new one through an update it would have to fetch from the old
-         one. A rename is a label; those two are addresses. -->
+         screen, all from here.
+
+         The applicationId and the Worker's hostname now match it, which they
+         did not at first: those two are addresses rather than labels, and
+         moving them meant this build cannot update the app that came before
+         it. See README's Naming. -->
     <string name="app_name">TinyTube</string>
 
     <!-- Written to be read out loud by a parent, not by the child: an empty

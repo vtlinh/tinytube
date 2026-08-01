@@ -356,31 +356,47 @@ otherwise is an update they can no longer find.
 
 ## Naming
 
-The app is **TinyTube**, and so is the Kotlin package: `dev.vtlinh.tinytube`.
+Everything is **TinyTube**: the label, the Kotlin package, the `applicationId`
+(`dev.vtlinh.tinytube`) and the Worker (`tinytube.vtlinh87.workers.dev`).
 
-Two things deliberately did *not* change with it, because they are **addresses
-rather than labels**:
+The last two were renamed together, once, and that pairing is the only way it
+can be done. It is worth writing down why, so nobody does it again casually.
 
-- **`applicationId` — `dev.vtlinh.ytkids`.** Android identifies an installed app
-  by this, not by its class names. A new one would install *beside* the old app
-  rather than update it, and every phone already carrying this would keep the
-  old copy, still self-updating from the old release, forever. It can differ
-  from the namespace, and now does.
-- **The Worker — `yt-kids.vtlinh87.workers.dev`.** Its hostname is compiled into
-  `Endpoints.kt`. An installed copy could only learn a new one through an update
-  it would have to fetch from the old one.
+**The `applicationId` is how Android identifies an installed app.** Changing it
+means this build cannot update the one already on a phone: it installs *beside*
+it, with its own data directory. The approved channels, watch history and
+settings of the old app are not visible to the new one. There is no migration —
+the old app has to be uninstalled by hand and its channels approved again.
 
-Moving the Kotlin package renamed every Android component with it, and a
-home-screen icon is a pinned **component name**. So `MainActivity` keeps its old
-name as an `activity-alias` — `dev.vtlinh.ytkids.MainActivity` — and that alias
-is what carries the launcher filter. Without it, updating would have left the
-app installed and in the drawer with every already-placed icon pointing at a
-class that no longer exists. Don't tidy the alias away; the old name is the
-point.
+**The Worker's hostname is compiled into `Endpoints.kt`.** A renamed Worker
+cannot tell an installed app where it went, because the only thing that could is
+an update the app would have to fetch from the hostname it no longer has. That
+is survivable exactly once, and only because it happened alongside the
+applicationId: the app carrying the new hostname is a fresh install, not an
+update to something that was pointed at the old one.
 
-`Updater.ACTION_INSTALL_UPDATE` stays on the old string for the same class of
-reason: a notification posted by the previous build holds a `PendingIntent`
-naming it, and renaming it would leave that Install button doing nothing.
+The old hostname did **not** survive the rename, and this is the part that went
+differently from the plan. Cloudflare's git-connected build **renames the
+existing service** rather than standing a second one up beside it, so
+`yt-kids.vtlinh87.workers.dev` began answering 404 the moment the new name
+deployed. Every app already installed lost its uploads feed and its update check
+in the same instant, with nothing able to tell it where to look.
+
+Those apps still play what is already in their grid — videos come from YouTube
+directly — but they will never learn about a new upload or a new build again.
+Installing the new app by hand is the only recovery, which makes the migration
+below mandatory rather than tidy-up.
+
+### Migrating a phone
+
+1. Install the new APK:
+   **https://tinytube.vtlinh87.workers.dev/app/app-release.apk**
+2. Uninstall the old app. Both are called TinyTube in the launcher; the old one
+   is `dev.vtlinh.ytkids` under Android's app info.
+3. Approve the channels again, in parent mode.
+
+The old app cannot update itself to the new one — its update check points at a
+hostname that no longer answers — so step 1 has to be a manual download.
 
 ## Building locally
 

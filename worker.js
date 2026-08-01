@@ -40,7 +40,12 @@
  *   npx wrangler secret put GH_TOKEN     # fine-grained, Contents:read, this repo only
  */
 
-const RELEASE_REPO = "vtlinh/yt_kids";
+/* The repository was renamed from yt_kids to tinytube with everything else.
+ * GitHub 301-redirects the old name and fetch() follows redirects, so this kept
+ * working across the gap — but a redirect is somebody else's promise, and the
+ * one thing this Worker must never fail at is telling an app where its update
+ * is. Name it directly. */
+const RELEASE_REPO = "vtlinh/tinytube";
 const RELEASE_TAG = "android-latest";
 
 /* path -> the asset name published by .github/workflows/android.yml */

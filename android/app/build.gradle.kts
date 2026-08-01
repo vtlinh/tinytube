@@ -15,20 +15,24 @@ val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 val appVersionName = System.getenv("APP_VERSION_NAME") ?: "dev"
 
 android {
-    /* The Kotlin package and the R class. Renamed with the app; this one is
-       only a name.
-
-       The applicationId below is NOT, and the two are deliberately different
-       now. Android identifies an installed app by its applicationId: change it
-       and the next build installs BESIDE the old app on every phone that has
-       one, rather than updating it — and the old copy keeps self-updating from
-       the old release forever, with nothing able to migrate anyone off it. */
     namespace = "dev.vtlinh.tinytube"
     compileSdk = 34
 
     defaultConfig {
-        /* Never rename this. It is the address of every installed copy. */
-        applicationId = "dev.vtlinh.ytkids"
+        /* The address of every installed copy, and the reason renaming it is
+           a one-way door.
+
+           Android identifies an installed app by this string. Changing it from
+           dev.vtlinh.ytkids means this build cannot update the app already on
+           a phone — it installs BESIDE it, with its own data directory, and
+           the approved channels, watch history and settings of the old one are
+           not visible to it. The old app has to be uninstalled by hand and its
+           channels approved again.
+
+           That was asked for and is done. What must not happen is doing it
+           twice: there is no migration here, only a fresh start, and every
+           further rename costs another one. */
+        applicationId = "dev.vtlinh.tinytube"
         minSdk = 26
         targetSdk = 34
         versionCode = ciRunNumber

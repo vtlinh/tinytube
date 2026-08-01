@@ -16,10 +16,21 @@ package dev.vtlinh.tinytube
    uploads route answers a question about a channel already approved. */
 object Endpoints {
     /* Set by wrangler.toml's `name` plus the account's workers.dev subdomain.
-       Changing the worker name means changing this, and old installs keep
-       asking the old hostname until they update — which they can only do if
-       the old hostname still answers. Rename with that in mind. */
-    const val WORKER = "https://yt-kids.vtlinh87.workers.dev"
+
+       Changing this strands every installed copy: they keep asking the old
+       hostname, and the only thing that could tell them otherwise is an update
+       they can no longer find. It was changed once — from yt-kids, alongside
+       the applicationId — which works only because the app carrying this
+       hostname is a NEW install rather than an update to the old one.
+
+       The old hostname did NOT survive that. Cloudflare's git build renames
+       the service rather than adding one, so yt-kids.vtlinh87.workers.dev
+       began answering 404 the moment this deployed, and every app already
+       carrying it lost its uploads and its updates with nothing able to tell
+       it where to look. Installing the new app by hand was the only recovery.
+
+       There is no second go at that. Don't change it again. */
+    const val WORKER = "https://tinytube.vtlinh87.workers.dev"
 
     fun uploads(): String = "$WORKER/uploads"
 }

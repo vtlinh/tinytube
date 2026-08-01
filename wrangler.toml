@@ -6,9 +6,25 @@
 # lives on the device — see README.
 #
 # The `name` here decides the hostname, and the Android app has that hostname
-# compiled in (android/.../Endpoints.kt). Renaming the worker orphans every
-# installed copy: they keep asking the old hostname, and the only thing that
-# could tell them otherwise is an update they can no longer find. Don't.
+# compiled in (android/.../Endpoints.kt).
+#
+# It was renamed from yt-kids to tinytube once, deliberately and together with
+# the applicationId. That pairing is the only way it can be done: a renamed
+# Worker cannot tell an installed app where it went — the app would have to be
+# told by an update it can only fetch from the hostname it no longer has — so
+# the app that talks to this one has to be a NEW install rather than an update.
+#
+# And note what changing this name actually DOES, because it was not what was
+# expected. Cloudflare's git-connected build RENAMES the existing service; it
+# does not stand a second one up beside it. The moment the new name deployed,
+# yt-kids.vtlinh87.workers.dev started answering 404 — so every already
+# installed app lost its uploads feed and its update check in the same instant,
+# with no way to be told where to look. Their cached grids still play, because
+# videos come from YouTube directly, but they learn nothing new ever again.
+#
+# That is the whole reason this file said "don't". Doing it left no bridge: the
+# only recovery is installing the new app by hand on every phone. Don't rename
+# this again.
 #
 # One-time setup, from this directory:
 #   npx wrangler deploy                 # if the git-connected build isn't on
@@ -16,7 +32,7 @@
 #
 # Never put the token in this file — it is committed. `secret put` stores it on
 # the worker, where the code reads it as env.GH_TOKEN.
-name = "yt-kids"
+name = "tinytube"
 main = "worker.js"
 compatibility_date = "2026-07-01"
 
