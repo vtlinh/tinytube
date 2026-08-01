@@ -487,7 +487,12 @@ stops, green publishes.
   allowlist is separate and narrower on purpose — accounts.google.com and the
   rest of the sign-in chain are not on it and must not be added.
 
-  **The player runs on `www.youtube-nocookie.com` and must keep doing so.** It
+  **The WRAPPER runs on `www.youtube-nocookie.com` and must keep doing so —
+  and note "wrapper", because the player itself never did.** The embed iframe
+  has always been `www.youtube.com`: `YT.Player` points at the nocookie domain
+  only when passed `host:`, and neither platform's page ever has. So
+  `Player.ORIGIN` names the origin of the document that HOSTS the player, and
+  the failed change moved that document rather than the player. It
   was moved to `www.youtube.com` on purpose — same-origin with parent mode's
   session, so a **YouTube Premium account would play without ads**, which was
   asked for explicitly and is the only way Premium could ever apply, the
@@ -506,13 +511,24 @@ stops, green publishes.
   did before, which is how one constant reached a phone and stopped every
   video playing.
 
-  Premium is still possible, but it needs a different design rather than a
-  different string: navigate the WebView straight to
-  `https://www.youtube.com/embed/<id>`, which is a real first-party document
-  carrying the real session, and hook the `<video>` element's own events
-  instead of the IFrame API's. That gives up the `Bridge` contract the shared
-  page is built on, so it is a rewrite of the player's plumbing on both
-  platforms. Cost it before starting.
+  **The Premium lever is the cookie policy, not this constant.** Because the
+  iframe is `www.youtube.com` and the wrapper is not, the embed is THIRD-PARTY,
+  so whether it carries a session is decided by whether third-party cookies are
+  sent to it. Android opts in with `setAcceptThirdPartyCookies` — currently in
+  as a probe, and to be taken back OUT if it does not deliver an ad-free player,
+  because the tracking surface on the child's screen is unconditional while the
+  benefit is not.
+
+  WKWebView has no equivalent: its tracking prevention blocks third-party
+  cookies for a domain like youtube.com and no public API disables that outside
+  a browser-entitled app. So if the probe works, iOS needs the wrapper served
+  from a REAL origin — e.g. the Worker serving the player page as a URL — at
+  which point the iframe is still third-party but the document is at least
+  provable. The other route is navigating straight to
+  `https://www.youtube.com/embed/<id>`, first-party on both, which gives up the
+  `Bridge` contract's error signal and turns every link YouTube draws into a
+  top-level navigation — so the allowlist would have to match on PATH as well
+  as host. Cost either before starting.
 - **Approving a channel approves its future uploads**, which no adult has seen.
   That is the deal the app now makes, and it is the weakest point in it.
   Anything that widens it further — auto-approving related channels, following

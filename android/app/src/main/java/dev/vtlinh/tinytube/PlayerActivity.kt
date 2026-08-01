@@ -14,6 +14,7 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -196,21 +197,42 @@ class PlayerActivity : AppCompatActivity() {
         val w = findViewById<WebView>(R.id.web)
         web = w
 
-        /* NO third-party cookie opt-in here, and that is a revert rather than
-         * an omission.
+        /* THE ONE THING THAT COULD MAKE PREMIUM APPLY, and it is not the
+         * origin — which is the correction this block exists to record.
          *
-         * It was added as the other half of signing the player in for Premium:
+         * The embed iframe has ALWAYS been www.youtube.com. YT.Player only
+         * points at the nocookie domain if you pass `host:`, and Player's page
+         * never has, on either platform. Our own ad-detection comment says the
+         * player is "cross-origin so its DOM cannot be inspected", which under
+         * a nocookie wrapper is only true if the iframe is youtube.com. So
+         * Player.ORIGIN is the WRAPPER's origin and nothing else; it never
+         * decided where the player itself was served from.
+         *
+         * Which means the failed Premium attempt changed the wrong thing. It
+         * moved the wrapper to youtube.com — breaking playback, because a
+         * synthetic document cannot prove that origin — while the lever that
+         * actually mattered was this: the iframe is THIRD-PARTY to the wrapper,
+         * so without this line it is sent no youtube.com cookies and is
+         * therefore signed out no matter who signed in to parent mode.
+         *
          * WebViews share one process-wide cookie store, so parent mode's
-         * session was already present and the player merely had to opt in to
-         * using it. That whole attempt is gone — Player.ORIGIN is back on
-         * youtube-nocookie.com because youtube.com stopped every video playing
-         * — and an embed that carries no session has nothing to gain from
-         * third-party cookies. What it would still have is the tracking
-         * surface, on the child's screen, which is the one place this app
-         * spends nothing it does not have to.
+         * session is already here. This is the opt-in to using it.
          *
-         * See Player.ORIGIN for the full story, and README for what buying
-         * Premium back would actually take. */
+         * It is a probe rather than a settled decision. It costs the tracking
+         * surface of third-party cookies on the child's screen, which this app
+         * otherwise spends nothing on, and it buys an ad-free player ONLY if
+         * the account has Premium. If it turns out not to work, take it back
+         * out — the cost is real and unconditional while the benefit is not.
+         *
+         * There is no iOS counterpart, and that is not an oversight: WKWebView
+         * blocks third-party cookies for a domain like youtube.com under its
+         * tracking prevention, and no public API turns that off outside a
+         * browser-entitled app. If this works, iOS needs the wrapper served
+         * from a real origin instead. See README. */
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(w, true)
+        }
 
         w.settings.apply {
             javaScriptEnabled = true               // the IFrame API is javascript
