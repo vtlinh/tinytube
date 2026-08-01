@@ -119,6 +119,40 @@ object Chrome {
     fun seekBarBottom(pixels: IntArray, width: Int, height: Int): Int? =
         seekBar(pixels, width, height)?.last
 
+    /* How thick the drawn LINE is, which is not the same as how tall the red
+       band is.
+     *
+     * At the head of the played portion YouTube draws a round scrubber knob,
+     * about four times the line's thickness. On a long video that knob sits at
+     * the left of the bar for minutes, so the band found above is knob-tall
+     * rather than line-tall — and since the margin is a multiple of the
+     * thickness, that made the margin four times too big and swallowed the
+     * whole inset. Measured on a real device: a 9px line reported as 36, a
+     * 180px margin against a 204px gap, a 35px strip where 170 was right.
+     *
+     * So the thickness is counted per column and reduced to the MEDIAN, not
+     * taken from the band's height. Most of the played portion is line and
+     * only its head is knob, so the middle value is the line.
+     *
+     * Median rather than minimum, which was tried first and is worse: the
+     * columns at either end of the bar are antialiased down to a pixel or two,
+     * so the smallest run describes the rendering rather than the line. On the
+     * real frame that came out as 1, which made the gap forty times the
+     * thickness and got the whole measurement rejected as implausible. */
+    fun barThickness(pixels: IntArray, width: Int, height: Int, band: IntRange): Int {
+        val runs = ArrayList<Int>()
+        for (x in 0 until width) {
+            var run = 0
+            for (y in band) {
+                if (isProgressRed(pixels[y * width + x])) run++
+            }
+            if (run > 0) runs.add(run)
+        }
+        if (runs.isEmpty()) return band.last - band.first + 1
+        runs.sort()
+        return runs[runs.size / 2].coerceAtLeast(1)
+    }
+
     /* How tall the bottom blocker should be, given a strip captured from the
        bottom of the player.
 
@@ -148,14 +182,32 @@ object Chrome {
      * same number, and treating them alike is how one bad frame got written to
      * storage as if it were the answer — after which nothing ever looked
      * again. Null means try another frame. */
-    fun blockHeightOrNull(pixels: IntArray, width: Int, height: Int): Int? {
+    fun blockHeightOrNull(pixels: IntArray, width: Int, height: Int): Int? =
+        measure(pixels, width, height)?.blockPx
+
+    /* The whole answer, so a readout can show the working rather than only the
+       conclusion. A wrong number is far easier to place when the thickness and
+       the gap it came from are next to it. */
+    class Measurement(val barBottom: Int, val thickness: Int, val below: Int, val blockPx: Int) {
+        override fun toString() = "bar@$barBottom thick $thickness below $below → $blockPx px"
+    }
+
+    fun measure(pixels: IntArray, width: Int, height: Int): Measurement? {
         val bar = seekBar(pixels, width, height) ?: return null
-        val thickness = bar.last - bar.first + 1
+        val thickness = barThickness(pixels, width, height, bar)
         val below = height - 1 - bar.last
         if (below <= 0 || below > thickness * MAX_BELOW_IN_BARS) return null
-        /* A bar close enough to the bottom that the margin swallows the lot
-           means there is genuinely nothing down there to block. Zero is the
-           measurement, not a failure. */
-        return (below - thickness * MARGIN_IN_BARS).coerceAtLeast(0)
+
+        /* The margin never eats more than a quarter of the gap.
+         *
+         * Five thicknesses is the right size when the thickness is the line's.
+         * When something inflates it — a knob at the head of the played
+         * portion, a chunky progress style on some future player — five of
+         * them can exceed the whole inset, and the blocker silently shrinks to
+         * nothing while still reporting success. A ratio of the gap bounds
+         * that without reintroducing a fixed number: whatever else is wrong,
+         * three quarters of the space below the bar is still blocked. */
+        val margin = minOf(thickness * MARGIN_IN_BARS, below / 4)
+        return Measurement(bar.last, thickness, below, (below - margin).coerceAtLeast(0))
     }
 }

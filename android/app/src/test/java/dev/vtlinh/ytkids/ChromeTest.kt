@@ -52,9 +52,9 @@ class ChromeTest {
         for (y in 90..93) p.row(w, y, 12, 260, RED)
         assertEquals(90..93, Chrome.seekBar(p, w, h))
         assertEquals(93, Chrome.seekBarBottom(p, w, h))
-        /* Six rows under it, less five thicknesses of margin — which is more
-           than six, so nothing is left to block. */
-        assertEquals(0, Chrome.blockHeight(p, w, h, 99))
+        /* Six rows under it. Five thicknesses would be twenty, so the quarter
+           of the gap ceiling applies and one row is given back. */
+        assertEquals(5, Chrome.blockHeight(p, w, h, 99))
     }
 
     /* The played portion grows rightwards from the start of the bar, so red
@@ -145,7 +145,9 @@ class ChromeTest {
         /* And a real one still answers. */
         val p = strip(w, h)
         for (y in 76..78) p.row(w, y, 12, 300, RED)
-        assertEquals(21 - 15, Chrome.blockHeightOrNull(p, w, h))
+        /* 21 rows below a 3px bar; five thicknesses is 15, the quarter-gap
+           ceiling is 5, so 5 comes off. */
+        assertEquals(21 - 5, Chrome.blockHeightOrNull(p, w, h))
     }
 
     @Test fun `refuses a malformed or empty strip rather than reading past it`() {
@@ -163,27 +165,105 @@ class ChromeTest {
        Five bar-thicknesses of it, taken from the bar the picture actually
        drew. Nobody passes a margin in. */
     @Test fun `leaves a margin below the bar, scaled by the bar itself`() {
-        val w = 800; val h = 200
-        val thin = strip(w, h)
-        for (y in 118..120) thin.row(w, y, 12, 300, RED)   // 3px bar, 79 below
-        assertEquals(79 - 15, Chrome.blockHeight(thin, w, h, 42))
+        val w = 800; val h = 300
 
-        /* The same layout at three times the scale: three times the bar, three
-           times the gap, three times the margin. The blocked height triples
-           too, without anything being told the scale changed. */
+        val thin = strip(w, h)
+        for (y in 197..199) thin.row(w, y, 12, 300, RED)   // 3px line, 100 below
+        val a = Chrome.measure(thin, w, h)!!
+        assertEquals(3, a.thickness)
+        assertEquals("five thicknesses", 5 * 3, a.below - a.blockPx)
+
+        /* Three times the line, three times the margin — with nothing told the
+           scale changed. Gaps chosen so the quarter-of-the-gap ceiling is not
+           what is being measured here; that has a test of its own above. */
         val thick = strip(w, h)
-        for (y in 108..116) thick.row(w, y, 12, 300, RED)  // 9px bar, 83 below
-        assertEquals(83 - 45, Chrome.blockHeight(thick, w, h, 42))
+        for (y in 91..99) thick.row(w, y, 12, 300, RED)    // 9px line, 200 below
+        val b = Chrome.measure(thick, w, h)!!
+        assertEquals(9, b.thickness)
+        assertEquals("five thicknesses", 5 * 9, b.below - b.blockPx)
     }
 
-    @Test fun `a margin wider than the gap blocks nothing at all`() {
+    /* The ceiling on the margin, stated on its own. Five thicknesses is right
+       when the thickness is the line's; when something inflates it the margin
+       must not be allowed to swallow the strip, so it is bounded by a quarter
+       of the gap — a ratio, not a number. */
+    @Test fun `the margin is capped at a quarter of the gap`() {
         val w = 800; val h = 100
         val p = strip(w, h)
         for (y in 93..95) p.row(w, y, 12, 300, RED)
-        /* Four rows under a three-pixel bar, and the margin is fifteen. Zero
-           is the measurement — there is nothing down there — not a failure, so
-           the fallback must NOT come back instead. */
-        assertEquals(0, Chrome.blockHeight(p, w, h, 42))
+        /* Four rows under a three-pixel bar. Five thicknesses is fifteen,
+           which is more than the gap; a quarter of four is one. */
+        assertEquals(3, Chrome.blockHeight(p, w, h, 42))
+    }
+
+    /* ------------------------------------------------------------------
+       The scrubber knob.
+
+       At the head of the played portion YouTube draws a round knob about four
+       times the line's thickness, and on a long video it sits at the left of
+       the bar for minutes — so the red BAND is knob-tall while the LINE is
+       not. Since the margin is a multiple of the thickness, measuring the band
+       made the margin four times too big.
+
+       This is not hypothetical. On a real device: a 9px line reported as 36, a
+       180px margin against a 204px gap, and a 35px strip where about 170 was
+       right — reported as a success, because nothing knew the difference.
+       ------------------------------------------------------------------ */
+
+    /* A bar with a knob on its head: a thin line, and a fat circle-ish blob at
+       the start of it. */
+    private fun barWithKnob(
+        width: Int,
+        height: Int,
+        barY: Int,
+        lineThickness: Int,
+        knobThickness: Int,
+        from: Int,
+        to: Int,
+    ): IntArray {
+        val p = strip(width, height)
+        for (y in barY until barY + lineThickness) p.row(width, y, from, to, RED)
+        val knobTop = barY - (knobThickness - lineThickness) / 2
+        for (y in knobTop until knobTop + knobThickness) p.row(width, y, from, from + knobThickness, RED)
+        return p
+    }
+
+    @Test fun `the thickness is the line, not the knob on it`() {
+        val w = 2322; val h = 480
+        val p = barWithKnob(w, h, barY = 280, lineThickness = 9, knobThickness = 36, from = 200, to = 900)
+        val band = Chrome.seekBar(p, w, h)!!
+        /* The band really is knob-tall — that part was never wrong. */
+        assertEquals(36, band.last - band.first + 1)
+        /* The line is what scales the margin. */
+        assertEquals(9, Chrome.barThickness(p, w, h, band))
+    }
+
+    /* The device numbers, end to end. */
+    @Test fun `a knob no longer swallows the whole inset`() {
+        val w = 2322; val h = 480
+        val p = barWithKnob(w, h, barY = 267, lineThickness = 9, knobThickness = 36, from = 200, to = 900)
+        val m = Chrome.measure(p, w, h)!!
+        assertEquals("thickness should be the line", 9, m.thickness)
+        /* The knob's lower half sets the band's bottom edge. What matters is
+           what comes off the gap: five line-thicknesses, not five knobs. */
+        assertEquals(45, m.below - m.blockPx)
+        assertTrue("most of the gap stays blocked", m.blockPx > m.below * 3 / 4)
+    }
+
+    /* And when nothing but the knob is on screen — the first seconds of a long
+       video, where there is no line to measure — the margin is bounded by the
+       gap rather than by the knob, so the strip survives. */
+    @Test fun `the margin never eats more than a quarter of the gap`() {
+        val w = 2322; val h = 480
+        val p = strip(w, h)
+        for (y in 250..285) p.row(w, y, 200, 236, RED)   // knob only, 36px
+        val m = Chrome.measure(p, w, h)!!
+        assertEquals(36, m.thickness)
+        val below = h - 1 - 285
+        /* Five thicknesses would be 180, more than the gap. A quarter of the
+           gap is the ceiling, so three quarters of it stays blocked. */
+        assertEquals(below - below / 4, m.blockPx)
+        assertTrue("most of the gap must still be blocked", m.blockPx > below / 2)
     }
 
     /* ------------------------------------------------------------------
@@ -299,6 +379,18 @@ class ChromeTest {
         val f = realFrame()
         val (px, w, stripH) = bottomStrip(f)
         assertEquals(217 - 45, Chrome.blockHeight(px, w, stripH, 44))
+    }
+
+    /* The whole measurement on the real frame, as numbers rather than as a
+       conclusion — the form the app now reports on About, so a bad reading can
+       be placed rather than guessed at. */
+    @Test fun `the real frame measures a nine pixel line with 217 below it`() {
+        val f = realFrame()
+        val (px, w, stripH) = bottomStrip(f)
+        val m = Chrome.measure(px, w, stripH)!!
+        assertEquals("the line, not the knob on its head", 9, m.thickness)
+        assertEquals(217, m.below)
+        assertEquals(217 - 45, m.blockPx)
     }
 
     /* The picture is full of red — a red-lit set behind the presenter, with
