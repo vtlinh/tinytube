@@ -1,57 +1,84 @@
 package dev.vtlinh.ytkids
 
-/* Working out where YouTube's seek bar ends, by looking at the pixels.
+/* Working out where YouTube's seek bar is, by looking at the pixels.
 
    The player is a cross-origin iframe: its DOM cannot be read, so there is no
    way to ask it where it drew anything. The bottom blocker's height was
    therefore a constant — YouTube's mobile-embed inset, guessed once and wrong
    on any device or player version that differs. This measures it instead.
 
-   Nothing here is in dp, and nothing here knows the screen's density. An
-   earlier version did, and it was the wrong shape: the app can convert dp to
-   pixels exactly, but only by trusting a figure for YouTube's chrome that came
-   from eyeballing one screenshot whose density was itself a guess. Two guesses
-   multiplied together.
+   What it looks for is the TRACK: the thin light line that runs the whole
+   width of the bar, played part and unplayed part alike. Not the red.
 
-   The picture already carries its own scale. The drawn bar is about 3dp thick,
-   so its thickness in pixels IS the device's dp-to-pixel ratio, measured on the
-   spot from the thing being measured. Everything below is expressed as a
-   multiple of that — ratios, which are the same number at any resolution.
+   The red was the first idea and it was the wrong signal, for a reason worth
+   recording. The played portion is red, but so is the round scrubber knob at
+   its head, and the knob is about four times thicker than the line. Early in a
+   long video the knob is nearly all the red there is, so "how tall is the red"
+   answered with the knob's diameter — and since the margin is a multiple of
+   the thickness, the blocker shrank to almost nothing while reporting success.
+   Every fix for that was a fix for a symptom.
+
+   The track has none of those problems. It spans the bar at every playback
+   position, it is the line's own thickness by definition, and a knob a few
+   dozen columns wide cannot shift a measurement taken across the full width.
+   Measured on a real frame: the bar's rows score 62-76% of columns while
+   nothing else in the bottom of the picture reaches 3%.
 
    Pure, and no Android in it, so ChromeTest can hold it to its promises under
    a plain JVM: it takes a rectangle of ARGB pixels and returns a height. The
-   Activity does the capturing, and never keeps what it captured — see
-   PlayerActivity.measureBlockHeight. */
+   Activity does the capturing — see PlayerActivity.measureBlockHeight. */
 object Chrome {
 
     /* How much of the space under the bar stays reachable, in bar-thicknesses.
      *
-     * On the frame this was calibrated against the bar is 9px thick, the gap
-     * to the row of chrome below is 58px — 6.4 thicknesses — and the whole
-     * inset is 217px. Five thicknesses is 45px there: comfortably inside the
-     * gap, and comfortably more than a fingertip's error against a 9px line.
-     * Because the bar and the gap are both drawn in dp, that ratio holds on
-     * every device without anyone converting anything. */
+     * On the frame this was calibrated against the line is 9px including the
+     * rows its edges are antialiased into, the gap to the row of chrome below
+     * is 58px, and the whole inset is 217px. Five thicknesses is 45px there:
+     * comfortably inside the gap, and comfortably more than a fingertip's
+     * error against a line that thin. Because the bar and the gap are both
+     * drawn in dp, that ratio holds on every device without anyone converting
+     * anything. */
     private const val MARGIN_IN_BARS = 5
 
     /* A sanity limit on how far above the bottom the bar may be, again in
-       bar-thicknesses. The real figure is 24; anything past 40 is not an inset
-       and the match was something in the picture. */
-    private const val MAX_BELOW_IN_BARS = 40
+       bar-thicknesses. The real figure is 24; anything past 60 is not an inset
+       and the match was something else. */
+    private const val MAX_BELOW_IN_BARS = 60
 
-    /* And a limit on the bar itself: a red band a tenth of the frame tall is
-       not a 3dp line. */
+    /* And a limit on the line itself: a band a tenth of the frame tall is not
+       a 3dp line. */
     private const val MAX_THICKNESS_FRACTION = 10
 
-    /* The played portion of YouTube's progress bar, which is red and has been
-       for the entire life of the product. Saturated red specifically: a
-       reddish frame of video is common, a pixel whose green and blue are both
-       under half its red is not.
+    /* How much lighter than its surroundings a pixel must be to count as part
+       of the track. The track is white at partial opacity, so over a dark
+       scene it is far lighter and over a bright one only somewhat — and
+       YouTube lays a dark scrim behind its controls, which helps. Sixteen out
+       of 255 is well below what the real frame produces and well above what
+       compression noise does. */
+    private const val CONTRAST = 16
 
-       Measured off a real paused frame (see ChromeTest and the fixture beside
-       it) the bar comes out at #FF0032 — not the #FF0000 you would guess, and
-       with JPEG in the way it wanders to #EE0532 and #F60538. Hence a test on
-       proportions rather than a colour match. */
+    /* And how much of the width has to be lighter for the row to be a line
+       rather than an edge in the picture. The real bar scores 62-76%; the
+       next-best row in the bottom of that frame scores under 3%. */
+    private const val MIN_COLUMNS_PERCENT = 40
+
+    /* Perceived brightness. The weights are the usual ones; what matters is
+       only that the track reads as lighter than the frame behind it. */
+    fun luminance(argb: Int): Int {
+        val r = (argb shr 16) and 0xFF
+        val g = (argb shr 8) and 0xFF
+        val b = argb and 0xFF
+        return (r * 30 + g * 59 + b * 11) / 100
+    }
+
+    /* The played portion of YouTube's progress bar, which is red and has been
+       for the entire life of the product. Kept as corroboration rather than as
+       the primary signal: a bright full-width line that also has red in it is
+       a seek bar, and one without is something else.
+
+       Measured off a real paused frame the bar comes out at #FF0032 — not the
+       #FF0000 you would guess, and with JPEG in the way it wanders to #EE0532
+       and #F60538. Hence a test on proportions rather than a colour match. */
     fun isProgressRed(argb: Int): Boolean {
         val r = (argb shr 16) and 0xFF
         val g = (argb shr 8) and 0xFF
@@ -59,58 +86,61 @@ object Chrome {
         return r >= 140 && g * 2 <= r && b * 2 <= r
     }
 
-    /* Does this row look like the progress bar?
+    /* How far above and below to look when asking whether a row is lighter
+       than what surrounds it.
+     *
+     * It has to EXCEED the line's thickness, or the band's own outer rows
+     * compare themselves against the middle of the same line and score
+     * nothing — which showed up as a 9px line measuring 7. And it has to stay
+     * inside the dark scrim YouTube lays behind its controls, or the
+     * comparison lands on the picture. Measured on the real frame, anything
+     * from a third of the line's thickness to three times it works; the score
+     * falls off gently and the first false row only appears past that.
+     * Proportional to the captured strip, so it holds at any resolution. */
+    private fun gapFor(height: Int) = maxOf(6, height / 32)
 
-       Two things are needed, and both matter. It must contain a run of red — a
-       single stray red pixel is noise, a long one is the bar. And that run
-       must START near the left edge, because the played portion always does:
-       it grows rightwards from the beginning of the bar. Red in the middle of
-       the frame is a red shirt.
-
-       On the real frame the run starts 9% of the way across, because YouTube
-       insets its controls past the display cutout — and a cutout is exactly
-       the sort of thing that differs between devices. A sixth leaves room for
-       a wider one without reaching the middle of the picture, where the red
-       jumper lives. Proportional rather than absolute for the same reason:
-       nothing here may assume a resolution. */
-    private fun rowIsBar(pixels: IntArray, width: Int, y: Int): Boolean {
-        val startsWithin = maxOf(width / 6, 1)
-        val minRun = maxOf(width / 200, 4)
-        var runStart = -1
-        var run = 0
+    /* What percentage of the row's columns are lighter than the pixels a short
+       way above AND below them. A drawn line scores most of the width; a
+       bright object in the picture scores a few percent, because it is not a
+       line. */
+    fun lineScore(pixels: IntArray, width: Int, height: Int, y: Int): Int {
+        val gap = gapFor(height)
+        if (y - gap < 0 || y + gap >= height) return 0
+        var count = 0
         for (x in 0 until width) {
-            if (isProgressRed(pixels[y * width + x])) {
-                if (run == 0) runStart = x
-                run++
-                if (run >= minRun && runStart <= startsWithin) return true
-            } else {
-                run = 0
-            }
+            val here = luminance(pixels[y * width + x])
+            val above = luminance(pixels[(y - gap) * width + x])
+            val below = luminance(pixels[(y + gap) * width + x])
+            if (here - maxOf(above, below) > CONTRAST) count++
         }
-        return false
+        return count * 100 / width
     }
 
     /* The bar, as the rows it occupies.
 
-       Found by scanning up from the bottom, so the FIRST match is its bottom
-       edge — below the bar is only the row of chrome this is here to measure,
-       and above it is a whole frame of video that might be any colour at all.
-       Then up again while rows keep qualifying, which is what gives the
-       thickness everything else is scaled by. */
+       Found by scanning up from the bottom, so the FIRST match is the lowest
+       line in the frame — below the bar is only the row of chrome this is here
+       to measure, and above it is a whole picture that might contain anything.
+       Then out from there while rows still look like the same line, which is
+       what gives the thickness everything else is scaled by. */
     fun seekBar(pixels: IntArray, width: Int, height: Int): IntRange? {
         if (width <= 0 || height <= 0 || pixels.size < width * height) return null
 
-        var bottom = -1
+        var seed = -1
         for (y in height - 1 downTo 0) {
-            if (rowIsBar(pixels, width, y)) { bottom = y; break }
+            if (lineScore(pixels, width, height, y) >= MIN_COLUMNS_PERCENT) { seed = y; break }
         }
-        if (bottom < 0) return null
+        if (seed < 0) return null
 
-        var top = bottom
-        while (top > 0 && rowIsBar(pixels, width, top - 1)) top--
+        /* Half the threshold on the way out, so the line's own softer edges
+           are included and the frame beyond them is not. On the real frame the
+           rows either side of the bar score under 3%, so this stops cleanly. */
+        val edge = MIN_COLUMNS_PERCENT / 2
+        var top = seed
+        while (top > 0 && lineScore(pixels, width, height, top - 1) >= edge) top--
+        var bottom = seed
+        while (bottom + 1 < height && lineScore(pixels, width, height, bottom + 1) >= edge) bottom++
 
-        /* Too thick to be a 3dp line — a red band in the picture that happened
-           to reach the left edge. */
         if (bottom - top + 1 > maxOf(height / MAX_THICKNESS_FRACTION, 1)) return null
         return top..bottom
     }
@@ -119,89 +149,18 @@ object Chrome {
     fun seekBarBottom(pixels: IntArray, width: Int, height: Int): Int? =
         seekBar(pixels, width, height)?.last
 
-    /* How thick the drawn LINE is, which is not the same as how tall the red
-       band is.
+    /* Is there any of YouTube's red in this band?
      *
-     * At the head of the played portion YouTube draws a round scrubber knob,
-     * about four times the line's thickness. On a long video that knob sits at
-     * the left of the bar for minutes, so the band found above is knob-tall
-     * rather than line-tall — and since the margin is a multiple of the
-     * thickness, that made the margin four times too big and swallowed the
-     * whole inset. Measured on a real device: a 9px line reported as 36, a
-     * 180px margin against a 204px gap, a 35px strip where 170 was right.
-     *
-     * So the thickness is counted per column, and taken as the THINNEST run
-     * that occurs on enough columns to be a drawn line rather than an edge.
-     *
-     * Two rejected alternatives, both of which fail on a real frame:
-     *
-     * - The plain minimum. The columns at either end of the bar are
-     *   antialiased down to a pixel or two, so the smallest run describes the
-     *   rendering rather than the line. On the real frame that came out as 1,
-     *   which made the gap forty times the thickness and got the whole
-     *   measurement rejected as implausible.
-     * - The median. Fine while the knob is a small minority, which it is once
-     *   a video is a few percent in — but at the very start the knob is most
-     *   of the red there is, and the median becomes the knob again. The bug
-     *   this replaced was exactly that, seen at 0:06 of a 22-minute video.
-     *
-     * Requiring a minimum number of columns keeps the antialiased ends out
-     * while still finding the line when the knob outnumbers it. Where there is
-     * genuinely no line yet — a video paused at zero — the knob is all there
-     * is, and the ceiling in measure() is what stops that from mattering. */
-    fun barThickness(pixels: IntArray, width: Int, height: Int, band: IntRange): Int {
-        /* Anchor on the band's densest row. The line spans the whole played
-           portion while the knob is a few dozen columns, so the row with the
-           most red in it is a line row — which also excludes the stray red the
-           video itself contributes, since that is scattered rather than in a
-           row hundreds of pixels long. */
-        var anchor = band.first
-        var most = -1
+     * Corroboration, not detection. A full-width light line low in a video
+     * frame is almost certainly the seek bar, and if it also carries the red
+     * of a played portion or its knob then it certainly is. */
+    fun hasProgressRed(pixels: IntArray, width: Int, band: IntRange): Boolean {
         for (y in band) {
-            var count = 0
-            for (x in 0 until width) if (isProgressRed(pixels[y * width + x])) count++
-            if (count > most) { most = count; anchor = y }
+            for (x in 0 until width) if (isProgressRed(pixels[y * width + x])) return true
         }
-        if (most <= 0) return band.last - band.first + 1
-
-        /* Then the CONTIGUOUS run through that row, per column. Contiguous
-           matters: counting red anywhere in the band lets a red frame behind
-           the bar add a pixel to every column and drag the answer to 1, which
-           made the gap forty times the thickness and got the whole measurement
-           thrown out as implausible. */
-        val runs = ArrayList<Int>()
-        for (x in 0 until width) {
-            if (!isProgressRed(pixels[anchor * width + x])) continue
-            var top = anchor
-            while (top - 1 >= band.first && isProgressRed(pixels[(top - 1) * width + x])) top--
-            var bottom = anchor
-            while (bottom + 1 <= band.last && isProgressRed(pixels[(bottom + 1) * width + x])) bottom++
-            runs.add(bottom - top + 1)
-        }
-        if (runs.isEmpty()) return band.last - band.first + 1
-        runs.sort()
-        return runs[runs.size / 2].coerceAtLeast(1)
+        return false
     }
 
-    /* How tall the bottom blocker should be, given a strip captured from the
-       bottom of the player.
-
-       Not simply "everything under the bar". A few bar-thicknesses of it are
-       left reachable, because the drawn bar is thin — nine pixels on the frame
-       this was calibrated against — and a thumb aiming for it lands around it,
-       not on it. Blocking flush to the line would make the one control the
-       reveal exists to reach the one control nobody can hit. Everything above
-       the line is already reachable, so the margin only has to cover fingers
-       that land low.
-
-       Takes no measurements from its caller beyond the fallback. Where the bar
-       is, how thick it is, how much room to leave and what counts as an
-       implausible answer all come out of the pixels.
-
-       Returns fallbackPx rather than guessing whenever the answer would be
-       untrustworthy: no bar, a bar on the last row, or a gap too large to be
-       an inset. The fallback is the compiled-in constant the app used before
-       this existed. */
     fun blockHeight(pixels: IntArray, width: Int, height: Int, fallbackPx: Int): Int =
         blockHeightOrNull(pixels, width, height) ?: fallbackPx
 
@@ -224,19 +183,15 @@ object Chrome {
 
     fun measure(pixels: IntArray, width: Int, height: Int): Measurement? {
         val bar = seekBar(pixels, width, height) ?: return null
-        val thickness = barThickness(pixels, width, height, bar)
+        val thickness = bar.last - bar.first + 1
         val below = height - 1 - bar.last
         if (below <= 0 || below > thickness * MAX_BELOW_IN_BARS) return null
 
-        /* The margin never eats more than a quarter of the gap.
-         *
-         * Five thicknesses is the right size when the thickness is the line's.
-         * When something inflates it — a knob at the head of the played
-         * portion, a chunky progress style on some future player — five of
-         * them can exceed the whole inset, and the blocker silently shrinks to
-         * nothing while still reporting success. A ratio of the gap bounds
-         * that without reintroducing a fixed number: whatever else is wrong,
-         * three quarters of the space below the bar is still blocked. */
+        /* The margin never eats more than a quarter of the gap. Five
+           thicknesses is the right size when the thickness is the line's; if
+           anything ever inflates it, a ratio of the gap bounds the damage
+           without reintroducing a fixed number. Three quarters of the space
+           below the bar stays blocked whatever else goes wrong. */
         val margin = minOf(thickness * MARGIN_IN_BARS, below / 4)
         return Measurement(bar.last, thickness, below, (below - margin).coerceAtLeast(0))
     }

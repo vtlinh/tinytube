@@ -25,7 +25,7 @@ android/                         the app
     Feed.kt         pure: channel upload feed         (unit-tested)
     Schema.kt       pure: the SQL                     (unit-tested)
     Library.kt      pure: collate uploads into the grid (unit-tested)
-    Chrome.kt       pure: find the seek bar in pixels    (unit-tested)
+    Chrome.kt       pure: find the seek bar's track     (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
     ChannelFeeds.kt per-channel uploads + cache
     BlockHeightStore.kt the measured player inset, per display
