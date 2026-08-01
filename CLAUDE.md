@@ -135,12 +135,18 @@ stops, green publishes.
   That is the deal the app now makes, and it is the weakest point in it.
   Anything that widens it further — auto-approving related channels, following
   playlists, surfacing recommendations — is a bigger change than it looks.
-- **The player's frame capture stays a measurement, never a picture.**
+- **The player's frame capture is diagnostic, and its limits are deliberate.**
   `PlayerActivity.measureBlockHeight` PixelCopies the bottom strip of the
-  window to find the seek bar. Only that strip is ever copied, the bitmap is
-  recycled in the callback that received it, and nothing is written, passed on
-  or sent. Don't widen the source rectangle, don't keep the bitmap, and don't
-  add a caller that wants the image rather than the number.
+  window to find the seek bar, and `CaptureStore` keeps the last one as a PNG
+  so a wrong reading can be looked at rather than argued about — six rounds
+  went by without anyone being able to see what the analysis saw. What holds:
+  only that strip is ever copied, never the part with the picture in it; it
+  goes to internal storage, which the backup and device-transfer rules
+  exclude; there is one file and each capture overwrites it; About can delete
+  it; and it leaves the device only through an explicit tap on the share
+  sheet, via a FileProvider that exposes that one directory. Don't widen the
+  source rectangle, don't keep more than the latest, and don't add a caller
+  that sends it anywhere on its own.
 - **The player does not read `BlockHeightStore` back at the moment**, on
   purpose. It is still written so About can show what was last measured, but
   nothing acts on it and the strip is measured afresh each run. Persisted
