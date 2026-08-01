@@ -43,11 +43,6 @@
             android:theme="@style/Theme.YtKids.Player"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
 
-        <activity
-            android:name=".AboutActivity"
-            android:exported="false"
-            android:label="@string/about_title" />
-
         <!-- Both are parent-facing and neither is exported: nothing outside
              the app may open parent mode, and in particular nothing may skip
              the challenge by starting ParentActivity directly. -->

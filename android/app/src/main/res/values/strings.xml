@@ -46,17 +46,12 @@
     <string name="parent_removed">Removed “%1$s”</string>
 
 
-    <string name="about_title">About</string>
     <!-- The heading over the only part of About that does anything. -->
     <string name="about_updates">Updates</string>
     <!-- The versionCode is what the updater actually compares, but it means
          nothing to a parent — the version name is the human-facing one. -->
     <string name="version_fmt">Version %1$s</string>
     <string name="author">By Linh Vu</string>
-    <plurals name="approved_channels">
-        <item quantity="one">%d approved channel</item>
-        <item quantity="other">%d approved channels</item>
-    </plurals>
 
     <string name="notif_off_explain">Notifications are off, so nothing will tell you when an update is ready. Updates still download, and you can install them from this screen.</string>
     <string name="notif_blocked_explain">Notifications are turned off for this app in Android settings, so nothing will tell you when an update is ready. Updates still download, and you can install them from this screen.</string>
@@ -87,6 +82,12 @@
     <string name="parent_sort_watched_none">Most watched · nothing watched yet, so A–Z</string>
 
     <string name="settings_title">Settings</string>
+    <string name="settings_hold">Hold to unlock the player</string>
+    <string name="settings_hold_explain">How long the corner of the player has to be held before YouTube\'s own controls become reachable. Longer is harder for a child to trigger by resting a thumb.</string>
+    <plurals name="hold_seconds">
+        <item quantity="one">%d second</item>
+        <item quantity="other">%d seconds</item>
+    </plurals>
     <string name="settings_next_video">When a video ends</string>
     <string name="settings_next_video_explain">Another video starts automatically. Choose which one.</string>
     <string name="settings_next_in_order">Play the next one down the list</string>

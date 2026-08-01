@@ -45,15 +45,19 @@
             android:background="#E6000000"
             android:visibility="gone" />
 
-        <!-- Hold this for two seconds to lift the overlay and reach
-             YouTube's real controls.
+        <!-- Hold this to lift the overlay and reach YouTube's real controls.
 
-             The tint is normally invisible and appears on a tap anywhere on
-             the overlay, then fades again a second later — so the picture is
-             unobstructed while a video is actually being watched, and a parent
-             who needs the corner can summon it by tapping the screen like
-             anyone would. The corner is live the whole time, tinted or not:
-             the tint is a label, not a switch.
+             Normally invisible. It GLOWS for a second whenever the overlay
+             comes back — at the start of a video, and after a reveal ends —
+             and is invisible the rest of the time. That replaces a tint that
+             appeared on a tap anywhere and faded a second later, which had the
+             corner drawn over the picture at the moment a child was most
+             likely to be touching the screen. Announcing itself once, when the
+             thing it belongs to appears, says the same thing at a moment
+             nobody is watching anything yet.
+
+             The corner is live the whole time, glowing or not: the glow is a
+             label, not a switch.
 
              136dp square, twice the area it started at, because the target is
              invisible most of the time and a thumb aiming at nothing needs the

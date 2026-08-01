@@ -112,9 +112,17 @@ object Updater {
                 Intent(context, UpdateReceiver::class.java).setAction(ACTION_INSTALL_UPDATE),
                 flags,
             )
+            /* Tapping the notification opens the GRID, not the settings the
+               update controls now live on. A notification sits in the shade
+               and on the lock screen, where a child can reach it — a content
+               intent straight into the parent's settings would be a way past
+               ChallengeActivity, and one of the things on that screen is how
+               long the player's corner has to be held. The Install action
+               below still does the useful thing in one tap without opening
+               anything. */
             val open = PendingIntent.getActivity(
                 context, 2,
-                Intent(context, AboutActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 flags,
             )
             nm.notify(
@@ -143,9 +151,17 @@ object Updater {
             )
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
+            /* Tapping the notification opens the GRID, not the settings the
+               update controls now live on. A notification sits in the shade
+               and on the lock screen, where a child can reach it — a content
+               intent straight into the parent's settings would be a way past
+               ChallengeActivity, and one of the things on that screen is how
+               long the player's corner has to be held. The Install action
+               below still does the useful thing in one tap without opening
+               anything. */
             val open = PendingIntent.getActivity(
                 context, 2,
-                Intent(context, AboutActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 flags,
             )
             nm.notify(

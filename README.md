@@ -142,7 +142,9 @@ setting a screen lock is the fix.
 ## Settings
 
 The gear in parent mode's bar, next to the approved-list button, holds the
-parent's choices. There is one so far: what plays when a video ends.
+parent's choices, the version number, and the update controls.
+
+**When a video ends** — what plays next.
 
 - **Play the next one down the list** — walks the grid in order and stops at the
   end of it. A session has an edge.
@@ -154,6 +156,18 @@ approved channel's uploads, or one channel's if they opened it from the Channels
 tab. A video started inside a channel cannot lead out of it. That falls out of
 how the player is started rather than from a rule inside it — it is handed the
 list it should be walking, so there is nothing for a bug to get wrong.
+
+**Hold to unlock the player** — a slider, one to five seconds, defaulting to
+one. One rather than Android's own half-second long-press, which is short
+enough for a resting thumb to complete. Five is the ceiling because a hold
+nobody will sit through is not a stronger lock, it is a control an adult gives
+up on; what keeps a child out is that the corner is invisible and somewhere
+nothing else is.
+
+The version number and the update controls are at the bottom of the same
+screen. They used to be an About screen of their own, opened by long-pressing
+the grid's title — a parent-facing screen on the child's side of the app, behind
+a gesture nobody would guess was there.
 
 ## How the safety boundary works
 
@@ -214,7 +228,10 @@ tapped.
 
 `Chrome.kt` is the odd one on that list, and worth a word because of how it gets
 its input. A native overlay covers the player so none of YouTube's controls can
-be touched; holding the top-right corner for two seconds lifts it for an adult.
+be touched; holding the top-right corner lifts it for an adult, for as long as
+the settings say. The corner is invisible, and glows for a second each time the
+overlay comes back so an adult can see where it is without a coloured wedge
+sitting over the picture while a video plays.
 A strip along the bottom stays blocked even then, so a scrub that slides off the
 seek bar lands on nothing. Knowing how tall that strip should be means knowing
 where the seek bar is — and the player is a cross-origin iframe, so it cannot be
@@ -286,9 +303,11 @@ it to a fixed `android-latest` release.
   self-performed update onward the app is its own installer of record, so
   Android 12+ applies later ones with no further confirmation.
 - **Notifications**: asked for on first launch, because the notification is the
-  only thing that says an update is ready. If they're off, the About screen
+  only thing that says an update is ready. If they're off, the settings screen
   says so and offers to turn them on — and its **Check for updates** button
-  works regardless.
+  works regardless. Tapping the notification itself opens the grid rather than
+  the settings: a notification is reachable from the lock screen, so it must not
+  lead past the gate. Its **Install** action still works in one tap.
 
 Two one-time hurdles on the very first update: the app needs Android's "Install
 unknown apps" permission, and Android shows one confirmation while the app

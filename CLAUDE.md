@@ -27,10 +27,11 @@ android/                         the app
     Schema.kt       pure: the SQL                     (unit-tested)
     Library.kt      pure: collate + date + order the grid (unit-tested)
     Playlist.kt     pure: what plays next             (unit-tested)
+    HoldTime.kt     pure: the hold-to-unlock duration (unit-tested)
     ChannelSort.kt  pure: the approved list's order   (unit-tested)
     Chrome.kt       pure: find the seek bar's track     (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
-    SettingsStore.kt the parent's choices; SettingsActivity edits them, inside parent mode
+    SettingsStore.kt the parent's choices; SettingsActivity edits them + About, in parent mode
     ChannelFeeds.kt asks the Worker, once a day per channel
     VideoStore.kt   the grid, in SQLite
     WatchStore.kt   what was played, on the device only — feeds the sort
@@ -121,7 +122,7 @@ stops, green publishes.
 
 - **The pure files must stay free of Android imports.** `VideoId`, `Player`,
   `Challenge`, `YouTubeUrls`, `Uploads`, `Schema`, `Library`, `Playlist`,
-  `ChannelSort` and `Chrome` are the app's safety boundary and they are testable precisely
+  `ChannelSort`, `HoldTime` and `Chrome` are the app's safety boundary and they are testable precisely
   because a plain JVM can run them. Anything needing a `Context` belongs in the
   Activity or Store that calls them.
 - **Validate video ids at every hop.** The Worker refuses malformed ids off the
@@ -181,8 +182,13 @@ stops, green publishes.
   everything behind it is gated by `ChallengeActivity`. Settings had a second
   button there for one build; it lives in parent mode now, next to the approved
   list, where every other parent control already is. Anything reachable from
-  that bar without the gate does not belong on it. `AboutActivity` remains the
-  exception, on the long-press: parent-facing but harmless.
+  that bar without the gate does not belong on it. Nothing on the child's
+  screen has a hidden action either: About used to open on a long-press of the
+  title and is part of Settings now.
+- **A notification may not lead past the gate.** It sits in the shade and on
+  the lock screen, where a child can reach it, so `Updater`'s content intent
+  opens the grid rather than Settings — where the hold duration now lives. The
+  Install action still does the useful thing in one tap.
 - **Watch history never leaves the device, and stays small.** It exists for one
   feature — ordering the approved list by what is actually being watched — and
   is one row per play in the same SQLite file. Nothing uploads it, the Worker is
