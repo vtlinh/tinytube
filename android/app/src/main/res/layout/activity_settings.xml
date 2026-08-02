@@ -14,7 +14,11 @@
      action, and an action belongs under the things it acts on.
 
      Cards on a plain background, so a setting reads as a thing you press
-     rather than as a line of prose.
+     rather than as a line of prose. Their padding is deliberately tighter than
+     it reads in a layout editor: five cards at 20dp each pushed the approved
+     list off the bottom of a phone, and the space was doing nothing but
+     separating things already separated by having a card each. The RadioButtons
+     keep their 48dp minimum — that is a touch target, not decoration.
 
      EVERY EXPLANATION IS BEHIND THE ? BESIDE ITS HEADING. They used to sit
      under the headings in grey, permanently, and four of them was most of the
@@ -31,7 +35,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:padding="14dp">
 
         <!-- What this is. First, because it is what the screen is a screen
              ABOUT: a parent who opened settings to check the version should
@@ -45,7 +49,7 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:background="@drawable/bg_tile"
-            android:padding="20dp">
+            android:padding="14dp">
 
             <ImageView
                 android:layout_width="56dp"
@@ -95,10 +99,10 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="8dp"
             android:orientation="vertical"
             android:background="@drawable/bg_tile"
-            android:padding="20dp">
+            android:padding="14dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -131,7 +135,7 @@
                 android:id="@+id/next_mode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="6dp"
                 android:orientation="vertical">
 
                 <RadioButton
@@ -159,10 +163,10 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="8dp"
             android:orientation="vertical"
             android:background="@drawable/bg_tile"
-            android:padding="20dp">
+            android:padding="14dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -195,7 +199,7 @@
                 android:id="@+id/hold_value"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="6dp"
                 android:textSize="16sp"
                 android:textColor="@color/accent" />
 
@@ -214,10 +218,10 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="8dp"
             android:orientation="vertical"
             android:background="@drawable/bg_tile"
-            android:padding="20dp">
+            android:padding="14dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -250,7 +254,7 @@
                 android:id="@+id/status"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingTop="10dp"
+                android:paddingTop="6dp"
                 android:textSize="16sp"
                 android:lineSpacingMultiplier="1.15"
                 android:textColor="@color/text" />
@@ -259,7 +263,7 @@
                 android:id="@+id/action"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="6dp"
                 android:backgroundTint="@color/accent"
                 android:textColor="@color/on_accent" />
 
@@ -274,7 +278,7 @@
                 android:id="@+id/notif_divider"
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:layout_marginTop="20dp"
+                android:layout_marginTop="14dp"
                 android:background="@color/divider"
                 android:visibility="gone" />
 
@@ -316,13 +320,13 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="8dp"
             android:orientation="vertical"
             android:background="@drawable/bg_tile"
-            android:paddingStart="20dp"
-            android:paddingEnd="20dp"
-            android:paddingTop="20dp"
-            android:paddingBottom="14dp">
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="10dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -398,7 +402,7 @@
                 android:id="@+id/channels_list"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="6dp"
                 android:layout_marginStart="-20dp"
                 android:layout_marginEnd="-20dp"
                 android:orientation="vertical" />
@@ -407,7 +411,7 @@
                 android:id="@+id/channels_empty"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="6dp"
                 android:layout_marginBottom="6dp"
                 android:text="@string/settings_channels_empty"
                 android:textSize="14sp"
