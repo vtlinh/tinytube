@@ -128,14 +128,19 @@ jobs:
             # release APK afterwards produces a binary nobody asked for and
             # nothing will install.
             #
-            # The gradle files and the keystore are in here even though they
-            # are not sources: they set the versionCode, the dependencies and
-            # the signature, so they change the artifact as surely as a .kt
-            # file does.
+            # The gradle files are in here even though they are not sources:
+            # they set the versionCode and the dependencies, so they change the
+            # artifact as surely as a .kt file does.
+            #
+            # android/signing.p12 used to be on this list and is gone from it
+            # because the file is gone from the repository — the key is a secret
+            # now, and a secret cannot appear in a PR's file list. Nothing here
+            # can notice it changing, which is precisely why the build asserts
+            # the certificate fingerprint on the finished APK instead.
             case "$f" in
               android/app/src/main/*|android/app/build.gradle.kts|\
               android/build.gradle.kts|android/gradle.properties|\
-              android/settings.gradle.kts|android/signing.p12) APK=true ;;
+              android/settings.gradle.kts) APK=true ;;
             esac
             case "$f" in
               worker.js|worker.test.mjs|wrangler.toml) WORKER=true ;;
@@ -319,10 +324,37 @@ jobs:
       # Reaching here on a publish means the reuse was refused, which means no
       # run has tested this exact tree, which is exactly when skipping the
       # tests would be skipping the only check there is.
+      # The signing key is not in the repository. It was, and removing it from
+      # the tree would not have unpublished it — GitHub keeps pull-request refs
+      # and 76 of them carried the file, fetchable by anyone once this is
+      # public, with a history rewrite touching none of them. So it was rotated
+      # rather than hidden. See README's "About that committed key".
+      #
+      # Only when an APK is actually being assembled: a tests-only run needs no
+      # key, and demanding one would fail every docs-adjacent build.
+      #
+      # No fallback and no continue-on-error. build.gradle.kts refuses to
+      # assemble an unsigned release anyway; this says so earlier and names the
+      # reason.
+      - name: Restore the signing keystore
+        if: steps.reuse.outputs.reused != 'yes' && needs.changes.outputs.apk == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "ANDROID_KEYSTORE_B64 is not set."
+            echo "An APK signed with anything else installs on no phone running this app."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/signing.p12
+          echo "Wrote android/signing.p12 ($(wc -c < android/signing.p12) bytes)"
+
       - name: Unit tests, and the release APK if this change can alter one
         if: steps.reuse.outputs.reused != 'yes'
         env:
           APK: ${{ needs.changes.outputs.apk }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
           # ONE gradle invocation either way: it starts a daemon and configures
@@ -334,6 +366,42 @@ jobs:
             echo "Nothing here changes the APK — running the tests only."
           fi
           gradle -p android $TASKS
+
+      # The property that decides whether a build can reach a phone at all.
+      #
+      # A wrong key does not fail a build. It produces a perfectly good APK
+      # that Android refuses to install over the app already there, and nothing
+      # else in this pipeline inspects a signature — the failure would surface
+      # as "the update silently never applies", on every device at once.
+      #
+      # It is also what covers the gap the reuse hash cannot. That hash is the
+      # SHA of android/, and the key no longer lives there, so replacing the
+      # secret changes what ships without forcing a rebuild. Assert the property
+      # on the artifact rather than inferring it from the tree.
+      #
+      # Not a secret: this is readable from any published APK.
+      - name: Check the APK carries the expected signing certificate
+        if: steps.reuse.outputs.reused != 'yes' && needs.changes.outputs.apk == 'true'
+        env:
+          EXPECTED: "D1A7D21D0ED4B393BAE007E1D7941258EC3D719FD69EB57F60D4F646C9F906D1"
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          APKSIGNER=$(ls "$SDK"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "No apksigner under ${SDK:-<unset>} — cannot verify what was just signed."
+            exit 1
+          fi
+          GOT=$("$APKSIGNER" verify --print-certs \
+                  android/app/build/outputs/apk/release/app-release.apk \
+                | sed -n 's/.*SHA-256 digest: *//p' | head -1 | tr 'a-f' 'A-F')
+          echo "expected $EXPECTED"
+          echo "got      ${GOT:-<none>}"
+          if [ "$GOT" != "$EXPECTED" ]; then
+            echo "This APK is signed with the wrong key. Refusing to go any further."
+            exit 1
+          fi
+          echo "Signing certificate matches."
 
       # Everything downstream reads dist/, so a reused build and a fresh one
       # are the same thing by the time anyone looks.

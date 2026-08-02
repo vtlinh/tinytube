@@ -119,7 +119,8 @@ ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
 .github/workflows/auto-merge.yml merge a PR once both platforms pass
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
 android/                         the app
-  signing.p12                    committed keystore; see README for why
+  signing.p12                    NOT in the repo — a secret, and gitignored
+                                 here; CI writes it out. See README for why
   app/src/main/java/dev/vtlinh/tinytube/
     VideoId.kt      pure: which video ids are valid   (unit-tested)
     Player.kt       pure: page + navigation allowlist (unit-tested)
@@ -681,15 +682,19 @@ stops, green publishes.
     one now would only help devices that have not yet run the renamed build.
   - **The keystore.** `storePassword` / `keyAlias` / `keyPassword` are
     `signing.p12`'s real credentials, not labels, so the KEYSTORE was re-keyed
-    with `keytool -changealias` and `-storepasswd`. That alters the container,
-    not the key: the certificate SHA-256 is unchanged, which is the only reason
-    installed apps still accept an update. Verify with `keytool -list -v`.
+    with `keytool -changealias` and `-storepasswd`. That altered the container,
+    not the key: the certificate SHA-256 came through unchanged, which is the
+    only reason installed apps still accepted an update across that rename.
 
-  The certificate's own subject still carries the old name and cannot be
-  changed the same way — a subject is part of what is signed, so a new one is a
-  new certificate, a new fingerprint, and every installed copy stranded. It is
-  inside a binary and no text search finds it. Changing it needs APK Signature
-  Scheme v3 key rotation, which is a migration rather than a rename.
+  **That is history now — the key itself has since been rotated**, when this
+  repository went public, and the certificate DID change. The paragraph above
+  describes what a rename could achieve and is kept because the distinction it
+  draws still matters; it is not a description of the current key. Every copy
+  installed before the rotation is stranded and has to be reinstalled by hand,
+  which was accepted deliberately. Verify the current one with
+  `keytool -list -v`, and see README's **About that committed key** for why
+  rotating beat scrubbing: GitHub's pull-request refs keep the old file
+  reachable forever, and a history rewrite does not touch them.
 
   Renamed with no such care needed, because none is persisted on a device: the
   CI artifact, the Worker's outgoing `User-Agent`, `rootProject.name` and the
@@ -735,5 +740,13 @@ stops, green publishes.
   job of `android.yml`, which auto-merge requires BY NAME, so it gates a merge.
   What makes a check a gate is being in that REQUIRED list — not which file it
   sits in.
-- Never commit API keys or tokens. The Worker's `GH_TOKEN` is a wrangler secret;
-  `signing.p12` is committed on purpose and is not a secret (see README).
+- Never commit API keys or tokens. The Worker's `GH_TOKEN` is a wrangler secret,
+  and the signing key is two repository secrets — `ANDROID_KEYSTORE_B64` and
+  `ANDROID_KEYSTORE_PASSWORD` — that `android.yml` writes out at build time.
+  `signing.p12` was committed on purpose for as long as this repository was
+  private. It is gitignored now; do not commit it again. It is also a DIFFERENT
+  key from the one in the history, which was rotated rather than scrubbed
+  because GitHub's pull-request refs keep the old file reachable forever and a
+  history rewrite does not touch them. Losing the current key is unrecoverable:
+  a new key updates nothing that already exists. See README's **About that
+  committed key**.

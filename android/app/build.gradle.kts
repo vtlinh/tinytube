@@ -14,6 +14,12 @@ val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
    actually compares. */
 val appVersionName = System.getenv("APP_VERSION_NAME") ?: "dev"
 
+/* Where the signing key is, and whether there is one at all. It is a repository
+   secret now rather than a committed file — see the note by signingConfigs. */
+val keystoreFile = file("../signing.p12")
+val keystorePassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val canSign = keystoreFile.exists() && !keystorePassword.isNullOrBlank()
+
 android {
     namespace = "dev.vtlinh.tinytube"
     compileSdk = 34
@@ -39,47 +45,64 @@ android {
         versionName = appVersionName
     }
 
-    /* one committed key signs every build: Android only installs an update
-       over an existing app when signatures match, and CI runners would
-       otherwise generate a fresh random debug key per run */
+    /* One key signs every build: Android only installs an update over an
+       existing app when signatures match, and CI runners would otherwise
+       generate a fresh random debug key per run.
+
+       THE KEY IS NOT IN THIS REPOSITORY, and it is not the key that was. Both
+       facts arrived together when this went public.
+
+       The old key was committed here with its password in this file. Removing
+       it from the tree would not have unpublished it — GitHub keeps every pull
+       request's refs, 76 of which carried the file, and those are fetchable by
+       anyone the moment the repository is public. A history rewrite does not
+       touch them. So the key was ROTATED rather than hidden: a leaked key that
+       signs nothing is harmless, which is a property no amount of scrubbing
+       could have bought.
+
+       What that cost is stated plainly in README, because it is not small:
+       every copy installed before the rotation has to be uninstalled and
+       reinstalled by hand, losing its approved channels and watch history.
+       Android refuses an update whose certificate changed, and this one did:
+
+         old, now dead  74:7B:05:92:…:46:4B:24:9F
+         current        D1:A7:D2:1D:…:C9:F9:06:D1
+
+       APK Signature Scheme v3 rotation could have avoided that on API 28+, by
+       carrying a lineage proving the old key authorised the new one. It was not
+       used: minSdk is 26, so it would have stranded the oldest devices anyway,
+       and it cannot be verified anywhere but CI.
+
+       CI writes the keystore out from ANDROID_KEYSTORE_B64 before building. For
+       a local release build, put the .p12 at android/signing.p12 — it is
+       gitignored — and export ANDROID_KEYSTORE_PASSWORD. */
     signingConfigs {
-        create("shared") {
-            storeFile = file("../signing.p12")
-            /* These are the keystore's real credentials, not labels — so they
-               were changed by re-keying signing.p12 itself, not by editing the
-               strings here. `keytool -changealias` and `-storepasswd` alter the
-               container; they do not touch the KEY inside it.
-             *
-             * That distinction is the whole safety property. Android installs
-             * an update over an existing app only when the signing certificate
-             * matches, and the certificate's SHA-256 came through the rename
-             * unchanged:
-             *
-             *   74:7B:05:92:96:9A:38:82:A4:AB:0D:E9:2E:94:FD:52:
-             *   E7:95:01:FE:FB:8D:5A:05:76:06:EE:B0:46:4B:24:9F
-             *
-             * Verify with:
-             *   keytool -list -v -keystore android/signing.p12 \
-             *     -storetype PKCS12 -storepass tinytube
-             *
-             * If that fingerprint ever changes, every installed copy is
-             * stranded on the version it has — so a new key is not a rename,
-             * it is a migration, and it needs APK Signature Scheme v3 rotation
-             * to be survivable. See README's "About that committed key". */
-            storePassword = "tinytube"
-            keyAlias = "tinytube"
-            keyPassword = "tinytube"
-            storeType = "PKCS12"
+        /* Created only when there is something to create it from. Pointing a
+           signingConfig at a file that isn't there fails every task, including
+           unit tests that have no business needing a key. What must not build
+           is a RELEASE, and that is refused below where it can be refused
+           precisely. */
+        if (canSign) {
+            create("shared") {
+                storeFile = keystoreFile
+                storePassword = keystorePassword
+                keyAlias = "tinytube"
+                keyPassword = keystorePassword
+                storeType = "PKCS12"
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("shared")
+            /* Falls back to Gradle's own throwaway debug key when the real one
+               isn't around, so a fresh checkout still builds and runs. A debug
+               build was never going to update anybody's phone. */
+            if (canSign) signingConfig = signingConfigs.getByName("shared")
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("shared")
+            if (canSign) signingConfig = signingConfigs.getByName("shared")
         }
     }
     compileOptions {

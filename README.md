@@ -389,12 +389,13 @@ uploaded, under every one of these arrangements.
 Every push to `main` that touches `android/` builds a release APK and publishes
 it to a fixed `android-latest` release.
 
-- **Signing**: one keystore, committed at `android/signing.p12`, signs every
-  build. Android only installs an update over an existing app when the
-  signatures match, and CI runners would otherwise mint a random key per run.
-  The password is in `build.gradle.kts` and provides no secrecy — the file is
-  committed, so anyone with the repo has the key. It buys signature *stability*,
-  not security. Treat it as public, and see the note below.
+- **Signing**: one keystore signs every build. Android only installs an update
+  over an existing app when the signatures match, and CI runners would otherwise
+  mint a random key per run — so what this buys is signature *stability*, and
+  losing the key is unrecoverable. It is held as two repository secrets and
+  written out at build time. It used to be committed, and it was replaced rather
+  than merely hidden when this went public; the note below says why, and what
+  that cost.
 - **Versioning**: `versionCode` is the workflow run number, which is what the
   updater compares. `versionName` is a display-only `<year>.<week>.<patch>`.
 - **Publish order**: the APK is uploaded first, `version.json` second and in its
@@ -428,11 +429,56 @@ claims update ownership. Silent from then on.
 
 ### About that committed key
 
-This mirrors how `vtlinh/novels` does it, and it is a deliberate trade: anyone
-with repo access can sign an APK that Android will install over this one as an
-update. That is acceptable while the repo is private and the app is
-family-scale. If this app is ever distributed more widely, move the keystore to
-an encrypted GitHub secret and have the workflow write it out at build time.
+The key was committed here, at `android/signing.p12`, with its password in
+`build.gradle.kts` — mirroring how `vtlinh/novels` does it. That was a stated
+trade: anyone with repo access could sign an APK Android installs over this one
+as an update, which was acceptable while the repo was private.
+
+Going public ended it, and **deleting the file would not have been enough.**
+GitHub keeps every pull request's refs permanently and independently of
+branches: 76 of them carried the keystore, and on a public repository anyone can
+fetch them. A history rewrite does not touch a single one. The scrub would have
+felt complete and left the key downloadable from 76 places — which is the worst
+outcome available, because it is the one you stop checking.
+
+So the key was **rotated**, not hidden. A leaked key that signs nothing is
+harmless, and that is a property no amount of scrubbing could have bought. The
+old key is still in the history and is now a dead artifact.
+
+**The cost, stated plainly: every copy installed before this must be
+uninstalled and reinstalled by hand, losing its approved channels and watch
+history.** Android refuses an update whose signing certificate changed, and this
+one did:
+
+| | certificate SHA-256 |
+| --- | --- |
+| old, now dead | `74:7B:05:92:…:46:4B:24:9F` |
+| current | `D1:A7:D2:1D:…:C9:F9:06:D1` |
+
+Self-update will not rescue those phones. The updater downloads the new APK and
+the install fails on a signature mismatch, so the app sits on its last old-key
+version until somebody reinstalls it.
+
+APK Signature Scheme v3 rotation could have avoided that on Android 9+, by
+carrying a lineage proving the old key authorised the new one. It was not used:
+`minSdk` is 26, so the oldest devices would have been stranded regardless, and
+it cannot be verified anywhere but CI.
+
+The key now lives in `ANDROID_KEYSTORE_B64` and `ANDROID_KEYSTORE_PASSWORD`,
+written out by `android.yml` at build time. Two things guard it:
+
+- `build.gradle.kts` refuses to assemble a release with no key rather than
+  emitting an unsigned APK. An unsigned build is not a broken artifact — it is a
+  working one that installs on none of the phones that matter.
+- `android.yml` reads the certificate fingerprint back out of the APK it just
+  built and fails unless it matches. The build-reuse hash covers `android/` and
+  the key no longer lives there, so swapping the secret would change what ships
+  without forcing a rebuild; this checks the artifact instead of inferring from
+  the tree.
+
+**Keep a copy somewhere durable.** A GitHub secret is write-only — nothing reads
+it back — so the secret is not a backup. Lose the keystore and every installed
+copy is stranded permanently, including by its author.
 
 ## Appearance
 
