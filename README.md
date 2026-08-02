@@ -40,9 +40,12 @@ Curation never leaves the phone. There is no server-side list of who may watch
 what and nothing to deploy when you approve something — the approved channels
 are SQLite on the device, and so is the grid built from them.
 
-The Worker does two jobs. It re-serves the app's release assets, because the
-repository is private and a device with no credential would get a 404 and could
-never find an update; that path holds a read-only GitHub token and its routes
+The Worker does two jobs. It re-serves the app's release assets — a job it took
+on when this repository was private and a device with no credential would get a
+404 and never find an update. The repository is public now and those assets are
+reachable directly, but the route stays: its hostname is compiled into both
+apps, so every installed phone asks it for updates and none of them can be told
+about a new address. That path holds a read-only GitHub token and its routes
 are fixed, so the credential cannot be pointed anywhere. And it answers
 `/uploads` — what has this channel posted — so the phone doesn't download two
 megabytes of YouTube's web app per channel and parse it.
@@ -324,10 +327,31 @@ claims update ownership. Silent from then on.
 ### About that committed key
 
 This mirrors how `vtlinh/novels` does it, and it is a deliberate trade: anyone
-with repo access can sign an APK that Android will install over this one as an
-update. That is acceptable while the repo is private and the app is
-family-scale. If this app is ever distributed more widely, move the keystore to
-an encrypted GitHub secret and have the workflow write it out at build time.
+who can read the repository can sign an APK that Android will install over this
+one as an update. The repository is public, so that is anyone at all. The
+keystore and its password are in the history as well as the tree, and code
+search finds files like it — treat the key as published, because it is.
+
+What that buys an attacker is worth being exact about. It buys a package these
+phones accept as an *update* to this app rather than as a second app beside it,
+which means it inherits the data directory — the approved-channel list, the
+watch history — and the install permissions this app has already been granted.
+It does not buy a way to deliver one. The app fetches only from the Worker over
+HTTPS and installs only what it downloaded there, so putting that APK on a phone
+takes physical access to the phone or somebody talked into sideloading it. The
+exposure is real, and it is local.
+
+It stays this way because rotating is a one-way door of the same kind as
+renaming the `applicationId`. A new key means a signature mismatch, which
+Android refuses to install over the existing app: every phone needs an
+uninstall and a fresh install, and loses its approved channels doing it. For an
+app running on a handful of phones, all of them belonging to the person who
+built it, that cost is worse than the risk it removes.
+
+If this app is ever distributed more widely the arithmetic changes and the
+rotation becomes worth paying for: move the keystore to an encrypted GitHub
+secret, have the workflow write it out at build time, and accept that every
+installed copy has to be reinstalled by hand.
 
 ## Appearance
 

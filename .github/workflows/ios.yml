@@ -89,10 +89,18 @@ jobs:
 
   # Does this change touch the iOS app at all?
   #
-  # A macOS runner bills at 10x, so a free-plan private repository gets about
-  # 200 macOS minutes a month. Building the app on every pull request would
-  # spend that on Android-only and docs-only changes. This job is seconds on
-  # ubuntu and decides whether the expensive one runs.
+  # A macOS runner bills at 10x, and that used to be a hard budget: a free-plan
+  # PRIVATE repository gets about 200 macOS minutes a month, and building the
+  # app on every pull request would spend them on Android-only and docs-only
+  # changes. This repository is public now and public repositories get standard
+  # runners free, so the meter is no longer the argument.
+  #
+  # The job stays for two better ones. It is seconds on ubuntu against minutes
+  # on macOS, so on an Android-only or docs-only pull request it is most of the
+  # wall-clock time between pushing and merging. And a check skipped this way
+  # still REPORTS, as skipped, which auto-merge counts as passing — which is
+  # why the filtering is a job-level `if` and not a path filter on the
+  # workflow. Removing it would slow every merge and change nothing else.
   changes:
     runs-on: ubuntu-latest
     outputs:

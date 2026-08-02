@@ -36,9 +36,27 @@ jobs:
     # Only PR runs, and only passing ones. Excluding workflow_dispatch here is
     # also what stops the dispatch at the end of this job from looping back
     # round into another merge.
+    #
+    # And only branches in THIS repository. A fork's pull request raises the
+    # same workflow_run event with the same conclusion, so without the third
+    # line a stranger's PR merges itself the moment both platforms report
+    # green. The merge is not where that would stop: the last step of this job
+    # then dispatches the publish, which signs an APK with the committed key
+    # and ships it to every installed phone. Nothing in between asks who wrote
+    # it.
+    #
+    # claude-autofix.yml has carried this same condition from the start, and
+    # the asymmetry was backwards — the workflow that pushes to an existing
+    # branch was fenced, and the one that writes to main was not. It cost
+    # nothing while the repository was private, because nobody outside could
+    # open a pull request at all. That is what changed.
+    #
+    # A fork's PR still builds and still reports. It just needs a person to
+    # merge it, which is the point.
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       # Earlier runs died on their first API call with a bare

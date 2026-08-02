@@ -2,12 +2,22 @@
  *
  * Two jobs, and they are kept apart on purpose.
  *
- * RELEASE ASSETS. The repository is private, so its release assets answer 404
- * to anyone without a credential and an installed app could never discover an
- * update — nothing on the device could recover from that, the update mechanism
- * being the thing that broke. This holds a read-only GitHub token and re-serves
- * them. Those routes are fixed: none takes a URL, a repo or a path from the
- * caller, so the credential cannot be pointed anywhere.
+ * RELEASE ASSETS. Built when the repository was private: its release assets
+ * answered 404 to anyone without a credential, so an installed app could never
+ * discover an update — and nothing on the device could recover from that, the
+ * update mechanism being the thing that broke. This holds a read-only GitHub
+ * token and re-serves them. Those routes are fixed: none takes a URL, a repo
+ * or a path from the caller, so the credential cannot be pointed anywhere.
+ *
+ * The repository is PUBLIC now, so those assets are reachable without any
+ * credential and this route is no longer what makes updates possible. It stays
+ * anyway, and not out of inertia: its hostname is compiled into both apps
+ * (Endpoints.kt, Endpoints.swift), every installed phone asks THIS for its
+ * updates, and an installed copy can only be told about a new address by an
+ * update it would have to fetch from the old one. Deleting the route strands
+ * every phone that already has it, for exactly the reason renaming the Worker
+ * did. env.GH_TOKEN now grants nothing a public URL wouldn't; it is harmless
+ * to leave and necessary again the day this repository goes private.
  *
  * UPLOADS. /uploads answers "what has this channel posted" so the phone does
  * not have to download two megabytes of YouTube's web app and parse it. It
