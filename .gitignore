@@ -18,6 +18,13 @@ android/local.properties
 # the repository is public and a blanket `git add -A` would publish it.
 .claude/
 
+# The signing key. It lived here, committed, until this repository went public;
+# it is a repository secret now and was purged from the history. CI writes it
+# out at build time. Keep your own copy here for local release builds — it is
+# the same key, and losing it means no installed phone can ever be updated
+# again. See README's "About that committed key".
+android/signing.p12
+
 # Xcode. The project is GENERATED from ios/project.yml by xcodegen, so it is
 # build output rather than source — see that file for why it isn't committed.
 ios/TinyTube.xcodeproj/

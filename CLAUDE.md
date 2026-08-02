@@ -112,7 +112,8 @@ ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
 .github/workflows/auto-merge.yml merge a PR once both platforms pass
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
 android/                         the app
-  signing.p12                    committed keystore; see README for why
+  signing.p12                    NOT in the repo — a secret, and gitignored
+                                 here; CI writes it out. See README for why
   app/src/main/java/dev/vtlinh/tinytube/
     VideoId.kt      pure: which video ids are valid   (unit-tested)
     Player.kt       pure: page + navigation allowlist (unit-tested)
@@ -263,7 +264,21 @@ APK when `git rev-parse HEAD:android` — the SHA of the `android/` subtree — 
 what that build recorded. Three things follow. The hash covers `android/` and
 only `android/`, so anything the APK depends on has to live there; a build input
 put anywhere else would be invisible to the check and could change without
-forcing a rebuild. Every build must keep writing `dist/version.json` and
+forcing a rebuild.
+
+**The signing key is now exactly such an input**, and it is the one exception
+rather than a licence for more. It moved out of `android/` and into a secret
+when the repository went public, so replacing that secret changes what every
+APK carries while leaving the subtree hash untouched — a publish could hand an
+installed phone a build signed with a key it doesn't accept, and the hash would
+have agreed the whole way. What covers it is not the hash but a direct
+assertion: `android.yml` reads the certificate fingerprint back out of the
+freshly built APK with `apksigner` and fails if it isn't the expected one. If
+another build input ever has to live outside `android/`, it needs its own
+version of that — a property checked on the artifact itself, not an inference
+from the tree.
+
+Every build must keep writing `dist/version.json` and
 `dist/build-tree.txt` beside the APK — the reuse check reads them, and a build
 that stops emitting them silently disables the fast path. And the tests run on
 *every* build that happens, including a publish: reaching the compiler on a
@@ -496,5 +511,12 @@ stops, green publishes.
   and moving it would cost a rerun to prove nothing. If a third workflow ever
   wants it, put it in whichever one is REQUIRED — that, not the file's name, is
   what makes a check a gate.
-- Never commit API keys or tokens. The Worker's `GH_TOKEN` is a wrangler secret;
-  `signing.p12` is committed on purpose and is not a secret (see README).
+- Never commit API keys or tokens. The Worker's `GH_TOKEN` is a wrangler secret,
+  and the signing key is two repository secrets — `ANDROID_KEYSTORE_B64` and
+  `ANDROID_KEYSTORE_PASSWORD` — that `android.yml` writes out at build time.
+  `signing.p12` was committed on purpose for as long as this repository was
+  private, and was purged from the history when it went public. Do not commit it
+  again; it is gitignored. **It is the same key it always was**, so installed
+  phones still take a build as an update — and that is why losing it is
+  unrecoverable rather than inconvenient. A new key updates nothing that already
+  exists. See README's **About that committed key**.

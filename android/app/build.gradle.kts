@@ -14,6 +14,12 @@ val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
    actually compares. */
 val appVersionName = System.getenv("APP_VERSION_NAME") ?: "dev"
 
+/* Where the signing key is, and whether there is one at all. See the note by
+   signingConfigs below — it is a repository secret now, not a committed file. */
+val keystoreFile = file("../signing.p12")
+val keystorePassword: String? = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val canSign = keystoreFile.exists() && !keystorePassword.isNullOrBlank()
+
 android {
     namespace = "dev.vtlinh.tinytube"
     compileSdk = 34
@@ -39,26 +45,47 @@ android {
         versionName = appVersionName
     }
 
-    /* one committed key signs every build: Android only installs an update
-       over an existing app when signatures match, and CI runners would
-       otherwise generate a fresh random debug key per run */
+    /* One key signs every build: Android only installs an update over an
+       existing app when signatures match, and CI runners would otherwise
+       generate a fresh random debug key per run.
+
+       That key is NOT in this repository any more. It was committed here, with
+       its password in this file, and both were purged from the history when the
+       repository went public — see README's "About that committed key". It is
+       the SAME key, not a new one: moving it did not rotate it, so every phone
+       that already has this app still takes a build as an update. A rotation
+       would not be survivable, which is exactly why the key must never be lost.
+
+       CI writes it out from the ANDROID_KEYSTORE_B64 secret before building.
+       For a local release build, put the .p12 back at android/signing.p12 — it
+       is gitignored — and export ANDROID_KEYSTORE_PASSWORD. */
     signingConfigs {
-        create("shared") {
-            storeFile = file("../signing.p12")
-            storePassword = "ytkids"
-            keyAlias = "ytkids"
-            keyPassword = "ytkids"
-            storeType = "PKCS12"
+        /* Created only when there is something to create it from. Pointing a
+           signingConfig at a file that isn't there is a configuration failure
+           for every task, including the unit tests, which have no business
+           needing a key. What must not build is a RELEASE, and that is refused
+           below where it can be refused precisely. */
+        if (canSign) {
+            create("shared") {
+                storeFile = keystoreFile
+                storePassword = keystorePassword
+                keyAlias = "ytkids"
+                keyPassword = keystorePassword
+                storeType = "PKCS12"
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("shared")
+            /* Falls back to Gradle's own throwaway debug key when the real one
+               isn't around, so a fresh checkout still builds and runs. A debug
+               build was never going to update anybody's phone. */
+            if (canSign) signingConfig = signingConfigs.getByName("shared")
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("shared")
+            if (canSign) signingConfig = signingConfigs.getByName("shared")
         }
     }
     compileOptions {
@@ -70,6 +97,31 @@ android {
     }
     buildFeatures {
         viewBinding = false
+    }
+}
+
+/* Refuse to build an unsigned release at all.
+ *
+ * Without this, a missing key is not an error: Gradle drops the signingConfig,
+ * emits app-release-unsigned.apk, and the pipeline fails later and for the
+ * wrong reason — or worse, doesn't. An APK that isn't signed with THIS key
+ * installs on no phone that already has TinyTube, and nothing downstream of
+ * here looks at a signature. So the failure belongs at the moment of building.
+ *
+ * On the task rather than at configuration time, so that a checkout with no
+ * key can still run `testReleaseUnitTest` and everything else. Only the thing
+ * that would actually ship is refused. */
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    doFirst {
+        if (!canSign) {
+            error(
+                "Refusing to build an unsigned release APK. Expected a keystore at " +
+                    "${keystoreFile.path} and ANDROID_KEYSTORE_PASSWORD in the environment. " +
+                    "CI writes both from repository secrets — see .github/workflows/android.yml. " +
+                    "Locally, restore the .p12 there and export the password. An APK signed " +
+                    "with anything else cannot update an installed copy of this app.",
+            )
+        }
     }
 }
 

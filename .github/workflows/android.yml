@@ -204,9 +204,69 @@ jobs:
         if: steps.reuse.outputs.reused != 'yes'
         run: node --test
 
+      # The signing key is not in the repository — it was committed once, and
+      # was purged from the history when this went public. See README's "About
+      # that committed key". It is the SAME key held a different way, so builds
+      # keep producing an APK that installed phones accept as an update.
+      #
+      # No fallback and no continue-on-error. A build with no key must stop
+      # here: build.gradle.kts refuses to assemble an unsigned release, and this
+      # says so earlier and more clearly.
+      - name: Restore the signing keystore
+        if: steps.reuse.outputs.reused != 'yes'
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "ANDROID_KEYSTORE_B64 is not set."
+            echo "Every installed phone updates only from a build carrying this key."
+            echo "Refusing to continue rather than ship something that installs nowhere."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/signing.p12
+          echo "Wrote android/signing.p12 ($(wc -c < android/signing.p12) bytes)"
+
       - name: Unit tests and release APK
         if: steps.reuse.outputs.reused != 'yes'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: gradle -p android testReleaseUnitTest assembleRelease
+
+      # The one property that must never drift: an installed app accepts an
+      # update only if it carries this exact certificate. A wrong key does not
+      # fail a build — it produces a perfectly good APK that installs on none of
+      # the phones that matter, and nothing else in this pipeline would notice.
+      #
+      # It is also the check that covers what the reuse hash cannot. That hash
+      # is the SHA of android/, and the key no longer lives there, so replacing
+      # the secret would not force a rebuild. This asserts the property directly
+      # instead of inferring it from the tree.
+      #
+      # The fingerprint is not a secret; it is readable from any published APK.
+      - name: Check the APK carries the expected signing certificate
+        if: steps.reuse.outputs.reused != 'yes'
+        env:
+          EXPECTED: "747B0592969A3882A4AB0DE92E94FD52E79501FEFB8D5A057606EEB0464B249F"
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          APKSIGNER=$(ls "$SDK"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "No apksigner under ${SDK:-<unset>} — cannot verify what was just signed."
+            exit 1
+          fi
+          GOT=$("$APKSIGNER" verify --print-certs \
+                  android/app/build/outputs/apk/release/app-release.apk \
+                | sed -n 's/.*SHA-256 digest: *//p' | head -1 | tr 'a-f' 'A-F')
+          echo "expected $EXPECTED"
+          echo "got      ${GOT:-<none>}"
+          if [ "$GOT" != "$EXPECTED" ]; then
+            echo "This APK is signed with the wrong key. It would install on no phone"
+            echo "that already has TinyTube. Refusing to go any further."
+            exit 1
+          fi
+          echo "Signing certificate matches."
 
       # Everything downstream reads dist/, so a reused build and a fresh one
       # are the same thing by the time anyone looks.

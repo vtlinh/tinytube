@@ -287,12 +287,12 @@ videos are served by YouTube and carry YouTube's ads.
 Every push to `main` that touches `android/` builds a release APK and publishes
 it to a fixed `android-latest` release.
 
-- **Signing**: one keystore, committed at `android/signing.p12`, signs every
-  build. Android only installs an update over an existing app when the
-  signatures match, and CI runners would otherwise mint a random key per run.
-  The password is in `build.gradle.kts` and provides no secrecy — the file is
-  committed, so anyone with the repo has the key. It buys signature *stability*,
-  not security. Treat it as public, and see the note below.
+- **Signing**: one keystore signs every build. Android only installs an update
+  over an existing app when the signatures match, and CI runners would otherwise
+  mint a random key per run — so what this buys is signature *stability*, and
+  losing it is unrecoverable. It is held as a repository secret and written out
+  at build time; it used to be committed, and the note below says what changed
+  and why the key itself did not.
 - **Versioning**: `versionCode` is the workflow run number, which is what the
   updater compares. `versionName` is a display-only `<year>.<week>.<patch>`.
 - **Publish order**: the APK is uploaded first, `version.json` second and in its
@@ -326,32 +326,43 @@ claims update ownership. Silent from then on.
 
 ### About that committed key
 
-This mirrors how `vtlinh/novels` does it, and it is a deliberate trade: anyone
-who can read the repository can sign an APK that Android will install over this
-one as an update. The repository is public, so that is anyone at all. The
-keystore and its password are in the history as well as the tree, and code
-search finds files like it — treat the key as published, because it is.
+The key was committed here, at `android/signing.p12`, with its password in
+`build.gradle.kts` — mirroring how `vtlinh/novels` does it. That was a
+deliberate trade and the README said so: anyone with repo access could sign an
+APK that Android installs over this one as an update, which was acceptable
+while the repo was private.
 
-What that buys an attacker is worth being exact about. It buys a package these
-phones accept as an *update* to this app rather than as a second app beside it,
-which means it inherits the data directory — the approved-channel list, the
-watch history — and the install permissions this app has already been granted.
-It does not buy a way to deliver one. The app fetches only from the Worker over
-HTTPS and installs only what it downloaded there, so putting that APK on a phone
-takes physical access to the phone or somebody talked into sideloading it. The
-exposure is real, and it is local.
+Going public ended it. It is now two repository secrets, `ANDROID_KEYSTORE_B64`
+and `ANDROID_KEYSTORE_PASSWORD`, which `android.yml` writes out before building;
+the file is gitignored, and it was purged from the history rather than merely
+deleted, because a deleted file is still in every clone of the commit that added
+it.
 
-It stays this way because rotating is a one-way door of the same kind as
-renaming the `applicationId`. A new key means a signature mismatch, which
-Android refuses to install over the existing app: every phone needs an
-uninstall and a fresh install, and loses its approved channels doing it. For an
-app running on a handful of phones, all of them belonging to the person who
-built it, that cost is worse than the risk it removes.
+**It is the same key.** Moving it was not a rotation — the certificate is
+unchanged, so every phone that already has TinyTube still accepts a build as an
+update, and nobody re-approves their channels. That distinction is the whole
+reason this was worth doing: the fix cost nothing, where a rotation would have
+cost every install.
 
-If this app is ever distributed more widely the arithmetic changes and the
-rotation becomes worth paying for: move the keystore to an encrypted GitHub
-secret, have the workflow write it out at build time, and accept that every
-installed copy has to be reinstalled by hand.
+Which is also why the key is now the single most fragile thing in the project.
+A *new* key cannot update an app signed with the old one — Android refuses the
+install outright — so an installed copy whose key is lost can never be updated
+again by anyone, including its author. Losing this key strands every phone
+permanently. Keep a copy somewhere durable, off this repository and off the
+machine that builds it.
+
+Two things guard it:
+
+- `build.gradle.kts` refuses to assemble a release with no key rather than
+  emitting an unsigned APK. An unsigned or wrongly-signed build is not a broken
+  artifact, it is a perfectly good one that installs on none of the phones that
+  matter, and nothing downstream inspects a signature.
+- `android.yml` reads the certificate fingerprint back out of the APK it just
+  built and fails unless it is
+  `74:7B:05:92:…:4B:24:9F`. The build-reuse hash covers `android/` and the key
+  no longer lives there, so swapping the secret would not force a rebuild — this
+  checks the property on the artifact instead of inferring it from the tree. The
+  fingerprint is not a secret; it is readable from any published APK.
 
 ## Appearance
 
