@@ -106,6 +106,9 @@ class ChannelStore private constructor(private val app: Context) :
         VideoStore.forget(app, channelId)
         WatchStore.forget(app, channelId)
         Thumbnails.forget(images)
+        /* Removing a channel can strand the group it was in — a pair minus one
+           is not a group. Same tidy every other writer ends with. */
+        tidy()
     }
 
     /* Every picture this channel put on the device: its avatar, and a poster
@@ -133,6 +136,114 @@ class ChannelStore private constructor(private val app: Context) :
             Schema.CHANNELS, COLUMNS, where, args, null, null, null, "1",
         ).use { c -> if (c.moveToFirst()) c.toChannel() else null }
 
+    /* ---- groups ----
+     *
+     * ChannelGroups holds every RULE; this holds the rows. The split is the
+     * usual one here: the rules are testable on a plain JVM and the SQL is not.
+     *
+     * ⚠️ EVERY MUTATION ENDS IN tidy(). A group of one is not a group, and the
+     * ways to make one are easy to miss: removing a channel, ungrouping half a
+     * group, or moving a member into a different group all strand whatever is
+     * left. Putting it at the end of each writer rather than at the call sites
+     * is what keeps that true for callers nobody has written yet. */
+    fun groups(): List<ChannelGroups.Group> {
+        val out = mutableListOf<ChannelGroups.Group>()
+        readableDatabase.query(
+            Schema.GROUPS, arrayOf("group_id", "name"), null, null, null, null, "name COLLATE NOCASE ASC",
+        ).use { c ->
+            while (c.moveToNext()) out.add(ChannelGroups.Group(c.getString(0), c.getString(1)))
+        }
+        return out
+    }
+
+    /* Put these channels in a group of this name, creating it.
+     *
+     * Returns false if the name is refused — the dialog checks first and
+     * disables its confirm, so this is the second lock on the same door rather
+     * than the only one. A UNIQUE index on the name is the third.
+     *
+     * Whatever group a channel was in, it leaves: the column is overwritten,
+     * not merged. That is rule 7, and it needs no code of its own — but it does
+     * need the tidy afterwards, because the group it left may now be down to
+     * one channel. */
+    fun group(channelIds: Collection<String>, name: String): Boolean {
+        val trimmed = name.trim()
+        if (ChannelGroups.nameError(trimmed, groups().map { it.name }) != null) return false
+        if (channelIds.size < 2) return false
+
+        val id = java.util.UUID.randomUUID().toString()
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.insertWithOnConflict(
+                Schema.GROUPS, null,
+                ContentValues().apply {
+                    put("group_id", id)
+                    put("name", trimmed)
+                },
+                SQLiteDatabase.CONFLICT_ABORT,
+            )
+            for (channelId in channelIds) {
+                db.update(
+                    Schema.CHANNELS,
+                    ContentValues().apply { put("group_id", id) },
+                    "channel_id = ?", arrayOf(channelId),
+                )
+            }
+            db.setTransactionSuccessful()
+        } catch (e: Exception) {
+            return false
+        } finally {
+            db.endTransaction()
+        }
+        tidy()
+        return true
+    }
+
+    /* Take these channels out of whatever group they are in. They stay
+       approved — ungrouping is not removing, and conflating the two would be
+       the worst possible reading of the word. */
+    fun ungroup(channelIds: Collection<String>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (channelId in channelIds) {
+                db.update(
+                    Schema.CHANNELS,
+                    ContentValues().apply { putNull("group_id") },
+                    "channel_id = ?", arrayOf(channelId),
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        tidy()
+    }
+
+    /* The invariant, enforced after every change: a group with fewer than two
+       channels is dissolved, and its remaining member — if any — becomes
+       loose. The channels are never touched beyond that column. */
+    private fun tidy() {
+        val doomed = ChannelGroups.dissolving(all(), groups())
+        if (doomed.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (groupId in doomed) {
+                db.update(
+                    Schema.CHANNELS,
+                    ContentValues().apply { putNull("group_id") },
+                    "group_id = ?", arrayOf(groupId),
+                )
+                db.delete(Schema.GROUPS, "group_id = ?", arrayOf(groupId))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     /* Newest approval first — that's the order a parent reviewing the list
        expects, and the one the index is built for. */
     fun all(): List<Channel> {
@@ -151,10 +262,12 @@ class ChannelStore private constructor(private val app: Context) :
         addedAt = getLong(2),
         handle = if (isNull(3)) null else getString(3),
         avatarUrl = if (isNull(4)) null else getString(4),
+        groupId = if (isNull(5)) null else getString(5),
     )
 
     companion object {
-        private val COLUMNS = arrayOf("channel_id", "title", "added_at", "handle", "avatar_url")
+        private val COLUMNS =
+            arrayOf("channel_id", "title", "added_at", "handle", "avatar_url", "group_id")
 
         @Volatile private var instance: ChannelStore? = null
 
@@ -185,6 +298,9 @@ data class Channel(
     val handle: String? = null,
     /* the channel's picture, when we managed to find it */
     val avatarUrl: String? = null,
+    /* Which group it belongs to, or null for a loose channel. A group always
+       has at least two of these — see ChannelGroups. */
+    val groupId: String? = null,
 ) {
     /* Where to send the parent's WebView to look at this channel again. The
        id is canonical and always works; a handle can be changed by its owner. */

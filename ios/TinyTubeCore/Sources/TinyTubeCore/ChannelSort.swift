@@ -11,18 +11,24 @@ public struct Channel: Equatable, Sendable {
     /* the channel's picture, when we managed to find it */
     public let avatarURL: String?
 
+    /* Which group it belongs to, or nil for a loose channel. A group always has
+       at least two of these — see ChannelGroups. */
+    public let groupId: String?
+
     public init(
         id: String,
         title: String,
         addedAt: Int64,
         handle: String? = nil,
-        avatarURL: String? = nil
+        avatarURL: String? = nil,
+        groupId: String? = nil
     ) {
         self.id = id
         self.title = title
         self.addedAt = addedAt
         self.handle = handle
         self.avatarURL = avatarURL
+        self.groupId = groupId
     }
 
     /* Where to send the parent's web view to look at this channel again. The id

@@ -20,7 +20,7 @@ import Foundation
 public enum Schema {
 
     public static let database = "tinytube.sqlite"
-    public static let version = 5
+    public static let version = 6
 
     /* Android renamed its database file and carried nothing across; a device
        updating into that build finds an empty approved list. Nothing equivalent
@@ -98,6 +98,30 @@ public enum Schema {
         "CREATE INDEX IF NOT EXISTS idx_watches_channel ON watches (channel_id, watched_at DESC)",
     ]
 
+    /* Named groups of channels. Mirrors Schema.kt's V6.
+
+       The name is UNIQUE and NOCASE, which is the whole identity model: the
+       dialog refuses a name already in use, so there is never a second
+       "Cartoons" for a parent to tell apart, and NOCASE means the database
+       refuses "cartoons" by the same rule ChannelGroups applies. The id is
+       separate from the name so a rename would stay a one-row update if it is
+       ever asked for; nothing renames one today.
+
+       group_id on channels is nullable — a loose channel has none — and
+       dissolving a group must leave its channels APPROVED and loose. That is
+       why nothing cascades: a cascade here would delete the channels, which is
+       to say silently un-approve them. */
+    static let v6 = [
+        """
+        CREATE TABLE IF NOT EXISTS groups (
+            group_id TEXT PRIMARY KEY NOT NULL,
+            name     TEXT NOT NULL COLLATE NOCASE UNIQUE
+        )
+        """,
+        "ALTER TABLE channels ADD COLUMN group_id TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_channels_group ON channels (group_id)",
+    ]
+
     /* Every statement needed to move a database from `from` to `to`.
        from == 0 means a fresh install, which is just every version in order. */
     public static func statements(from: Int, to: Int) -> [String] {
@@ -107,6 +131,7 @@ public enum Schema {
         if from < 3 && to >= 3 { out += v3 }
         if from < 4 && to >= 4 { out += v4 }
         if from < 5 && to >= 5 { out += v5 }
+        if from < 6 && to >= 6 { out += v6 }
         /* Later versions append their own block here. Nothing is ever edited in
            place: a device that already ran v1 will never run it again, so
            changing it only affects fresh installs and silently splits the

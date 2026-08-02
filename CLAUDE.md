@@ -419,10 +419,31 @@ stops, green publishes.
   that bar without the gate does not belong on it. Nothing on the child's
   screen has a hidden action either: About used to open on a long-press of the
   title and is part of Settings now.
-- **A notification may not lead past the gate.** It sits in the shade and on
-  the lock screen, where a child can reach it, so `Updater`'s content intent
-  opens the grid rather than Settings — where the hold duration now lives. The
-  Install action still does the useful thing in one tap.
+- **A notification may not lead PAST the gate — but it may lead TO it.** It
+  sits in the shade and on the lock screen where a child can reach it, so
+  `Updater`'s content intent must never name `SettingsActivity`: the hold
+  duration is on that screen. What it does instead is name the grid and ASK,
+  with an extra; `MainActivity` runs `ChallengeActivity` exactly as the Parent
+  button does, and settings opens only on a `RESULT_OK`. A failed challenge
+  leaves the child on the grid. The Install action still does the useful thing
+  in one tap without opening anything.
+
+  **And it does not ask twice.** A parent already in parent mode — or in the
+  settings inside it — has just passed that gate, so the notification opens
+  settings directly. `ParentSession` answers "is a parent looking at this now",
+  and it is a COUNT rather than a flag because Android starts the incoming
+  activity before it stops the outgoing one: a boolean would read "closed"
+  during the handover into settings, which is exactly when a parent would tap
+  this. Started/stopped rather than created/destroyed, so backgrounding the app
+  owes the gate again.
+
+  Two more details that are load-bearing rather than tidy. The request goes
+  through `ParentActivity` rather than starting settings directly, because the
+  approved list inside settings can hand back a channel to look at and that
+  screen owns the only WebView it could be shown in. And the extra is consumed
+  on arrival — `setIntent` keeps it for the life of the activity, so a rotation
+  would otherwise re-run the gate on a screen the parent had already
+  dismissed.
 - **Removing a channel removes everything it put on the device**, and that is
   one call on each platform rather than a checklist at every call site. Its
   row, its videos, its watch history AND its cached pictures — the last of

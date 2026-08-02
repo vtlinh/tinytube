@@ -10,7 +10,7 @@ package dev.vtlinh.tinytube
 object Schema {
 
     const val DATABASE = "tinytube.db"
-    const val VERSION = 5
+    const val VERSION = 6
 
     /* ⚠️ RENAMING THIS FILE COSTS EVERY EXISTING INSTALL ITS DATA, and that
        was accepted deliberately when the name changed.
@@ -29,6 +29,7 @@ object Schema {
 
        Rename it again and the same thing happens again. */
 
+    const val GROUPS = "groups"
     const val CHANNELS = "channels"
     const val VIDEOS = "videos"
     const val WATCHES = "watches"
@@ -132,6 +133,35 @@ object Schema {
         "CREATE INDEX IF NOT EXISTS idx_watches_channel ON watches (channel_id, watched_at DESC)",
     )
 
+    /* Named groups of channels.
+     *
+     * The name is UNIQUE, and that is the whole identity model: the dialog
+     * refuses a name already in use, so there is never a second "Cartoons" for
+     * a parent to tell apart. NOCASE so it refuses "cartoons" too — the check
+     * in ChannelGroups is case-insensitive and a database that disagreed with
+     * it would let one through by a different path.
+     *
+     * The id is separate from the name anyway, rather than using the name as
+     * the key, so renaming a group stays a one-row update if it is ever asked
+     * for. Nothing renames one today.
+     *
+     * ON DELETE SET NULL is deliberate: dissolving a group must leave its
+     * channels approved and loose. A cascade here would delete the CHANNELS,
+     * which is to say it would silently un-approve them — the worst possible
+     * reading of "ungroup". */
+    private val V6 = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS groups (
+            group_id TEXT PRIMARY KEY NOT NULL,
+            name     TEXT NOT NULL COLLATE NOCASE UNIQUE
+        )
+        """.trimIndent(),
+        "ALTER TABLE channels ADD COLUMN group_id TEXT",
+        /* The list reads "every channel in this group" for every group it
+           draws, on a screen a parent opens often. */
+        "CREATE INDEX IF NOT EXISTS idx_channels_group ON channels (group_id)",
+    )
+
     /* Every statement needed to move a database from `from` to `to`.
        from == 0 means a fresh install, which is just every version in order. */
     fun statementsFor(from: Int, to: Int): List<String> {
@@ -141,6 +171,7 @@ object Schema {
         if (from < 3 && to >= 3) out += V3
         if (from < 4 && to >= 4) out += V4
         if (from < 5 && to >= 5) out += V5
+        if (from < 6 && to >= 6) out += V6
         /* Later versions append their own block here. Nothing is ever edited
            in place: a device that already ran V1 will never run it again, so
            changing it only affects fresh installs and silently splits the

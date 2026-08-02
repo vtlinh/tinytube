@@ -66,7 +66,7 @@ class SchemaTest {
            than a hand-written chain. The hand-written one silently stopped
            checking the newest migration every time somebody added one — which
            is precisely the migration nobody has run on a real device yet. */
-        for (table in listOf(Schema.CHANNELS, Schema.VIDEOS, Schema.WATCHES)) {
+        for (table in listOf(Schema.CHANNELS, Schema.VIDEOS, Schema.WATCHES, Schema.GROUPS)) {
             val fresh = onDb { c -> apply(c, 0, Schema.VERSION); columnsOf(c, table) }
             val upgraded = onDb { c ->
                 for (v in 1..Schema.VERSION) apply(c, v - 1, v)
@@ -79,6 +79,52 @@ class SchemaTest {
         assertTrue("handle should exist, got $channels", "handle" in channels)
         assertTrue("avatar_url should exist, got $channels", "avatar_url" in channels)
         assertTrue("uploads_at should exist, got $channels", "uploads_at" in channels)
+        assertTrue("group_id should exist, got $channels", "group_id" in channels)
+    }
+
+    /* Two groups may not share a name, and the database says so as well as
+       ChannelGroups does. The dialog is the only thing that creates one, and it
+       refuses a duplicate — but a constraint that lives only in a dialog is one
+       bad code path away from two identical headers a parent cannot tell
+       apart. NOCASE, because "cartoons" and "Cartoons" are the same name to
+       the person reading the list. */
+    @Test fun `group names are unique, ignoring case`() {
+        onDb { c ->
+            apply(c, 0, Schema.VERSION)
+            c.createStatement().use {
+                it.executeUpdate("INSERT INTO groups (group_id, name) VALUES ('g1', 'Cartoons')")
+            }
+            var refused = false
+            try {
+                c.createStatement().use {
+                    it.executeUpdate("INSERT INTO groups (group_id, name) VALUES ('g2', 'cartoons')")
+                }
+            } catch (e: java.sql.SQLException) {
+                refused = true
+            }
+            assertTrue("a second Cartoons should have been refused", refused)
+        }
+    }
+
+    /* Dissolving a group must leave its channels APPROVED and loose. Nothing
+       cascades from groups to channels, and this is the test that says so —
+       a cascade here would silently un-approve them, which is the worst
+       possible reading of "ungroup". */
+    @Test fun `deleting a group does not delete its channels`() {
+        onDb { c ->
+            apply(c, 0, Schema.VERSION)
+            c.createStatement().use { st ->
+                st.executeUpdate("INSERT INTO groups (group_id, name) VALUES ('g1', 'Cartoons')")
+                st.executeUpdate(
+                    "INSERT INTO channels (channel_id, title, added_at, group_id) " +
+                        "VALUES ('c1', 'A', 1, 'g1')",
+                )
+                st.executeUpdate("DELETE FROM groups WHERE group_id = 'g1'")
+                val rs = st.executeQuery("SELECT COUNT(*) FROM channels WHERE channel_id = 'c1'")
+                rs.next()
+                assertEquals("the channel must survive its group", 1, rs.getInt(1))
+            }
+        }
     }
 
     private fun columnsOf(c: java.sql.Connection, table: String): List<String> {

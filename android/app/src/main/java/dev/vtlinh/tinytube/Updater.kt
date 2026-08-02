@@ -116,17 +116,26 @@ object Updater {
                 Intent(context, UpdateReceiver::class.java).setAction(ACTION_INSTALL_UPDATE),
                 flags,
             )
-            /* Tapping the notification opens the GRID, not the settings the
-               update controls now live on. A notification sits in the shade
-               and on the lock screen, where a child can reach it — a content
-               intent straight into the parent's settings would be a way past
-               ChallengeActivity, and one of the things on that screen is how
-               long the player's corner has to be held. The Install action
-               below still does the useful thing in one tap without opening
-               anything. */
+            /* Tapping the notification asks for the settings the update
+               controls live on — THROUGH THE GATE, never past it.
+             *
+             * A notification sits in the shade and on the lock screen, where a
+             * child can reach it, so this intent cannot name SettingsActivity:
+             * one of the things on that screen is how long the player's corner
+             * has to be held. It names the GRID and asks, and MainActivity runs
+             * ChallengeActivity exactly as the Parent button does. A failed
+             * challenge leaves the child on the grid, which is where the tap
+             * used to land unconditionally.
+             *
+             * FLAG_UPDATE_CURRENT above is what makes the extra arrive: without
+             * it a PendingIntent created by an earlier build would be reused
+             * with its old, empty extras. The Install action below still does
+             * the useful thing in one tap without opening anything. */
             val open = PendingIntent.getActivity(
                 context, 2,
-                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                Intent(context, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true),
                 flags,
             )
             nm.notify(
@@ -155,17 +164,19 @@ object Updater {
             )
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                 (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
-            /* Tapping the notification opens the GRID, not the settings the
-               update controls now live on. A notification sits in the shade
-               and on the lock screen, where a child can reach it — a content
-               intent straight into the parent's settings would be a way past
-               ChallengeActivity, and one of the things on that screen is how
-               long the player's corner has to be held. The Install action
-               below still does the useful thing in one tap without opening
-               anything. */
+            /* Same route as the ready notification: ask for settings, through
+               the gate. A failure is a parent's problem and the retry is on
+               that screen, so leading anywhere else would be telling somebody
+               about a thing they then have to go and find.
+
+               Request code 3, not 2. Two PendingIntents that share a code and
+               match on intent are the SAME object, and FLAG_UPDATE_CURRENT
+               would have this one quietly rewrite the other's. */
             val open = PendingIntent.getActivity(
-                context, 2,
-                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                context, 3,
+                Intent(context, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    .putExtra(MainActivity.EXTRA_OPEN_SETTINGS, true),
                 flags,
             )
             nm.notify(

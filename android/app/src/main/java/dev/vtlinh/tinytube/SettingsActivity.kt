@@ -92,6 +92,20 @@ class SettingsActivity : AppCompatActivity() {
         )
     }
 
+    /* This is inside parent mode, so it counts as parent mode — otherwise a
+       parent sitting in settings would be challenged by the update
+       notification they are already looking at the controls for. See
+       ParentSession. */
+    override fun onStart() {
+        super.onStart()
+        ParentSession.started()
+    }
+
+    override fun onStop() {
+        ParentSession.stopped()
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         refreshUpdateState()
