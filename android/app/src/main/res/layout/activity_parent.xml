@@ -58,6 +58,20 @@
             android:scaleType="centerInside"
             android:contentDescription="@string/parent_add_channel" />
 
+        <!-- The approved list, back on this bar. It was folded into settings
+             while it was a flat column of rows; it has a selection mode and a
+             two-state toolbar now, which is a screen rather than a section.
+             See ApprovedChannelsActivity. -->
+        <ImageButton
+            android:id="@+id/approved_list"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:src="@drawable/ic_approved_list"
+            android:tint="@color/text_muted"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:scaleType="centerInside"
+            android:contentDescription="@string/parent_approved_title" />
+
         <!-- Settings LAST, and iOS matches. They live here rather than on the
              child's bar: this side of the gate is where every other parent
              control already is, and it gives the child's screen back its one

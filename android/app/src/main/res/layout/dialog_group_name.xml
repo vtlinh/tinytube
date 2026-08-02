@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Group dialog's body.
+
+     The error is a line UNDER the field rather than a toast or a message that
+     replaces the dialog: the parent has to fix the name they are looking at,
+     and the confirm button is disabled until they do. Blank and already-taken
+     are the two refusals — see ChannelGroups.nameError. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="8dp">
+
+    <EditText
+        android:id="@+id/group_name_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/group_dialog_hint"
+        android:inputType="textCapWords"
+        android:maxLines="1"
+        android:textColor="@color/text"
+        android:textColorHint="@color/text_muted" />
+
+    <TextView
+        android:id="@+id/group_name_error"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="6dp"
+        android:textSize="13sp"
+        android:textColor="#E5534B"
+        android:visibility="gone" />
+
+</LinearLayout>

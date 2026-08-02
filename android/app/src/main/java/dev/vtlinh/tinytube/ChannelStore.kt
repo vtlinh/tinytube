@@ -168,21 +168,38 @@ class ChannelStore private constructor(private val app: Context) :
      * one channel. */
     fun group(channelIds: Collection<String>, name: String): Boolean {
         val trimmed = name.trim()
-        if (ChannelGroups.nameError(trimmed, groups().map { it.name }) != null) return false
         if (channelIds.size < 2) return false
 
-        val id = java.util.UUID.randomUUID().toString()
+        val ids = channelIds.toSet()
+        val all = all()
+        val existing = groups()
+        /* Judged against the names still IN USE afterwards, not every name
+           there is. A group with every member in this selection is emptied by
+           it, so it dissolves and its name comes free — which is what makes
+           "add these to Cartoons" work at all. See ChannelGroups.namesInUse. */
+        if (ChannelGroups.nameError(trimmed, ChannelGroups.namesInUse(existing, all, ids)) != null) {
+            return false
+        }
+
+        /* And when that is the case, take the emptied group's ROW rather than
+           inserting a second one: the name column is UNIQUE, so the insert
+           would abort here and tidy() only removes the old group afterwards.
+           Adding a channel to a group would fail with nothing to see. */
+        val absorbed = ChannelGroups.absorbing(trimmed, existing, all, ids)
+        val id = absorbed ?: java.util.UUID.randomUUID().toString()
         val db = writableDatabase
         db.beginTransaction()
         try {
-            db.insertWithOnConflict(
-                Schema.GROUPS, null,
-                ContentValues().apply {
-                    put("group_id", id)
-                    put("name", trimmed)
-                },
-                SQLiteDatabase.CONFLICT_ABORT,
-            )
+            if (absorbed == null) {
+                db.insertWithOnConflict(
+                    Schema.GROUPS, null,
+                    ContentValues().apply {
+                        put("group_id", id)
+                        put("name", trimmed)
+                    },
+                    SQLiteDatabase.CONFLICT_ABORT,
+                )
+            }
             for (channelId in channelIds) {
                 db.update(
                     Schema.CHANNELS,

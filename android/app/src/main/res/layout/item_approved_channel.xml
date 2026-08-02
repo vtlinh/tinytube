@@ -1,12 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Tapping the row opens the channel; the X removes it. The two targets are
-     kept well apart so a thumb aiming for one doesn't hit the other. -->
+     kept well apart so a thumb aiming for one doesn't hit the other.
+
+     BACKGROUND AND FOREGROUND BOTH, and each is doing a different job. The
+     background carries the ACTIVATED state — that is what a selected row looks
+     like in the parent's list — and the foreground keeps the ripple, which the
+     activated selector has none of. One attribute cannot be both: putting the
+     ripple in the background would leave a selected row indistinguishable from
+     an unselected one, which on a screen whose whole point is picking rows is
+     the difference between working and not. The child's Channels tab inflates
+     this too and never activates anything, so it looks exactly as it did. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:background="?android:attr/selectableItemBackground"
+    android:background="?android:attr/activatedBackgroundIndicator"
+    android:foreground="?android:attr/selectableItemBackground"
     android:clickable="true"
     android:focusable="true"
     android:paddingStart="20dp"

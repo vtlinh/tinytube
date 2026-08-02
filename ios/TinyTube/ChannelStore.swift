@@ -157,17 +157,36 @@ enum ChannelStore {
     @discardableResult
     static func group(channelIds: [String], name: String) -> Bool {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ChannelGroups.nameError(trimmed, existing: groups().map(\.name)) == nil,
-              channelIds.count >= 2
-        else { return false }
+        guard channelIds.count >= 2 else { return false }
 
-        let id = UUID().uuidString
+        let ids = Set(channelIds)
+        let everything = all()
+        let existing = groups()
+        /* Judged against the names still IN USE afterwards, not every name
+           there is. A group with every member in this selection is emptied by
+           it, so it dissolves and its name comes free — which is what makes
+           "add these to Cartoons" work at all. See ChannelGroups.namesInUse. */
+        guard ChannelGroups.nameError(
+            trimmed,
+            existing: ChannelGroups.namesInUse(groups: existing, all: everything, selectedIds: ids)
+        ) == nil else { return false }
+
+        /* And when that is the case, take the emptied group's ROW rather than
+           inserting a second one: the name column is UNIQUE, so the insert
+           would fail here and tidy() only removes the old group afterwards.
+           Adding a channel to a group would fail with nothing to see. */
+        let absorbed = ChannelGroups.absorbing(
+            trimmed, groups: existing, all: everything, selectedIds: ids
+        )
+        let id = absorbed ?? UUID().uuidString
         do {
             try Database.shared.transaction {
-                try Database.shared.write(
-                    "INSERT INTO groups (group_id, name) VALUES (?, ?)",
-                    [.text(id), .text(trimmed)]
-                )
+                if absorbed == nil {
+                    try Database.shared.write(
+                        "INSERT INTO groups (group_id, name) VALUES (?, ?)",
+                        [.text(id), .text(trimmed)]
+                    )
+                }
                 for channelId in channelIds {
                     try Database.shared.write(
                         "UPDATE channels SET group_id = ? WHERE channel_id = ?",

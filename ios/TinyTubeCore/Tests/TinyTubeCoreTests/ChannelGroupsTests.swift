@@ -131,4 +131,67 @@ final class ChannelGroupsTests: XCTestCase {
         XCTAssertEqual(["c1", "c2"], ChannelGroups.membersOf(cartoons.id, in: all))
         XCTAssertTrue(ChannelGroups.membersOf("nope", in: all).isEmpty)
     }
+
+    /* The other half of prefillName. It offers "Cartoons" for all-of-Cartoons
+       plus a loose channel; if the name were then judged taken, the dialog
+       would refuse the only name it had suggested. */
+    private var allChannels: [Channel] {
+        [
+            ch("c1", "A", group: cartoons.id), ch("c2", "B", group: cartoons.id),
+            ch("c4", "D", group: science.id), ch("c5", "E", group: science.id),
+            ch("c3", "C"),
+        ]
+    }
+
+    func testAGroupBeingWhollyRegroupedFreesItsName() {
+        let groups = [cartoons, science]
+
+        XCTAssertEqual(
+            ["science"],
+            ChannelGroups.namesInUse(groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"]),
+            "all of Cartoons is moving, so Cartoons dissolves and the name is free"
+        )
+        XCTAssertNil(ChannelGroups.nameError(
+            "Cartoons",
+            existing: ChannelGroups.namesInUse(groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"])
+        ))
+
+        XCTAssertEqual(
+            ["Cartoons", "science"],
+            ChannelGroups.namesInUse(groups: groups, all: allChannels, selectedIds: ["c1", "c3"]),
+            "only half of Cartoons is moving, so it keeps its members and its name"
+        )
+        XCTAssertEqual(.taken, ChannelGroups.nameError(
+            "Cartoons",
+            existing: ChannelGroups.namesInUse(groups: groups, all: allChannels, selectedIds: ["c1", "c3"])
+        ))
+    }
+
+    /* And what the store does with that: take the emptied group's row over
+       rather than insert a second one under a UNIQUE name. */
+    func testAnEmptiedGroupsRowIsAbsorbedRatherThanDuplicated() {
+        let groups = [cartoons, science]
+
+        XCTAssertEqual(
+            cartoons.id,
+            ChannelGroups.absorbing("Cartoons", groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"])
+        )
+        XCTAssertEqual(
+            cartoons.id,
+            ChannelGroups.absorbing("  cartoons ", groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"]),
+            "trimmed and case-insensitive, like every other name check"
+        )
+        XCTAssertNil(
+            ChannelGroups.absorbing("Cartoons", groups: groups, all: allChannels, selectedIds: ["c1", "c3"]),
+            "a partly-selected group keeps its name, so there is nothing to absorb"
+        )
+        XCTAssertNil(
+            ChannelGroups.absorbing("Music", groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"]),
+            "a name nobody has is simply new"
+        )
+        XCTAssertNil(
+            ChannelGroups.absorbing("Cartoons", groups: groups, all: [ch("c3", "C")], selectedIds: ["c3"]),
+            "an empty group hands its name to nobody"
+        )
+    }
 }
