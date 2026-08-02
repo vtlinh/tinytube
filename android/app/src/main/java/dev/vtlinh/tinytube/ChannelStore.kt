@@ -185,6 +185,9 @@ data class Channel(
     val handle: String? = null,
     /* the channel's picture, when we managed to find it */
     val avatarUrl: String? = null,
+    /* Which group it belongs to, or null for a loose channel. A group always
+       has at least two of these — see ChannelGroups. */
+    val groupId: String? = null,
 ) {
     /* Where to send the parent's WebView to look at this channel again. The
        id is canonical and always works; a handle can be changed by its owner. */
