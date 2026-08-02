@@ -31,6 +31,12 @@ import kotlinx.coroutines.launch
    This tab is a way to browse what is already allowed, nothing more. */
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        /* Asked for by the update notification. See openSettingsIfAsked. */
+        const val EXTRA_OPEN_SETTINGS = "open_settings"
+    }
+
+
     private lateinit var grid: RecyclerView
     private lateinit var channelList: RecyclerView
     private lateinit var empty: TextView
@@ -96,13 +102,36 @@ class MainActivity : AppCompatActivity() {
         setTab(intent.getIntExtra(BottomTabs.EXTRA_TAB, BottomTabs.VIDEOS))
 
         askForNotificationsIfNeeded()
+        openSettingsIfAsked(intent)
     }
 
-    /* Arriving from About, which sends you back here on a chosen tab. */
+    /* Arriving from About, which sends you back here on a chosen tab — or from
+       the update notification, which asks for settings. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         setTab(intent.getIntExtra(BottomTabs.EXTRA_TAB, tab))
+        openSettingsIfAsked(intent)
+    }
+
+    /* THE UPDATE NOTIFICATION LANDS HERE, NOT ON SETTINGS.
+     *
+     * A notification sits in the shade and on the lock screen, where a child
+     * can reach it, so it cannot be a door into the parent's settings — one of
+     * the things on that screen is how long the player's corner has to be held.
+     * What it can do is ask for the same gate every other way in asks for. So
+     * the tap arrives here, ChallengeActivity runs, and settings opens only on
+     * a RESULT_OK — which is exactly the sequence a parent gets from the grid's
+     * Parent button.
+     *
+     * The extra is consumed rather than left on the intent: setIntent keeps it
+     * for the life of the activity, and a rotation would otherwise re-run the
+     * gate on a screen the parent had already dismissed it from. */
+    private fun openSettingsIfAsked(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) != true) return
+        intent.removeExtra(EXTRA_OPEN_SETTINGS)
+        wantSettings = true
+        parentGate.launch(Intent(this, ChallengeActivity::class.java))
     }
 
     private fun setTab(selected: Int) {
@@ -151,10 +180,21 @@ class MainActivity : AppCompatActivity() {
         if (!stillThere) filter = null
     }
 
+    /* Set when the gate was opened by the update notification rather than by
+       the Parent button, so a pass lands on settings instead of the browser. */
+    private var wantSettings = false
+
     private val parentGate =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val toSettings = wantSettings
+            /* Cleared whatever the answer was. A failed challenge must not
+               leave the request armed for whenever the gate next passes. */
+            wantSettings = false
             if (result.resultCode == Activity.RESULT_OK) {
-                startActivity(Intent(this, ParentActivity::class.java))
+                startActivity(
+                    Intent(this, ParentActivity::class.java)
+                        .putExtra(ParentActivity.EXTRA_OPEN_SETTINGS, toSettings),
+                )
             }
         }
 

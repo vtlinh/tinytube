@@ -32,6 +32,14 @@ import kotlinx.coroutines.launch
  */
 class ParentActivity : AppCompatActivity() {
 
+    companion object {
+        /* Set by MainActivity when the gate was passed on the update
+           notification's behalf, so this opens settings rather than just
+           YouTube. */
+        const val EXTRA_OPEN_SETTINGS = "open_settings"
+    }
+
+
     private var web: WebView? = null
     private lateinit var current: TextView
     private lateinit var addButton: ImageButton
@@ -66,6 +74,22 @@ class ParentActivity : AppCompatActivity() {
            leaves this bar holding only what is used while browsing: the way
            back, and approve. */
         findViewById<ImageButton>(R.id.settings).setOnClickListener {
+            settings.launch(Intent(this, SettingsActivity::class.java))
+        }
+
+        /* Straight on to settings, when the update notification asked for it.
+         *
+         * It arrives here rather than being started directly BECAUSE this is
+         * the screen settings normally opens from: the approved list inside it
+         * can hand back a channel to go and look at, and this is the only
+         * screen that owns a WebView to show it in. Opening SettingsActivity
+         * from anywhere else would leave that one control doing nothing.
+         *
+         * savedInstanceState guards it: without that, a rotation would
+         * re-launch settings over the top of itself. */
+        if (savedInstanceState == null &&
+            intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false)
+        ) {
             settings.launch(Intent(this, SettingsActivity::class.java))
         }
         /* Nothing is loaded yet, so there is certainly no channel to approve.
