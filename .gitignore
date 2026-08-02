@@ -14,6 +14,17 @@ android/local.properties
 # Swift Package Manager build output for ios/TinyTubeCore
 .build/
 
+# Claude Code's local session state. Machine-specific rather than secret, but
+# this repository is public and a blanket `git add -A` would publish it.
+.claude/
+
+# The signing key. It was committed here until this went public; it is a
+# repository secret now, and a DIFFERENT key from the one in the history — see
+# README's "About that committed key". CI writes it out at build time. Keep
+# your own copy here for local release builds, and a copy somewhere durable:
+# lose it and no installed phone can ever be updated again.
+android/signing.p12
+
 # Xcode. The project is GENERATED from ios/project.yml by xcodegen, so it is
 # build output rather than source — see that file for why it isn't committed.
 ios/TinyTube.xcodeproj/
