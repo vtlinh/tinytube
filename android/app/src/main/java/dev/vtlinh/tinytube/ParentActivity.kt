@@ -57,6 +57,30 @@ class ParentActivity : AppCompatActivity() {
             updateApproveButton(web?.url)
         }
 
+    /* Parent mode being on screen is what lets the update notification skip
+       the gate — see ParentSession. */
+    override fun onStart() {
+        super.onStart()
+        ParentSession.started()
+    }
+
+    override fun onStop() {
+        ParentSession.stopped()
+        super.onStop()
+    }
+
+    /* The notification again, arriving while this screen is already open. It
+       comes through MainActivity, which brings this one back to the front with
+       CLEAR_TOP rather than stacking a second copy. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false)) {
+            intent.removeExtra(EXTRA_OPEN_SETTINGS)
+            settings.launch(Intent(this, SettingsActivity::class.java))
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -126,10 +126,34 @@ class MainActivity : AppCompatActivity() {
      *
      * The extra is consumed rather than left on the intent: setIntent keeps it
      * for the life of the activity, and a rotation would otherwise re-run the
-     * gate on a screen the parent had already dismissed it from. */
+     * gate on a screen the parent had already dismissed it from.
+     *
+     * And the gate is skipped when parent mode is ALREADY on screen — see
+     * ParentSession for why that is a count rather than a flag. */
     private fun openSettingsIfAsked(intent: Intent?) {
         if (intent?.getBooleanExtra(EXTRA_OPEN_SETTINGS, false) != true) return
         intent.removeExtra(EXTRA_OPEN_SETTINGS)
+
+        /* ALREADY PAST THE GATE — don't ask twice. A parent looking at parent
+           mode, or at the settings inside it, has just answered this question,
+           and challenging them again for tapping a notification about the
+           screen they are on is nonsense.
+         *
+         * CLEAR_TOP with SINGLE_TOP rather than a plain start: ParentActivity
+         * is already in this task, so this brings it back to the front and
+         * delivers to its onNewIntent instead of stacking a second copy with
+         * its own WebView. */
+        if (ParentSession.isOpen) {
+            startActivity(
+                Intent(this, ParentActivity::class.java)
+                    .putExtra(ParentActivity.EXTRA_OPEN_SETTINGS, true)
+                    .addFlags(
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                    ),
+            )
+            return
+        }
+
         wantSettings = true
         parentGate.launch(Intent(this, ChallengeActivity::class.java))
     }
