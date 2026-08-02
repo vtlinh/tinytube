@@ -47,19 +47,21 @@ final class SchemaTests: XCTestCase {
        table that exists on one and not the other is a bug waiting for whichever
        platform gets the next feature. Pinned by name against Schema.kt. */
     func testTheTablesMatchAndroid() {
-        XCTAssertEqual(Schema.version, 5)
+        XCTAssertEqual(Schema.version, 6)
         XCTAssertEqual(Schema.channels, "channels")
         XCTAssertEqual(Schema.videos, "videos")
         XCTAssertEqual(Schema.watches, "watches")
+        XCTAssertEqual(Schema.groups, "groups")
 
         let all = Schema.statements(from: 0, to: Schema.version).joined(separator: "\n")
-        for table in [Schema.channels, Schema.videos, Schema.watches] {
+        for table in [Schema.channels, Schema.videos, Schema.watches, Schema.groups] {
             XCTAssertTrue(all.contains("CREATE TABLE IF NOT EXISTS \(table)"),
                           "no CREATE TABLE for \(table)")
         }
         /* The columns the pure code depends on, by name. */
         for column in ["channel_id", "added_at", "handle", "avatar_url", "uploads_at",
-                       "video_id", "published_at", "thumb_url", "position", "watched_at"] {
+                       "video_id", "published_at", "thumb_url", "position", "watched_at",
+                       "group_id"] {
             XCTAssertTrue(all.contains(column), "no column \(column)")
         }
     }

@@ -27,6 +27,7 @@ public enum Schema {
        is needed here — no iOS build has ever shipped, so there is no earlier
        file to lose. See the note on Schema.kt's DATABASE. */
 
+    public static let groups = "groups"
     public static let channels = "channels"
     public static let videos = "videos"
     public static let watches = "watches"

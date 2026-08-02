@@ -67,13 +67,6 @@ class ParentActivity : AppCompatActivity() {
             updateApproveButton(web?.url)
         }
 
-    /* Parent mode being on screen is what lets the update notification skip
-       the gate — see ParentSession. */
-    override fun onStart() {
-        super.onStart()
-        ParentSession.started()
-    }
-
     override fun onStop() {
         ParentSession.stopped()
         super.onStop()
@@ -411,10 +404,18 @@ class ParentActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    /* Kept out of onCreate so the hint reads the same on first paint as it
-       does after a page load. */
+    /* ONE onStart, doing both jobs. It was briefly two — the focus one that
+       was always here, and a second added for ParentSession — which does not
+       compile, and is the kind of thing only a compiler catches.
+     *
+     * The focus is kept out of onCreate so the hint reads the same on first
+     * paint as it does after a page load. The ParentSession count is what lets
+     * the update notification skip the gate for a parent who is already past
+     * it; started/stopped rather than created/destroyed, so backgrounding the
+     * app owes the gate again. */
     override fun onStart() {
         super.onStart()
+        ParentSession.started()
         findViewById<View>(R.id.web).requestFocus()
     }
 }

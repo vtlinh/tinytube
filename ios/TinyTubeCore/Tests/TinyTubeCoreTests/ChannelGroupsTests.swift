@@ -174,23 +174,23 @@ final class ChannelGroupsTests: XCTestCase {
 
         XCTAssertEqual(
             cartoons.id,
-            ChannelGroups.absorbing("Cartoons", groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"])
+            ChannelGroups.absorbing(name: "Cartoons", groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"])
         )
         XCTAssertEqual(
             cartoons.id,
-            ChannelGroups.absorbing("  cartoons ", groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"]),
+            ChannelGroups.absorbing(name: "  cartoons ", groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"]),
             "trimmed and case-insensitive, like every other name check"
         )
         XCTAssertNil(
-            ChannelGroups.absorbing("Cartoons", groups: groups, all: allChannels, selectedIds: ["c1", "c3"]),
+            ChannelGroups.absorbing(name: "Cartoons", groups: groups, all: allChannels, selectedIds: ["c1", "c3"]),
             "a partly-selected group keeps its name, so there is nothing to absorb"
         )
         XCTAssertNil(
-            ChannelGroups.absorbing("Music", groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"]),
+            ChannelGroups.absorbing(name: "Music", groups: groups, all: allChannels, selectedIds: ["c1", "c2", "c3"]),
             "a name nobody has is simply new"
         )
         XCTAssertNil(
-            ChannelGroups.absorbing("Cartoons", groups: groups, all: [ch("c3", "C")], selectedIds: ["c3"]),
+            ChannelGroups.absorbing(name: "Cartoons", groups: groups, all: [ch("c3", "C")], selectedIds: ["c3"]),
             "an empty group hands its name to nobody"
         )
     }
