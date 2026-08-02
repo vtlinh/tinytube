@@ -232,4 +232,52 @@ final class LibraryTests: XCTestCase {
         let byChannel = ["UC1": [v("aaaaaaaaaaa")]]
         XCTAssertTrue(Library.forChannel(byChannel: byChannel, channelId: "UC-gone").isEmpty)
     }
+
+    // MARK: - A group's channels, as one grid
+
+    /* Collated ACROSS the group, not one channel's feed after another's. This
+       is what the child's Channels tab shows when a group row is tapped. */
+    func testAGroupsChannelsAreOrderedTogetherNotOneAfterAnother() {
+        let byChannel = [
+            "UC1": [v("aaaaaaaaaaa", at: 100), v("ccccccccccc", at: 300)],
+            "UC2": [v("bbbbbbbbbbb", at: 200)],
+            "UC3": [v("ddddddddddd", at: 400)],
+        ]
+        XCTAssertEqual(
+            ["ccccccccccc", "bbbbbbbbbbb", "aaaaaaaaaaa"],
+            Library.forChannels(byChannel: byChannel, channelIds: ["UC1", "UC2"]).map(\.id)
+        )
+    }
+
+    /* A collaboration, or a re-upload: the same video really does appear in
+       two of the group's channels, and two identical tiles side by side reads
+       as a broken grid. */
+    func testAVideoInTwoOfTheGroupsChannelsAppearsOnce() {
+        let byChannel = [
+            "UC1": [v("aaaaaaaaaaa", at: 100)],
+            "UC2": [v("aaaaaaaaaaa", at: 100), v("bbbbbbbbbbb", at: 50)],
+        ]
+        XCTAssertEqual(
+            ["aaaaaaaaaaa", "bbbbbbbbbbb"],
+            Library.forChannels(byChannel: byChannel, channelIds: ["UC1", "UC2"]).map(\.id)
+        )
+    }
+
+    func testAGroupWhoseChannelsAreAllGoneShowsNothing() {
+        let byChannel = ["UC1": [v("aaaaaaaaaaa")]]
+        XCTAssertTrue(
+            Library.forChannels(byChannel: byChannel, channelIds: ["UC-gone", "UC-also-gone"]).isEmpty
+        )
+        XCTAssertTrue(Library.forChannels(byChannel: byChannel, channelIds: []).isEmpty)
+    }
+
+    /* Ties keep the order the ids were given in, and the ids come from the
+       approved list — the same reason flatten takes an order. */
+    func testTiesFollowTheOrderTheChannelsWereGivenIn() {
+        let byChannel = ["UC1": [v("aaaaaaaaaaa")], "UC2": [v("bbbbbbbbbbb")]]
+        XCTAssertEqual(
+            ["bbbbbbbbbbb", "aaaaaaaaaaa"],
+            Library.forChannels(byChannel: byChannel, channelIds: ["UC2", "UC1"]).map(\.id)
+        )
+    }
 }

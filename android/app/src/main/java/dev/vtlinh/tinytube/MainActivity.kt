@@ -26,9 +26,16 @@ import kotlinx.coroutines.launch
    entire vocabulary of the screen, on purpose.
 
    Note what the Channels tab deliberately does NOT do. It cannot remove a
-   channel and it cannot open YouTube — the approved list is the parental
-   control, and editing it lives behind the gate, in SettingsActivity.
-   This tab is a way to browse what is already allowed, nothing more. */
+   channel, it cannot open YouTube, and it cannot make, rename or break up a
+   group — the approved list is the parental control, and editing it lives
+   behind the gate, in ApprovedChannelsActivity. This tab is a way to browse
+   what is already allowed, nothing more.
+
+   THE GROUPS ARE SHOWN AND THEIR MEMBERS ARE SHOWN TOO. A group is a header
+   that filters to the whole group, with its channels listed individually
+   beneath it — reaching one channel of a group must not cost a child two taps
+   and an idea about how grouping works. Same rows, same order, as the parent's
+   list: ChannelGroups.arrange decides both. */
 class MainActivity : AppCompatActivity() {
 
     companion object {
@@ -47,6 +54,8 @@ class MainActivity : AppCompatActivity() {
     private val adapter = VideoAdapter()
 
     private val channels = mutableListOf<Channel>()
+    private var groups = listOf<ChannelGroups.Group>()
+    private val rows = mutableListOf<ChannelGroups.Row>()
     private val channelAdapter = ChannelAdapter()
 
     /* Everything the app knows, kept per channel so the Channels tab can show
@@ -54,8 +63,19 @@ class MainActivity : AppCompatActivity() {
     private var byChannel: Map<String, List<Video>> = emptyMap()
 
     private var tab = BottomTabs.VIDEOS
-    /* Non-null while the grid is showing one channel rather than all of them. */
-    private var filter: Channel? = null
+    /* Non-null while the grid is narrowed rather than showing everything.
+     *
+     * An ID rather than the thing itself, and the title and the channels are
+     * derived from the current list on every read. That is what makes the
+     * filter heal itself: a channel removed, or a group dissolved down to one
+     * member, stops resolving and the grid widens back out rather than showing
+     * a heading for something that is gone. */
+    private var filter: Filter? = null
+
+    private sealed class Filter {
+        data class OneChannel(val id: String) : Filter()
+        data class OneGroup(val id: String) : Filter()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,12 +104,12 @@ class MainActivity : AppCompatActivity() {
            is not where a parent finds them. Nothing on this screen has a
            hidden action any more. */
 
-        back.setOnClickListener { showChannel(null) }
+        back.setOnClickListener { showFiltered(null) }
 
         BottomTabs.bind(this, tab) { selected ->
             /* Tapping Videos is also how you get back to all of them. There is
                no second gesture to learn and no state to be stuck in. */
-            if (selected == BottomTabs.VIDEOS) showChannel(null)
+            if (selected == BottomTabs.VIDEOS) showFiltered(null)
             setTab(selected)
         }
 
@@ -164,18 +184,43 @@ class MainActivity : AppCompatActivity() {
         render()
     }
 
-    /* Narrow the grid to one channel, or widen it back to all of them. */
-    private fun showChannel(channel: Channel?) {
-        filter = channel
+    /* Narrow the grid to one channel or one group, or widen it back to all of
+       them. Every caller goes through here, so the tab always follows. */
+    private fun showFiltered(to: Filter?) {
+        filter = to
         applyVideos()
         setTab(BottomTabs.VIDEOS)
     }
 
+    /* Which channels the filter covers, in ChannelStore's own order.
+     *
+     * A list rather than a set because that order decides how videos posted at
+     * the same second fall — see Library.forChannels — and ChannelStore's order
+     * is the one the unfiltered grid already resolves ties by. The sort the
+     * parent picked deliberately does NOT come into it: that arranges the
+     * channel LIST, and letting it reorder the video grid would mean the same
+     * two videos swapped places because of a setting about something else.
+     *
+     * Derived from the current list every time, so a filter naming something
+     * that has gone resolves to nothing and the grid widens back out. */
+    private fun filteredChannelIds(): List<String> = when (val f = filter) {
+        null -> emptyList()
+        is Filter.OneChannel -> channels.filter { it.id == f.id }.map { it.id }
+        is Filter.OneGroup -> channels.filter { it.groupId == f.id }.map { it.id }
+    }
+
+    /* What the heading says while the grid is narrowed, or null if the thing
+       it named no longer exists. */
+    private fun filterTitle(): String? = when (val f = filter) {
+        null -> null
+        is Filter.OneChannel -> channels.firstOrNull { it.id == f.id }?.title
+        is Filter.OneGroup -> groups.firstOrNull { it.id == f.id }?.name
+    }
+
     private fun applyVideos() {
-        val f = filter
         val fresh =
-            if (f == null) Library.collate(Library.flatten(byChannel))
-            else Library.forChannel(byChannel, f.id)
+            if (filter == null) Library.collate(Library.flatten(byChannel))
+            else Library.forChannels(byChannel, filteredChannelIds())
         videos.clear()
         videos.addAll(fresh)
         adapter.notifyDataSetChanged()
@@ -183,25 +228,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun reloadChannels() {
+        val store = ChannelStore.get(this)
         channels.clear()
-        /* The same order the parent set on their own list. It is one list, and
-           two orders for it is how a parent ends up unable to find on this
-           screen what they just arranged on the other. Read-only here, like
-           everything else on this tab — the button that changes it is in
-           parent mode. */
-        channels.addAll(
-            ChannelSort.sort(
-                ChannelStore.get(this).all(),
+        channels.addAll(store.all())
+        groups = store.groups()
+
+        /* The same order and the same grouping the parent set on their own
+           list. It is one list, and two arrangements of it is how a parent ends
+           up unable to find on this screen what they just arranged on the
+           other. Read-only here, like everything else on this tab — the screen
+           that changes it is in parent mode. */
+        rows.clear()
+        rows.addAll(
+            ChannelGroups.arrange(
+                channels,
+                groups,
                 SettingsStore.channelSort(this),
                 WatchStore.countsByWindow(this, System.currentTimeMillis()),
             ),
         )
         channelAdapter.notifyDataSetChanged()
-        /* A channel approved and then removed while its videos were on screen
-           would otherwise leave the grid filtered to nothing, with a heading
-           naming something that is gone. */
-        val stillThere = filter?.let { f -> channels.any { it.id == f.id } } ?: true
-        if (!stillThere) filter = null
+
+        /* A channel approved and then removed while its videos were on screen —
+           or a group dissolved because it dropped to one member — would
+           otherwise leave the grid filtered to nothing, with a heading naming
+           something that is gone. */
+        if (filter != null && filterTitle() == null) filter = null
     }
 
     /* Set when the gate was opened by the update notification rather than by
@@ -266,7 +318,7 @@ class MainActivity : AppCompatActivity() {
        those is how an app becomes impossible to leave. */
     @Suppress("OverridingDeprecatedMember", "DEPRECATION")
     override fun onBackPressed() {
-        if (tab == BottomTabs.VIDEOS && filter != null) showChannel(null)
+        if (tab == BottomTabs.VIDEOS && filter != null) showFiltered(null)
         else super.onBackPressed()
     }
 
@@ -275,8 +327,7 @@ class MainActivity : AppCompatActivity() {
        can act on rather than leaving a blank screen. */
     private fun render() {
         val onChannels = tab == BottomTabs.CHANNELS
-        val list = if (onChannels) channels else videos
-        val none = list.isEmpty()
+        val none = if (onChannels) rows.isEmpty() else videos.isEmpty()
 
         grid.visibility = if (!onChannels && !none) View.VISIBLE else View.GONE
         channelList.visibility = if (onChannels && !none) View.VISIBLE else View.GONE
@@ -285,14 +336,17 @@ class MainActivity : AppCompatActivity() {
         empty.setText(if (onChannels) R.string.channels_empty else R.string.empty_catalog)
 
         /* The heading says which of the three things you are looking at:
-           everything, one channel, or the channel list. */
-        val f = filter
+           everything, one channel or group, or the channel list. A group reads
+           the same as a channel does — "Showing Cartoons" — because from the
+           grid's side they are the same thing: a narrower set of videos with a
+           name and a way back. */
+        val narrowedTo = filterTitle()
         header.text = when {
             onChannels -> getString(R.string.channels_title)
-            f != null -> getString(R.string.showing_channel, f.title)
+            narrowedTo != null -> getString(R.string.showing_channel, narrowedTo)
             else -> getString(R.string.app_name)
         }
-        val showBack = !onChannels && f != null
+        val showBack = !onChannels && narrowedTo != null
         back.visibility = if (showBack) View.VISIBLE else View.GONE
         /* With the arrow up, the title sits where a title sits next to a nav
            control. Without it, the title carries the bar's start inset itself
@@ -357,25 +411,68 @@ class MainActivity : AppCompatActivity() {
     /* The Channels tab. The same row layout parent mode uses, with the remove
        button taken out — this side of the app may look at the approved list
        but not change it. */
-    private inner class ChannelAdapter : RecyclerView.Adapter<ChannelHolder>() {
-        init { setHasStableIds(true) }
+    /* Two kinds of row, the same two the parent's list has — and drawn from
+       the same ChannelGroups.arrange, so the two screens cannot drift apart.
+       What differs is what a tap does and what is missing: no remove button, no
+       long press, no selection. */
+    private inner class ChannelAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
-        override fun getItemId(position: Int) = channels[position].id.hashCode().toLong()
-        override fun getItemCount() = channels.size
+        override fun getItemCount() = rows.size
 
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = ChannelHolder(
-            LayoutInflater.from(parent.context)
-                .inflate(R.layout.item_approved_channel, parent, false),
-        )
+        override fun getItemViewType(position: Int) = when (rows[position]) {
+            is ChannelGroups.Row.Header -> TYPE_GROUP
+            is ChannelGroups.Row.Item -> TYPE_CHANNEL
+        }
 
-        override fun onBindViewHolder(holder: ChannelHolder, position: Int) {
-            val channel = channels[position]
+        override fun onCreateViewHolder(
+            parent: ViewGroup,
+            viewType: Int,
+        ): RecyclerView.ViewHolder {
+            val inflater = LayoutInflater.from(parent.context)
+            return if (viewType == TYPE_GROUP) {
+                GroupHolder(inflater.inflate(R.layout.item_channel_group, parent, false))
+            } else {
+                ChannelHolder(inflater.inflate(R.layout.item_approved_channel, parent, false))
+            }
+        }
+
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            when (val row = rows[position]) {
+                is ChannelGroups.Row.Header -> bindGroup(holder as GroupHolder, row)
+                is ChannelGroups.Row.Item -> bindChannel(holder as ChannelHolder, row)
+            }
+        }
+
+        /* Tapping a group shows every channel in it at once. Its members are
+           listed underneath as well, so this is a shortcut rather than the only
+           way in — a child who wants one channel of a group does not have to
+           understand grouping to reach it. */
+        private fun bindGroup(holder: GroupHolder, row: ChannelGroups.Row.Header) {
+            holder.name.text = row.group.name
+            holder.size.text = getString(R.string.group_size, row.size)
+            holder.itemView.setOnClickListener {
+                showFiltered(Filter.OneGroup(row.group.id))
+            }
+        }
+
+        private fun bindChannel(holder: ChannelHolder, row: ChannelGroups.Row.Item) {
+            val channel = row.channel
             holder.title.text = channel.title
             holder.subtitle.text = channel.handle?.let { "@$it" } ?: channel.id
             /* Not merely hidden — GONE, so it takes no space and cannot be
                reached by touch exploration either. */
             holder.remove.visibility = View.GONE
-            holder.itemView.setOnClickListener { showChannel(channel) }
+            holder.itemView.setOnClickListener { showFiltered(Filter.OneChannel(channel.id)) }
+
+            /* Members are indented under their header. Without it the header
+               reads as a divider above an unrelated list rather than as
+               something these rows are inside. */
+            holder.itemView.setPaddingRelative(
+                if (row.grouped) GROUPED_INDENT_DP.dp() else ROW_START_DP.dp(),
+                holder.itemView.paddingTop,
+                holder.itemView.paddingEnd,
+                holder.itemView.paddingBottom,
+            )
 
             val url = channel.avatarUrl
             holder.avatar.setImageDrawable(null)
@@ -389,6 +486,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
+
+    private class GroupHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val name: TextView = view.findViewById(R.id.group_name)
+        val size: TextView = view.findViewById(R.id.group_size)
+    }
+
     private class ChannelHolder(view: View) : RecyclerView.ViewHolder(view) {
         val avatar: ImageView = view.findViewById(R.id.avatar)
         val title: TextView = view.findViewById(R.id.title)
@@ -396,3 +500,13 @@ class MainActivity : AppCompatActivity() {
         val remove: View = view.findViewById(R.id.remove)
     }
 }
+
+private const val TYPE_GROUP = 0
+private const val TYPE_CHANNEL = 1
+
+/* item_approved_channel's own paddingStart, and the indent a grouped row gets
+   instead — the same two numbers ApprovedChannelsActivity uses, because the two
+   lists must line up. Set in code rather than in the layout because one view is
+   drawn either way and a recycled row has to be told which it is. */
+private const val ROW_START_DP = 20
+private const val GROUPED_INDENT_DP = 46

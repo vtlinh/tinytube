@@ -184,4 +184,54 @@ class LibraryTest {
             Library.forChannel(byChannel, "UC1").map { it.id },
         )
     }
+
+    /* ---- a group's channels, as one grid ---- */
+
+    /* Collated ACROSS the group, not one channel's feed after another's. This
+       is what the child's Channels tab shows when a group row is tapped. */
+    @Test fun `a group's channels are ordered together, not one after another`() {
+        val byChannel = linkedMapOf(
+            "UC1" to listOf(v("aaaaaaaaaaa", at = 100), v("ccccccccccc", at = 300)),
+            "UC2" to listOf(v("bbbbbbbbbbb", at = 200)),
+            "UC3" to listOf(v("ddddddddddd", at = 400)),
+        )
+        assertEquals(
+            listOf("ccccccccccc", "bbbbbbbbbbb", "aaaaaaaaaaa"),
+            Library.forChannels(byChannel, listOf("UC1", "UC2")).map { it.id },
+        )
+    }
+
+    /* A collaboration, or a re-upload: the same video really does appear in
+       two of the group's channels, and two identical tiles side by side reads
+       as a broken grid. */
+    @Test fun `a video in two of the group's channels appears once`() {
+        val byChannel = linkedMapOf(
+            "UC1" to listOf(v("aaaaaaaaaaa", at = 100)),
+            "UC2" to listOf(v("aaaaaaaaaaa", at = 100), v("bbbbbbbbbbb", at = 50)),
+        )
+        assertEquals(
+            listOf("aaaaaaaaaaa", "bbbbbbbbbbb"),
+            Library.forChannels(byChannel, listOf("UC1", "UC2")).map { it.id },
+        )
+    }
+
+    @Test fun `a group whose channels are all gone shows nothing, not everything`() {
+        val byChannel = linkedMapOf("UC1" to listOf(v("aaaaaaaaaaa")))
+        assertTrue(Library.forChannels(byChannel, listOf("UC-gone", "UC-also-gone")).isEmpty())
+        assertTrue(Library.forChannels(byChannel, emptyList()).isEmpty())
+    }
+
+    /* Ties keep the order the ids were given in, and the ids come from the
+       approved list. Both platforms have to agree on that sequence, which is
+       why forChannels takes an ordered list rather than a set. */
+    @Test fun `ties follow the order the channels were given in`() {
+        val byChannel = linkedMapOf(
+            "UC1" to listOf(v("aaaaaaaaaaa")),
+            "UC2" to listOf(v("bbbbbbbbbbb")),
+        )
+        assertEquals(
+            listOf("bbbbbbbbbbb", "aaaaaaaaaaa"),
+            Library.forChannels(byChannel, listOf("UC2", "UC1")).map { it.id },
+        )
+    }
 }

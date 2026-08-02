@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Two bars in one, swapped by visibility rather than by a second menu file.
+
+     Ordinary: the sort button, cycling the three orders. See ChannelSort.
+     Selecting: Group and Ungroup, each shown only when the selection allows it
+     — ChannelGroups.canGroup and canUngroup decide, not this file. -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_ungroup"
+        android:icon="@drawable/ic_ungroup"
+        android:title="@string/group_ungroup"
+        android:visible="false"
+        app:showAsAction="always" />
+
+    <item
+        android:id="@+id/action_group"
+        android:icon="@drawable/ic_group"
+        android:title="@string/group_selected"
+        android:visible="false"
+        app:showAsAction="always" />
+
+    <item
+        android:id="@+id/action_sort"
+        android:icon="@drawable/ic_sort"
+        android:title="@string/parent_sort"
+        app:showAsAction="always" />
+
+    <!-- What approving a channel actually commits to. It was a ? beside this
+         list's heading while the list lived in settings, and losing it with the
+         move would have quietly dropped the only place the app says that
+         approving a channel approves whatever it posts next. Same words, same
+         Tooltip. -->
+    <item
+        android:id="@+id/action_help"
+        android:icon="@drawable/ic_help"
+        android:title="@string/parent_approved_explain_title"
+        app:showAsAction="always" />
+
+</menu>

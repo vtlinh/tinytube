@@ -135,4 +135,62 @@ class ChannelGroupsTest {
         assertEquals(setOf("c1", "c2"), ChannelGroups.membersOf(cartoons.id, all))
         assertTrue(ChannelGroups.membersOf("nope", all).isEmpty())
     }
+
+    /* The other half of prefillName. It offers "Cartoons" for all-of-Cartoons
+       plus a loose channel; if the name were then judged taken, the dialog
+       would refuse the only name it had suggested. */
+    private val allChannels = listOf(
+        ch("c1", "A", cartoons.id), ch("c2", "B", cartoons.id),
+        ch("c4", "D", science.id), ch("c5", "E", science.id),
+        ch("c3", "C"),
+    )
+
+    @Test fun `a group being wholly regrouped frees its name`() {
+        val groups = listOf(cartoons, science)
+
+        assertEquals(
+            "all of Cartoons is moving, so Cartoons dissolves and the name is free",
+            listOf("science"),
+            ChannelGroups.namesInUse(groups, allChannels, setOf("c1", "c2", "c3")),
+        )
+        assertNull(
+            ChannelGroups.nameError(
+                "Cartoons",
+                ChannelGroups.namesInUse(groups, allChannels, setOf("c1", "c2", "c3")),
+            ),
+        )
+
+        assertEquals(
+            "only half of Cartoons is moving, so it keeps its members and its name",
+            listOf("Cartoons", "science"),
+            ChannelGroups.namesInUse(groups, allChannels, setOf("c1", "c3")),
+        )
+        assertEquals(
+            ChannelGroups.NameError.TAKEN,
+            ChannelGroups.nameError(
+                "Cartoons",
+                ChannelGroups.namesInUse(groups, allChannels, setOf("c1", "c3")),
+            ),
+        )
+    }
+
+    /* And what the store does with that: take the emptied group's row over
+       rather than insert a second one under a UNIQUE name. */
+    @Test fun `an emptied group's row is absorbed rather than duplicated`() {
+        val groups = listOf(cartoons, science)
+
+        assertEquals(
+            cartoons.id,
+            ChannelGroups.absorbing("Cartoons", groups, allChannels, setOf("c1", "c2", "c3")),
+        )
+        assertEquals("trimmed and case-insensitive, like every other name check",
+            cartoons.id,
+            ChannelGroups.absorbing("  cartoons ", groups, allChannels, setOf("c1", "c2", "c3")))
+        assertNull("a partly-selected group keeps its name, so there is nothing to absorb",
+            ChannelGroups.absorbing("Cartoons", groups, allChannels, setOf("c1", "c3")))
+        assertNull("a name nobody has is simply new",
+            ChannelGroups.absorbing("Music", groups, allChannels, setOf("c1", "c2", "c3")))
+        assertNull("an empty group hands its name to nobody",
+            ChannelGroups.absorbing("Cartoons", groups, listOf(ch("c3", "C")), setOf("c3")))
+    }
 }

@@ -86,4 +86,23 @@ object Library {
        show nothing, not the whole library. */
     fun forChannel(byChannel: Map<String, List<Video>>, channelId: String): List<Video> =
         collate(byChannel[channelId].orEmpty())
+
+    /* A group's uploads: several channels' feeds as one grid, collated
+       together rather than one channel's after another's.
+     *
+     * That collation is the whole reason this exists instead of the caller
+     * calling forChannel in a loop and concatenating. The same video in two of
+     * the group's channels — a collaboration, a re-upload — would otherwise
+     * appear twice, and the result would be sorted only within each channel.
+     *
+     * `channelIds` is ORDERED, for the same reason flatten takes an order: ties
+     * keep the order they arrived in, so the sequence has to be one both
+     * platforms agree on rather than whatever a map iterates in. Ids naming no
+     * feed contribute nothing, so a group whose channels are all gone gives an
+     * empty grid rather than the whole library. */
+    fun forChannels(byChannel: Map<String, List<Video>>, channelIds: List<String>): List<Video> {
+        val out = mutableListOf<Video>()
+        for (id in channelIds) out += byChannel[id].orEmpty()
+        return collate(out)
+    }
 }

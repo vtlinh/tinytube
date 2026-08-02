@@ -74,6 +74,14 @@
             android:exported="false"
             android:label="@string/settings_title" />
 
+        <!-- And the same rule again. This one edits ChannelStore, which IS the
+             parental control, so it is the last screen in the app that may be
+             reachable without the gate. Started only from parent mode's bar. -->
+        <activity
+            android:name=".ApprovedChannelsActivity"
+            android:exported="false"
+            android:label="@string/parent_approved_title" />
+
         <receiver
             android:name=".UpdateReceiver"
             android:exported="false">

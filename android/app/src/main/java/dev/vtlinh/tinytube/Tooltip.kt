@@ -42,7 +42,12 @@ object Tooltip {
         attach(anchor, anchor.context.getString(textId))
     }
 
-    private fun show(anchor: View, text: CharSequence) {
+    /* Public because a toolbar ACTION is a ? too — see
+       ApprovedChannelsActivity. Its view belongs to the menu and already has
+       the toolbar's own click listener on it, so attach() would replace the
+       thing that dispatches the menu item; the popup is shown from the item's
+       handler instead, anchored to the same view. */
+    fun show(anchor: View, text: CharSequence) {
         val context: Context = anchor.context
         val body = LayoutInflater.from(context).inflate(R.layout.view_tooltip, null)
         body.findViewById<TextView>(R.id.tooltip_text).text = text

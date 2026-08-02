@@ -44,25 +44,28 @@ class ParentActivity : AppCompatActivity() {
     private lateinit var current: TextView
     private lateinit var addButton: ImageButton
 
-    /* Settings, which now holds the approved list too — so it can hand back a
-       channel to go and look at, forwarded up from that list. This screen owns
-       the WebView, so it is the only one that can act on it. */
+    /* Settings. Nothing comes back from it any more — the approved list moved
+       out into a screen of its own — but channels can still have been removed
+       from the list this screen opens, so the approve button is re-read either
+       way. */
     private val settings =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            updateApproveButton(web?.url)
+        }
+
+    /* The approved list, which hands back a channel to go and look at. This
+       screen owns the WebView, so it is the only one that can act on it —
+       which is also why the list is opened from here rather than from
+       anywhere else. */
+    private val approvedList =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
-                result.data?.getStringExtra(SettingsActivity.EXTRA_OPEN_URL)
+                result.data?.getStringExtra(ApprovedChannelsActivity.EXTRA_OPEN_URL)
                     ?.let { web?.loadUrl(it) }
             }
             /* Channels may have been removed while it was open. */
             updateApproveButton(web?.url)
         }
-
-    /* Parent mode being on screen is what lets the update notification skip
-       the gate — see ParentSession. */
-    override fun onStart() {
-        super.onStart()
-        ParentSession.started()
-    }
 
     override fun onStop() {
         ParentSession.stopped()
@@ -90,24 +93,21 @@ class ParentActivity : AppCompatActivity() {
         addButton = findViewById(R.id.add_channel)
 
         findViewById<Button>(R.id.kids_mode).setOnClickListener { finish() }
-        /* No gate of its own: getting here already required one. Everything on
-           this side of ChallengeActivity is already past it.
-
-           The approved list is inside settings now rather than beside it. It is
-           a parent control and every other one already lived there, and it
-           leaves this bar holding only what is used while browsing: the way
-           back, and approve. */
+        /* Neither has a gate of its own: getting here already required one, and
+           everything on this side of ChallengeActivity is already past it. */
+        findViewById<ImageButton>(R.id.approved_list).setOnClickListener {
+            approvedList.launch(Intent(this, ApprovedChannelsActivity::class.java))
+        }
         findViewById<ImageButton>(R.id.settings).setOnClickListener {
             settings.launch(Intent(this, SettingsActivity::class.java))
         }
 
         /* Straight on to settings, when the update notification asked for it.
          *
-         * It arrives here rather than being started directly BECAUSE this is
-         * the screen settings normally opens from: the approved list inside it
-         * can hand back a channel to go and look at, and this is the only
-         * screen that owns a WebView to show it in. Opening SettingsActivity
-         * from anywhere else would leave that one control doing nothing.
+         * It arrives here rather than being started directly because this is
+         * parent mode: closing settings should leave the parent in it, with
+         * the bar and the browser, rather than back on the child's grid having
+         * passed a challenge for nothing.
          *
          * savedInstanceState guards it: without that, a rotation would
          * re-launch settings over the top of itself. */
@@ -404,10 +404,18 @@ class ParentActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    /* Kept out of onCreate so the hint reads the same on first paint as it
-       does after a page load. */
+    /* ONE onStart, doing both jobs. It was briefly two — the focus one that
+       was always here, and a second added for ParentSession — which does not
+       compile, and is the kind of thing only a compiler catches.
+     *
+     * The focus is kept out of onCreate so the hint reads the same on first
+     * paint as it does after a page load. The ParentSession count is what lets
+     * the update notification skip the gate for a parent who is already past
+     * it; started/stopped rather than created/destroyed, so backgrounding the
+     * app owes the gate again. */
     override fun onStart() {
         super.onStart()
+        ParentSession.started()
         findViewById<View>(R.id.web).requestFocus()
     }
 }

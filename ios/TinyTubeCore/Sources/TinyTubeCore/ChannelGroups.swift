@@ -121,6 +121,54 @@ public enum ChannelGroups {
         return groups.first { $0.id == groupId }?.name
     }
 
+    /* Group names a new group may NOT take, given what is selected.
+     *
+     * Not simply "every name": a group with every one of its members in the
+     * selection is about to be emptied, so it dissolves and its name comes
+     * free. That is precisely the case prefillName fills the box for — all of
+     * Cartoons plus a loose channel, named Cartoons — and judging it against
+     * the raw list would refuse the one name the parent was offered. */
+    public static func namesInUse(
+        groups: [Group],
+        all: [Channel],
+        selectedIds: Set<String>
+    ) -> [String] {
+        groups.filter { !emptiedBy($0, all: all, selectedIds: selectedIds) }.map(\.name)
+    }
+
+    /* The group whose ROW a new group of this name should take over, or nil
+     * for a genuinely new one.
+     *
+     * Only one qualifies, and it is the same one namesInUse forgives: same
+     * name, every member selected. Reusing the row rather than inserting a
+     * second one is not tidiness — the name column is UNIQUE, so the insert
+     * would abort, and the tidy that dissolves the emptied group only runs
+     * afterwards. Adding a channel to a group would fail with no explanation.
+     *
+     * A partly-selected group does NOT qualify. It keeps members, keeps its
+     * name, and that name is genuinely taken. */
+    public static func absorbing(
+        name: String,
+        groups: [Group],
+        all: [Channel],
+        selectedIds: Set<String>
+    ) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return groups.first {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare(trimmed) == .orderedSame
+                && emptiedBy($0, all: all, selectedIds: selectedIds)
+        }?.id
+    }
+
+    private static func emptiedBy(_ group: Group, all: [Channel], selectedIds: Set<String>) -> Bool {
+        let members = membersOf(group.id, in: all)
+        /* The non-empty guard covers a group with no members at all — it should
+           not exist, and treating "nothing left to move" as "fully selected"
+           would hand its name to any selection at all. */
+        return !members.isEmpty && selectedIds.isSuperset(of: members)
+    }
+
     // MARK: - The name, as the dialog judges it
 
     public enum NameError: Equatable {
