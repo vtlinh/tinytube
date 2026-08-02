@@ -176,7 +176,7 @@ enum ChannelStore {
            would fail here and tidy() only removes the old group afterwards.
            Adding a channel to a group would fail with nothing to see. */
         let absorbed = ChannelGroups.absorbing(
-            trimmed, groups: existing, all: everything, selectedIds: ids
+            name: trimmed, groups: existing, all: everything, selectedIds: ids
         )
         let id = absorbed ?? UUID().uuidString
         do {
