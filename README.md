@@ -152,20 +152,43 @@ numbers re-rolled on every wrong answer so guesses can't converge. That
 fallback is a speed bump rather than a lock — if it is what your device gets,
 setting a screen lock is the fix.
 
+## The approved channels
+
+The list button sits second-from-last in parent mode's bar, and opens the
+approved channels on a screen of their own. The bar reads **← Kids mode**, then
+a gap, then **+/−**, the list, and the gear last — the same on both platforms,
+so a parent moving between the two apps finds the same controls in the same
+places.
+
+Tapping a channel goes back to it in parent mode. The **✕** removes it, and
+removing takes everything that channel put on the device with it: its videos,
+its watch history, and its cached pictures.
+
+**Channels can be grouped.** Long-press to start selecting, pick two or more,
+and tap **Group**; the name is asked for on the way in, and a name that is blank
+or already taken disables the button with the reason under the field rather than
+failing after the tap. Selecting everything in one group offers **Ungroup**
+instead — which takes them out of the group without un-approving anything.
+
+A group always has at least two channels. One that drops to a single member
+dissolves, and that member becomes an ordinary loose channel again; there is no
+such thing as a group of one, so nothing has to explain what that would mean.
+
+Groups lead the list, A–Z among themselves, whatever order you picked for the
+channels — a group is not "recently added" and you want it where it was last
+time. The order you picked arranges the channels themselves: inside each group,
+and in the loose list below.
+
+The child's Channels tab shows the same arrangement, read-only. Tapping a group
+narrows the grid to everything in it; each of its channels is still listed
+individually, so reaching one of them never depends on understanding what a
+group is.
+
 ## Settings
 
 The gear is the last control in parent mode's bar, and holds the parent's
-choices, the version number, the update controls where there are any, and — at
-the bottom, below all of them — the approved channels. Both platforms order it
-that way, so a parent moving between the two apps finds the same screen; the
-bar itself is **← Kids mode**, then a gap, then **+/−**, then the gear, on
-both. (iOS has no update controls to place — see **Platform differences**.)
-
-The channel list is inline, at the bottom. It was a button opening a screen of
-its own for one build, and a whole screen — toolbar, up arrow, overflow menu —
-to show three or four rows was more furniture than list. What a parent opens
-settings to check is usually just *what is approved*, and that is now answered
-by looking.
+choices, the version number, and the update controls where there are any. (iOS
+has no update controls to place — see **Platform differences**.)
 
 **Every explanation is behind the ? beside its heading.** They used to sit under
 the headings in grey, permanently, which meant a parent scrolling for the hold
@@ -217,6 +240,7 @@ before anything is published:
 | `Library.kt` | how uploads become the grid, and its order |
 | `Playlist.kt` | what plays after a video ends |
 | `ChannelSort.kt` | what order the approved channels are listed in |
+| `ChannelGroups.kt` | how channels gather into groups, and when one dissolves |
 | `Chrome.kt` | where YouTube's seek bar is, from the pixels |
 
 Two of them matter most:

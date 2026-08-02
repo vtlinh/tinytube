@@ -21,7 +21,17 @@ struct ParentView: View {
     let onClose: () -> Void
 
     @State private var currentURL = YouTubeUrls.parentStart
-    @State private var showSettings = false
+    /* ONE sheet modifier, selected by this, rather than two chained
+       `.sheet(isPresented:)`. Two of those on the same view is the same trap
+       two `.alert`s are — the second silently never presents — and the symptom
+       is a bar button that appears to do nothing. See SettingsView. */
+    @State private var sheet: Sheet?
+
+    private enum Sheet: Int, Identifiable {
+        case approvedList
+        case settings
+        var id: Int { rawValue }
+    }
     @State private var reloadToken = UUID()
     @State private var working = false
     @State private var message: String?
@@ -54,15 +64,21 @@ struct ParentView: View {
         }
         .background(Color.black)
         .onChange(of: currentURL) { _ in refreshApprovedState() }
-        /* The approved list lives inside settings now, so the channel it hands
-           back arrives through here. This screen owns the web view and is the
-           only one that can act on it — settings is a pass-through for that one
-           value, exactly as SettingsActivity is on Android. */
-        .sheet(isPresented: $showSettings, onDismiss: refreshApprovedState) {
-            SettingsView { channel in
-                showSettings = false
-                currentURL = channel.url
-                reloadToken = UUID()
+        /* The approved list hands back a channel to go and look at. This screen
+           owns the web view and is the only one that can act on it, which is
+           also why the list is opened from here. Nothing comes back from
+           settings, but either can have removed a channel, so the + is re-read
+           on both dismissals. */
+        .sheet(item: $sheet, onDismiss: refreshApprovedState) { which in
+            switch which {
+            case .approvedList:
+                ApprovedChannelsView { channel in
+                    sheet = nil
+                    currentURL = channel.url
+                    reloadToken = UUID()
+                }
+            case .settings:
+                SettingsView()
             }
         }
     }
@@ -70,8 +86,8 @@ struct ParentView: View {
     private var bar: some View {
         HStack(spacing: 14) {
             /* SAME ORDER AND SAME WORDING AS ANDROID, left to right: the way
-               out, a gap, then settings, the approved list, and approve last.
-               These were mirrored here — approve, list, settings — and the exit
+               out, a gap, then approve, the approved list, and settings LAST.
+               These were mirrored here once — settings first — and the exit
                said "Done", so a parent moving between the two apps found the
                same bar with its controls in the opposite order and its first
                button renamed. Android is the one that ships; it is the
@@ -95,7 +111,15 @@ struct ParentView: View {
             .disabled(!onChannelPage || working)
             .accessibilityLabel(approvedHere ? "Remove channel" : "Approve channel")
 
-            Button { showSettings = true } label: {
+            /* The approved list, back on this bar. It was folded into settings
+               while it was a flat column of rows; it has a selection mode and a
+               two-state title now, which is a screen rather than a section. */
+            Button { sheet = .approvedList } label: {
+                Image(systemName: "list.bullet").font(.title3)
+            }
+            .accessibilityLabel("Approved channels")
+
+            Button { sheet = .settings } label: {
                 Image(systemName: "gearshape").font(.title3)
             }
             .accessibilityLabel("Settings")

@@ -9,10 +9,17 @@ import TinyTubeCore
    and nothing here has a hidden one: no search, no text entry, no link out.
 
    THE CHANNELS TAB IS READ-ONLY. It shows the approved list and narrows the
-   grid to one channel. It cannot remove a channel and it cannot open YouTube —
+   grid to one channel, or to a whole group. It cannot remove a channel, it
+   cannot open YouTube, and it cannot make, rename or break up a group —
    `ChannelStore` is the parental control and editing it lives behind the gate,
-   in SettingsView. Don't give this one an action that changes what is
-   approved. */
+   in ApprovedChannelsView. Don't give this one an action that changes what is
+   approved.
+
+   THE GROUPS ARE SHOWN AND THEIR MEMBERS ARE SHOWN TOO. A group is a header
+   that filters to the whole group, with its channels listed individually
+   beneath it — reaching one channel of a group must not cost a child two taps
+   and an idea about how grouping works. Same rows, same order, as the parent's
+   list: `ChannelGroups.arrange` decides both. */
 struct MainView: View {
 
     enum Tab { case videos, channels }
@@ -20,13 +27,27 @@ struct MainView: View {
     @State private var tab: Tab = .videos
     @State private var byChannel: [String: [Video]] = [:]
     @State private var channels: [Channel] = []
-    /* Approved order, kept separately from `channels` — that one is in the
-       parent's chosen sort, which must not reshuffle the grid. */
+    @State private var groups: [ChannelGroups.Group] = []
+    @State private var rows: [ChannelGroups.Row] = []
+    /* Approved order — ChannelStore's, which is what the grid resolves ties
+       by. Kept as its own array because `rows` is in the parent's chosen sort
+       and grouped besides, and neither of those may reshuffle the grid. */
     @State private var channelOrder: [String] = []
     @State private var sortMode: ChannelSort.Mode = .lastAdded
     @State private var sortWindow: Int?
-    /* nil is the whole grid; a channel id narrows it. */
-    @State private var filter: String?
+    /* nil is the whole grid; a channel or a group narrows it.
+     *
+     * An ID rather than the thing itself, with the title and the channels
+     * derived from the current list on every read. That is what makes the
+     * filter heal itself: a channel removed, or a group dissolved down to one
+     * member, stops resolving and the grid widens back out rather than heading
+     * itself after something that is gone. */
+    @State private var filter: Filter?
+
+    private enum Filter: Equatable {
+        case channel(String)
+        case group(String)
+    }
     @State private var playing: PlayingList?
     @State private var gating = false
     @State private var showChallenge = false
@@ -38,17 +59,36 @@ struct MainView: View {
         let index: Int
     }
 
-    /* The whole grid, or one channel's. `forChannel` collates on its own; the
-       whole-grid path needs flatten AND collate, and the order handed to
-       flatten is the approved list's — see ChannelFeeds.channelOrder for why
-       that order matters even though collate re-sorts. */
+    /* The whole grid, or one channel's, or one group's. `forChannels` collates
+       on its own; the whole-grid path needs flatten AND collate, and the order
+       handed to either is the approved list's — see ChannelFeeds.channelOrder
+       for why that order matters even though collate re-sorts. */
     private var visible: [Video] {
-        guard let filter else {
+        guard filter != nil else {
             return Library.collate(
                 Library.flatten(byChannel: byChannel, channelOrder: channelOrder)
             )
         }
-        return Library.forChannel(byChannel: byChannel, channelId: filter)
+        return Library.forChannels(byChannel: byChannel, channelIds: filteredChannelIds)
+    }
+
+    /* Which channels the filter covers, in ChannelStore's own order.
+     *
+     * That order decides how videos posted at the same second fall — see
+     * Library.forChannels — and it is the one the unfiltered grid already
+     * resolves ties by. The sort the parent picked deliberately does NOT come
+     * into it: that arranges the channel LIST, and letting it reorder the video
+     * grid would mean two videos swapped places because of a setting about
+     * something else. */
+    private var filteredChannelIds: [String] {
+        guard let filter else { return [] }
+        switch filter {
+        case .channel(let id):
+            return channelOrder.filter { $0 == id }
+        case .group(let id):
+            let members = ChannelGroups.membersOf(id, in: channels)
+            return channelOrder.filter { members.contains($0) }
+        }
     }
 
     var body: some View {
@@ -108,10 +148,18 @@ struct MainView: View {
         .padding(.vertical, 10)
     }
 
-    private var filterTitle: String {
-        guard let filter, let channel = channels.first(where: { $0.id == filter })
-        else { return "TinyTube" }
-        return channel.title
+    private var filterTitle: String { narrowedTo ?? "TinyTube" }
+
+    /* What the heading says while the grid is narrowed, or nil if the thing it
+       named no longer exists. A group reads the same as a channel does, because
+       from the grid's side they are the same thing: a narrower set of videos
+       with a name and a way back. */
+    private var narrowedTo: String? {
+        guard let filter else { return nil }
+        switch filter {
+        case .channel(let id): return channels.first { $0.id == id }?.title
+        case .group(let id): return groups.first { $0.id == id }?.name
+        }
     }
 
     private var bottomTabs: some View {
@@ -234,14 +282,12 @@ struct MainView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                 }
-                ForEach(channels) { channel in
-                    Button {
-                        filter = channel.id
-                        tab = .videos
-                    } label: {
-                        channelRow(channel)
-                    }
-                    .buttonStyle(.plain)
+                /* Indexed rather than by identity: a Row is a header or a
+                   channel, and the two have no id in common. The array is
+                   rebuilt whole on every reload anyway, so there is no
+                   incremental diff for an identity to serve. */
+                ForEach(rows.indices, id: \.self) { index in
+                    listRow(rows[index])
                     Divider().overlay(Color.white.opacity(0.06))
                 }
             }
@@ -264,7 +310,56 @@ struct MainView: View {
         return "Most watched"
     }
 
-    private func channelRow(_ channel: Channel) -> some View {
+    /* Two kinds of row, the same two the parent's list has — and drawn from the
+       same ChannelGroups.arrange, so the two screens cannot drift apart. What
+       differs is what a tap does and what is missing: no remove, no long press,
+       no selection. */
+    @ViewBuilder
+    private func listRow(_ row: ChannelGroups.Row) -> some View {
+        switch row {
+        case .header(let group, let size):
+            /* Tapping a group shows every channel in it at once. Its members
+               are listed underneath as well, so this is a shortcut rather than
+               the only way in — a child who wants one channel of a group does
+               not have to understand grouping to reach it. */
+            Button {
+                filter = .group(group.id)
+                tab = .videos
+            } label: {
+                groupRow(name: group.name, size: size)
+            }
+            .buttonStyle(.plain)
+        case .item(let channel, let grouped):
+            Button {
+                filter = .channel(channel.id)
+                tab = .videos
+            } label: {
+                channelRow(channel, grouped: grouped)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func groupRow(name: String, size: Int) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder.fill")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Text(name)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Spacer()
+            Text("\(size) channels")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+    }
+
+    private func channelRow(_ channel: Channel, grouped: Bool) -> some View {
         HStack(spacing: 12) {
             /* scaledToFill, not a bare resizable: an avatar that is not
                square would otherwise be stretched into the circle rather than
@@ -285,7 +380,11 @@ struct MainView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 16)
+        /* Members are indented under their header. Without it the header reads
+           as a divider above an unrelated list rather than as something these
+           rows are inside. Matches MainActivity's GROUPED_INDENT_DP. */
+        .padding(.leading, grouped ? 46 : 16)
+        .padding(.trailing, 16)
         .padding(.vertical, 10)
     }
 
@@ -320,13 +419,22 @@ struct MainView: View {
         let approved = ChannelStore.all()
         byChannel = ChannelFeeds.cachedByChannel()
         channelOrder = approved.map(\.id)
-        channels = ChannelSort.sort(approved, mode: mode, countsByWindow: counts)
+        channels = approved
+        groups = ChannelStore.groups()
+        /* The same order and the same grouping the parent set on their own
+           list. It is one list, and two arrangements of it is how a parent ends
+           up unable to find on this screen what they just arranged on the
+           other. Read-only here, like everything else on this tab. */
+        rows = ChannelGroups.arrange(
+            channels: approved, groups: groups, mode: mode, countsByWindow: counts
+        )
         sortMode = mode
         sortWindow = mode == .mostWatched ? ChannelSort.windowIndex(counts) : nil
 
-        /* A channel removed in parent mode must not leave the grid filtered to
-           something that is no longer approved. */
-        if let filter, !channels.contains(where: { $0.id == filter }) { self.filter = nil }
+        /* A channel removed in parent mode — or a group dissolved because it
+           dropped to one member — must not leave the grid filtered to something
+           that is no longer there. */
+        if filter != nil, narrowedTo == nil { filter = nil }
     }
 
     private func nowMillis() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }

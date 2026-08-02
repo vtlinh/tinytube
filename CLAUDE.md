@@ -96,8 +96,8 @@ ios/TinyTube/                    the app target
   PlayerView.swift      overlay, reveal corner, blocker, what plays next
   PlayerWebView.swift   the locked-down WKWebView + the Bridge shim
   ParentView.swift      real YouTube, only ever reached through the gate
-  SettingsView.swift    the parent's choices + About + the approved list,
-                        with open and remove; no updates on iOS
+  SettingsView.swift    the parent's choices + About; no updates on iOS
+  ApprovedChannelsView.swift  the approved list, with groups, open and remove
   Gate.swift            LocalAuthentication; arithmetic only with no lock
   ChallengeView.swift   that arithmetic fallback
   PlayerChrome.swift    the blocker's height: measured, else 16pt
@@ -109,8 +109,8 @@ ios/TinyTubeTests/               app-target tests; run on a simulator in CI
 ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
                                  Kotlin files; `swift test` runs it on Linux
   Sources/TinyTubeCore/          VideoId Player Uploads Library Playlist
-                                 ChannelSort HoldTime Challenge YouTubeUrls
-                                 Schema Chrome — the whole pure layer
+                                 ChannelSort ChannelGroups HoldTime Challenge
+                                 YouTubeUrls Schema Chrome — the whole pure layer
   Tests/                         the Kotlin tests, ported alongside
 .github/workflows/android.yml    build, sign, publish to the android-latest release
 .github/workflows/ios.yml        ios-core on Linux; ios-app builds the IPA on
@@ -133,8 +133,10 @@ android/                         the app
     ChannelSort.kt  pure: the approved list's order   (unit-tested)
     Chrome.kt       pure: find the seek bar's track     (unit-tested)
     ChannelStore.kt approved channels, SQLite on the device — the parental control
-    SettingsStore.kt the parent's choices; SettingsActivity edits them + About
-                    + the approved list, with open and remove, in parent mode
+    SettingsStore.kt the parent's choices; SettingsActivity edits them +
+                    About, in parent mode
+    ChannelGroups.kt pure: channels gathered into named groups (unit-tested)
+    ApprovedChannelsActivity.kt the approved list, with groups, open and remove
     Tooltip.kt      the ? beside each settings heading
     ChannelFeeds.kt asks the Worker, once a day per channel
     VideoStore.kt   the grid, in SQLite
@@ -438,9 +440,9 @@ stops, green publishes.
   owes the gate again.
 
   Two more details that are load-bearing rather than tidy. The request goes
-  through `ParentActivity` rather than starting settings directly, because the
-  approved list inside settings can hand back a channel to look at and that
-  screen owns the only WebView it could be shown in. And the extra is consumed
+  through `ParentActivity` rather than starting settings directly, because
+  closing settings should leave the parent in parent mode rather than back on
+  the child's grid having passed a challenge for nothing. And the extra is consumed
   on arrival — `setIntent` keeps it for the life of the activity, so a rotation
   would otherwise re-run the gate on a screen the parent had already
   dismissed.
@@ -492,12 +494,39 @@ stops, green publishes.
   link that leaves the app. The status bar holds one control — see the gating
   rule below.
 - **The Channels tab is read-only, and must stay that way.** It shows the
-  approved list and narrows the grid to one channel. It cannot remove a channel
-  and it cannot open YouTube — `ChannelStore` is the parental control and
-  editing it lives behind the gate, in `SettingsActivity`. The two screens
-  share `item_approved_channel.xml`; the child's copy hides the remove button,
-  and settings inflates the same row into a plain `LinearLayout`. Don't give
+  approved list and narrows the grid to one channel, or to a whole group. It
+  cannot remove a channel, it cannot open YouTube, and it cannot make, rename
+  or break up a group — `ChannelStore` is the parental control and editing it
+  lives behind the gate, in `ApprovedChannelsActivity`. The two screens share
+  `item_approved_channel.xml` and `item_channel_group.xml`, and both build
+  their rows from the same `ChannelGroups.arrange`, so they cannot drift apart;
+  the child's copy hides the remove button and has no long press. Don't give
   this one an action that changes what is approved.
+
+  **The groups are shown AND their members are shown too**, on the child's
+  side. A group header filters the grid to every channel in it, and each of
+  those channels is still listed individually below it. Reaching one channel of
+  a group must not cost a child two taps and an idea about how grouping works.
+
+- **A group has at least two channels, and that is enforced rather than
+  assumed.** Grouping is offered only for two or more; a group that loses
+  members until one is left dissolves, and its last member becomes loose.
+  `ChannelGroups.dissolving` is the rule and each store's `tidy()` runs it
+  after EVERY mutation rather than at the call sites somebody remembered — a
+  removal, an ungroup of half a group, and a move into another group each
+  strand whatever is left behind.
+
+  Two consequences worth not rediscovering. Group headers sort A–Z among
+  themselves whatever the channel sort is, because "recently added" is not a
+  property a group has and a parent looking for one wants it where it was last
+  time; the sort orders the channels, inside a group and in the loose list
+  below. And the name a new group may take is judged against
+  `ChannelGroups.namesInUse`, not against every name there is: a group whose
+  every member is in the selection is emptied by the grouping and dissolves, so
+  its name comes free. That is what makes "add these to Cartoons" possible at
+  all — and the store then has to ABSORB that group's row rather than insert a
+  second one, because the name column is UNIQUE and the tidy that removes the
+  emptied group runs afterwards.
 - **The settings screen explains itself through the `?` beside each heading,
   not in prose under it.** Four permanent grey paragraphs were most of that
   screen, and a parent scrolling for the hold slider read three explanations of
