@@ -68,7 +68,15 @@ final class ScreenMeasurement {
         /* ReplayKit shares its plumbing with AirPlay and the system screen
            recorder, so it simply refuses while either is running. That is a
            "try again another day", not a "this device cannot do it". */
-        guard recorder.isAvailable else { completion(nil); return }
+        MeasurementDebug.beginAttempt()
+        Self.resetStripCapture()
+        MeasurementDebug.note { $0.recorderAvailable = recorder.isAvailable }
+        guard recorder.isAvailable else {
+            MeasurementDebug.note { $0.outcome = "RPScreenRecorder.isAvailable was false — AirPlay or the system recorder is using the pipeline" }
+            MeasurementDebug.persist()
+            completion(nil)
+            return
+        }
 
         running = true
         var finished = false
@@ -76,24 +84,42 @@ final class ScreenMeasurement {
             guard !finished else { return }
             finished = true
             self?.stop()
+            MeasurementDebug.note { $0.measuredPoints = result.map(Double.init) }
+            MeasurementDebug.persist()
             DispatchQueue.main.async { completion(result) }
         }
 
         recorder.startCapture { [weak self] sample, bufferType, _ in
             guard let self, bufferType == .video, !self.delivered else { return }
+            MeasurementDebug.note { $0.videoFrames += 1 }
             guard let points = Self.measureStrip(in: sample, scale: scale) else { return }
             self.delivered = true
+            MeasurementDebug.note { $0.outcome = "measured" }
             finish(points)
         } completionHandler: { error in
             /* Denied consent, or unavailable. Either way there is no frame
                coming, so stop waiting for one. */
-            if error != nil { finish(nil) }
+            if let error {
+                MeasurementDebug.note {
+                    $0.captureError = error.localizedDescription
+                    $0.outcome = "startCapture failed — consent refused, or ReplayKit unavailable"
+                }
+                finish(nil)
+            }
         }
 
         /* A capture that is running but never produces a frame `Chrome` can
            read would otherwise hold the recorder — and the recording indicator
            — open indefinitely. */
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { finish(nil) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            MeasurementDebug.note {
+                guard $0.outcome.hasPrefix("started") else { return }
+                $0.outcome = $0.videoFrames == 0
+                    ? "timed out after 8s with NO video frames — capture never started delivering"
+                    : "timed out after 8s: \($0.videoFrames) frames arrived but Chrome found no seek bar in any of them"
+            }
+            finish(nil)
+        }
     }
 
     func stop() {
@@ -181,9 +207,19 @@ final class ScreenMeasurement {
      * above that strip is copied into memory this code owns, in any
      * orientation, which is the promise in the header. */
     static func measureStrip(in sample: CMSampleBuffer, scale: CGFloat) -> CGFloat? {
-        guard let buffer = CMSampleBufferGetImageBuffer(sample) else { return nil }
-        guard CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_32BGRA
-        else { return nil }
+        guard let buffer = CMSampleBufferGetImageBuffer(sample) else {
+            MeasurementDebug.note { $0.framesRejectedNoImageBuffer += 1 }
+            return nil
+        }
+        let format = CVPixelBufferGetPixelFormatType(buffer)
+        guard format == kCVPixelFormatType_32BGRA else {
+            MeasurementDebug.note {
+                $0.framesRejectedPixelFormat += 1
+                $0.pixelFormat = Self.fourCC(format) + " (wanted BGRA)"
+            }
+            return nil
+        }
+        MeasurementDebug.note { $0.pixelFormat = Self.fourCC(format) }
 
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
@@ -218,8 +254,52 @@ final class ScreenMeasurement {
             }
         }
 
-        guard let blockPx = Chrome.blockHeight(pixels, width: dw, height: stripHeight)
-        else { return nil }
+        /* TEMPORARY, and the whole reason this debugging build exists: keep the
+           strip as Chrome received it, so a wrong orientation transform is
+           visible as a picture rather than guessed at from a null. Only the
+           first frame of an attempt, overwritten each time. See
+           MeasurementDebug for the limits kept on it. */
+        MeasurementDebug.note {
+            $0.bufferWidth = bw
+            $0.bufferHeight = bh
+            $0.orientationRaw = facing.rawValue
+            $0.orientationName = "\(facing)"
+            $0.displayWidth = dw
+            $0.displayHeight = dh
+            $0.stripRows = stripHeight
+        }
+        if !firstStripSaved {
+            firstStripSaved = true
+            let path = MeasurementDebug.saveStrip(pixels, width: dw, height: stripHeight)
+            MeasurementDebug.note { $0.framePath = path }
+        }
+
+        guard let blockPx = Chrome.blockHeight(pixels, width: dw, height: stripHeight) else {
+            MeasurementDebug.note { $0.framesChromeFoundNothing += 1 }
+            return nil
+        }
+        MeasurementDebug.note { $0.measuredPixels = Double(blockPx) }
         return CGFloat(blockPx) / max(scale, 1)
+    }
+
+    /* Set once per attempt so the saved strip is the first frame analysed
+       rather than the last, and so a long capture does not rewrite the file
+       hundreds of times. */
+    private static var firstStripSaved = false
+
+    static func resetStripCapture() { firstStripSaved = false }
+
+    /* A CVPixelFormatType is four packed ASCII bytes; printed raw it is an
+       unreadable integer, and which format arrived is exactly what matters when
+       frames are being rejected. */
+    static func fourCC(_ value: OSType) -> String {
+        let bytes = [
+            UInt8((value >> 24) & 0xFF), UInt8((value >> 16) & 0xFF),
+            UInt8((value >> 8) & 0xFF), UInt8(value & 0xFF),
+        ]
+        let text = String(bytes: bytes, encoding: .ascii) ?? ""
+        return text.allSatisfy { $0.isLetter || $0.isNumber || $0 == " " }
+            ? text.trimmingCharacters(in: .whitespaces)
+            : "0x" + String(value, radix: 16)
     }
 }

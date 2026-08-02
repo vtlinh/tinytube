@@ -611,10 +611,20 @@ What is genuinely different is that ReplayKit **asks**. It shows "TinyTube would
 like to record your screen", once per app process and again after eight minutes
 in the background, and on this app a child can be the one looking at that alert.
 That is a reason to capture rarely, not never. So iOS measures **once per
-install**: the answer goes to `BlockHeightStore` keyed by display and by a
-version number, and after that no capture is ever started again. A device where
-the capture never yields a usable frame gives up after three launches rather
-than prompting on every one, and a bumped version revives it.
+install** — the answer goes to `BlockHeightStore` keyed by display, and after
+that no capture is ever started again.
+
+**Temporarily, it does not give up.** It used to stop after three fruitless
+launches, and to key the answer by a version number so that a corrected
+measurement could invalidate a stored one. Both are removed while the
+measurement is being debugged on real hardware, where it is currently failing:
+the blocker falls back to 16 points and YouTube's seek bar stays reachable in
+the player, which is worse than a returning prompt. Until a capture succeeds on
+a device, the consent alert now comes back on every launch — and a child may be
+the one who sees it. Settings carries a **Blocker measurement (debug)** section
+reporting what the last capture did, including the strip that was analysed.
+Both the give-up counter and the version key should go back once the
+measurement is known to work.
 
 Two rules carry over from Android unchanged, because both were paid for there. A
 failed capture **stores nothing** — `Chrome.blockHeight` returns nil for "could

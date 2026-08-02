@@ -69,19 +69,24 @@ final class AppSurfaceTests: XCTestCase {
         )
     }
 
-    /* An answer written by an older measurement is not an answer to this one.
-       Android learned this the expensive way: a build that could persist a
-       FAILURE wrote the fallback as though measured, and every later build read
-       it back and never looked again. */
-    func testAnAnswerFromAnotherVersionIsIgnored() {
-        BlockHeightStore.put(64, defaults: defaults)
-        defaults.set(BlockHeightStore.version + 1, forKey: "block_version")
+    /* Versioning is GONE, and this pins the consequence rather than leaving it
+       to be discovered. A stored answer now survives anything a new build might
+       want to say about it — including a stale `block_version` left behind by a
+       build that did version. The only ways to invalidate an answer are a
+       different display and `clear`.
 
-        XCTAssertNil(BlockHeightStore.get(defaults))
-        XCTAssertTrue(
-            BlockHeightStore.shouldMeasure(defaults),
-            "bumping the version has to actually reach the device, or a fix changes nothing"
+       This is a real loss, not a tidy-up: bumping the version was what let a
+       corrected measurement reach a device that had already stored a bad
+       number. It is recorded in BlockHeightStore so it can be put back. */
+    func testAStoredAnswerOutlivesALegacyVersionKey() {
+        BlockHeightStore.put(64, defaults: defaults)
+        defaults.set(999, forKey: "block_version")
+
+        XCTAssertEqual(
+            BlockHeightStore.get(defaults), 64,
+            "nothing reads block_version any more, so it must not affect the answer"
         )
+        XCTAssertFalse(BlockHeightStore.shouldMeasure(defaults))
     }
 
     /* And an answer measured on a different display is not an answer for this
@@ -94,41 +99,44 @@ final class AppSurfaceTests: XCTestCase {
         XCTAssertTrue(BlockHeightStore.shouldMeasure(defaults))
     }
 
-    // MARK: - Not prompting a child forever
+    // MARK: - Retrying until it works
 
-    /* iOS-only, and the reason it exists is the consent alert. A device where
-       the capture never yields a usable frame must stop asking, or a child sees
-       a screen-recording prompt on every launch for the life of the install. */
-    func testItGivesUpAfterTheAttemptsAreSpent() {
-        for _ in 0..<BlockHeightStore.maxSessions {
-            XCTAssertTrue(BlockHeightStore.shouldMeasure(defaults))
-            BlockHeightStore.noteSessionSpent(defaults)
+    /* The give-up counter is GONE, and this is the property that replaced it:
+       a device that has never produced an answer keeps asking, restart after
+       restart, instead of stopping after three.
+
+       What that costs is the reason the counter existed — ReplayKit's consent
+       alert, which a CHILD can be the one looking at, now returns on every
+       launch until some capture succeeds. That was accepted knowingly: the
+       measurement is failing on real hardware, and a blocker stuck on its
+       fallback leaves YouTube's seek bar reachable in the player, which is the
+       failure the app exists to prevent. See BlockHeightStore. */
+    func testItNeverGivesUpWhileThereIsNoAnswer() {
+        for launch in 1...25 {
+            XCTAssertTrue(
+                BlockHeightStore.shouldMeasure(defaults),
+                "launch \(launch): with nothing stored it must still be willing to measure"
+            )
         }
-        XCTAssertFalse(
-            BlockHeightStore.shouldMeasure(defaults),
-            "after maxSessions fruitless launches the fallback has to stand for good"
-        )
     }
 
-    /* But a build that changes the measurement gets its chance again on a
-       device that had given up. */
-    func testBumpingTheVersionRevivesADeviceThatGaveUp() {
-        for _ in 0..<BlockHeightStore.maxSessions { BlockHeightStore.noteSessionSpent(defaults) }
+    /* But an answer stops it dead — the consent alert must not return on a
+       device where the measurement already worked. */
+    func testASuccessfulAnswerStopsTheRetrying() {
+        BlockHeightStore.put(64, defaults: defaults)
         XCTAssertFalse(BlockHeightStore.shouldMeasure(defaults))
-
-        defaults.set(BlockHeightStore.version + 1, forKey: "block_version")
-        XCTAssertTrue(BlockHeightStore.shouldMeasure(defaults))
     }
 
-    /* Spending an attempt must never look like an answer. This is the exact
-       shape of the Android bug: a failure that gets written where a success
-       goes. */
-    func testSpendingAnAttemptStoresNoHeight() {
-        BlockHeightStore.noteSessionSpent(defaults)
-        XCTAssertNil(
-            BlockHeightStore.get(defaults),
-            "a failed session must not leave anything a later read could mistake for a measurement"
-        )
+    /* Unchanged and still the sharpest edge here: only a real answer is ever
+       written. `Chrome.blockHeight` returns nil for "could not tell" precisely
+       so a failure cannot be stored as though it were a measurement — the exact
+       Android bug that made the feature silently do nothing. */
+    func testClearingLeavesNothingThatLooksLikeAnAnswer() {
+        BlockHeightStore.put(64, defaults: defaults)
+        BlockHeightStore.clear(defaults)
+
+        XCTAssertNil(BlockHeightStore.get(defaults))
+        XCTAssertTrue(BlockHeightStore.shouldMeasure(defaults))
     }
 
     /* The blocker in use follows the store, and refuses a stored value that is
