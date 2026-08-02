@@ -18,7 +18,7 @@ extension Channel: Identifiable {}
 enum ChannelStore {
 
     private static let columns =
-        "channel_id, title, added_at, handle, avatar_url"
+        "channel_id, title, added_at, handle, avatar_url, group_id"
 
     private static func channel(_ r: Database.Row) -> Channel {
         Channel(
@@ -26,7 +26,8 @@ enum ChannelStore {
             title: r.string(1),
             addedAt: r.int(2),
             handle: r.stringOrNil(3),
-            avatarURL: r.stringOrNil(4)
+            avatarURL: r.stringOrNil(4),
+            groupId: r.stringOrNil(5)
         )
     }
 
@@ -122,6 +123,96 @@ enum ChannelStore {
         VideoStore.forget(channelId: channelId)
         WatchStore.forget(channelId: channelId)
         ImageCache.forget(images)
+        /* Removing a channel can strand the group it was in — a pair minus one
+           is not a group. Same tidy every other writer ends with. */
+        tidy()
+    }
+
+    // MARK: - Groups
+
+    /* ChannelGroups holds every RULE; this holds the rows. The split is the
+       usual one here: the rules are testable on Linux and the SQL is not.
+
+       ⚠️ EVERY MUTATION ENDS IN tidy(). A group of one is not a group, and the
+       ways to make one are easy to miss: removing a channel, ungrouping half a
+       group, or moving a member into a different group all strand whatever is
+       left behind. Putting it at the end of each writer rather than at the call
+       sites is what keeps that true for callers nobody has written yet. */
+    static func groups() -> [ChannelGroups.Group] {
+        (try? Database.shared.read(
+            "SELECT group_id, name FROM groups ORDER BY name COLLATE NOCASE ASC",
+            row: { ChannelGroups.Group(id: $0.string(0), name: $0.string(1)) }
+        )) ?? []
+    }
+
+    /* Put these channels in a group of this name, creating it.
+     *
+     * Returns false if the name is refused — the sheet checks first and
+     * disables its confirm, so this is the second lock on the same door rather
+     * than the only one. The UNIQUE index on the name is the third.
+     *
+     * Whatever group a channel was in, it leaves: the column is overwritten,
+     * not merged. That needs no code of its own, but it does need the tidy
+     * afterwards, because the group it left may now be down to one channel. */
+    @discardableResult
+    static func group(channelIds: [String], name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ChannelGroups.nameError(trimmed, existing: groups().map(\.name)) == nil,
+              channelIds.count >= 2
+        else { return false }
+
+        let id = UUID().uuidString
+        do {
+            try Database.shared.transaction {
+                try Database.shared.write(
+                    "INSERT INTO groups (group_id, name) VALUES (?, ?)",
+                    [.text(id), .text(trimmed)]
+                )
+                for channelId in channelIds {
+                    try Database.shared.write(
+                        "UPDATE channels SET group_id = ? WHERE channel_id = ?",
+                        [.text(id), .text(channelId)]
+                    )
+                }
+            }
+        } catch {
+            return false
+        }
+        tidy()
+        return true
+    }
+
+    /* Take these channels out of whatever group they are in. They stay
+       approved — ungrouping is not removing, and conflating the two would be
+       the worst possible reading of the word. */
+    static func ungroup(channelIds: [String]) {
+        try? Database.shared.transaction {
+            for channelId in channelIds {
+                try Database.shared.write(
+                    "UPDATE channels SET group_id = NULL WHERE channel_id = ?",
+                    [.text(channelId)]
+                )
+            }
+        }
+        tidy()
+    }
+
+    /* The invariant, enforced after every change: a group with fewer than two
+       channels is dissolved, and its remaining member — if any — becomes loose.
+       The channels themselves are never touched beyond that column. */
+    private static func tidy() {
+        let doomed = ChannelGroups.dissolving(channels: all(), groups: groups())
+        guard !doomed.isEmpty else { return }
+        try? Database.shared.transaction {
+            for groupId in doomed {
+                try Database.shared.write(
+                    "UPDATE channels SET group_id = NULL WHERE group_id = ?", [.text(groupId)]
+                )
+                try Database.shared.write(
+                    "DELETE FROM groups WHERE group_id = ?", [.text(groupId)]
+                )
+            }
+        }
     }
 
     /* Every picture this channel put on the device: its avatar, and a poster
