@@ -1,58 +1,53 @@
 import Foundation
 import UIKit
 
-/* Remembers what the player measured, so it is measured ONCE and never again.
+/* Remembers what the player measured, so a device that has a usable answer does
+   not go asking for another one.
 
-   The counterpart of BlockHeightStore.kt, and it carries the same two keys for
-   the same two reasons — plus a third that only iOS needs.
+   The counterpart of BlockHeightStore.kt, and it keeps that file's DISPLAY key
+   for the same reason: a measurement is about a particular geometry. An iPad in
+   a different orientation, Display Zoom being changed, or the same install
+   restored onto another device all produce a different key, and a mismatch
+   simply measures again.
 
-   Keyed by DISPLAY, because a measurement is about a particular geometry. An
-   iPad in a different orientation, Display Zoom being changed, or the same
-   install restored onto another device all produce a different key, and a
-   mismatch simply measures again.
+   IT NO LONGER VERSIONS AND IT NO LONGER GIVES UP. Both were deliberate and
+   both were load-bearing, so what removing them costs is written down here
+   rather than discovered later:
 
-   Keyed by VERSION, which is the more important half. On Android a build that
-   could persist a FAILED capture wrote the fallback here as though it had been
-   measured; preferences survive an app update, so every later build read it
-   back, concluded the work was done, and never looked again. Fixing the bug
-   changed nothing on any device that had already run the broken one. So: bump
-   VERSION whenever the measurement changes, and old entries are ignored rather
-   than trusted. It costs one re-measure per device.
+   - The VERSION key existed because a preference file survives an app update,
+     so a wrong answer written by one build is read back by every build after
+     it. Bumping it was the only thing that let a corrected measurement reach a
+     device that had already stored a bad number. Without it, a stored answer
+     outlives any change to how the measurement is made, and a build that
+     changes what the measurement returns has no way to invalidate what is
+     already on a device short of `clear`.
 
-   And keyed by an ATTEMPT COUNT, which Android does not have and iOS needs.
-   Android's capture is silent, so it can retry forever at no cost to anyone.
-   iOS's capture is ReplayKit, and ReplayKit shows the user a consent alert —
-   once per app process, and again after eight minutes in the background. A
-   device where the capture never yields a usable frame would therefore ask a
-   CHILD to approve screen recording on every single launch, forever. After
-   `maxSessions` fruitless launches this gives up and lets the fallback stand.
-   Bumping VERSION resets that too, so a build that fixes the measurement gets
-   its chance on devices that had given up. */
+   - The ATTEMPT COUNT existed because ReplayKit shows a consent alert — once
+     per app process, and again after eight minutes backgrounded — and A CHILD
+     CAN BE THE ONE LOOKING AT IT. Giving up after three fruitless launches was
+     what stopped a device where capture never works from prompting forever.
+     Without it, that is exactly what happens: a prompt every launch until some
+     capture finally succeeds.
+
+   That second cost is real and current, not hypothetical. It is accepted for
+   now because the alternative was worse in the way that matters: the
+   measurement is failing on a real device, the blocker is sitting on its
+   16-point fallback, and YouTube's seek bar, settings gear, "More videos" and
+   logo are all reachable by the child this app exists to fence in. A consent
+   alert is recoverable and visible; an unblocked player is the failure the
+   whole app is built to prevent.
+
+   Put the attempt count back once the measurement is known to work on real
+   hardware, and take the same care with VERSION at the same time. */
 enum BlockHeightStore {
 
     private static let keyPoints = "block_points"
     private static let keyDisplay = "block_display"
-    private static let keyVersion = "block_version"
-    private static let keySessions = "block_sessions"
 
-    /* iOS's own ladder. The NUMBER does not have to agree with Android's; the
-       RULE does — bump it whenever what the measurement would return changes.
-
-       2: the capture read the bottom rows of ReplayKit's BUFFER as though they
-       were the bottom of the screen. In portrait that is the same thing; the
-       player forces landscape, where it is a band down one side, so `Chrome`
-       never found a seek bar and nothing was ever stored. The bump matters
-       more than usual here: the three attempts are spent per launch whether or
-       not the analysis works, so every device that ran the broken build has
-       given up permanently. Without a new version a fixed build would never
-       ask again. See ScreenMeasurement.bufferCoord. */
-    static let version = 2
-
-    /* How many launches may fail before this stops asking. Three is enough to
-       ride out a device that was mirroring to a TV or had the app backgrounded
-       at the wrong moment, and few enough that a device where this simply does
-       not work stops prompting almost immediately. */
-    static let maxSessions = 3
+    /* Written by builds that versioned and counted attempts. Nothing reads them
+       any more; they are named only so `clear` can sweep them off devices that
+       still carry them. */
+    private static let legacyKeys = ["block_version", "block_sessions"]
 
     /* What the display is, as a string to compare against later. Points and
        scale rather than raw pixels: the answer is applied in points, so two
@@ -64,9 +59,8 @@ enum BlockHeightStore {
     }
 
     /* The remembered height, or nil if there is nothing here worth trusting for
-       this display and this version of the measurement. */
+       this display. */
     static func get(_ defaults: UserDefaults = .standard, screen: UIScreen = .main) -> CGFloat? {
-        guard defaults.integer(forKey: keyVersion) == version else { return nil }
         guard defaults.string(forKey: keyDisplay) == displayKey(screen) else { return nil }
         let points = defaults.double(forKey: keyPoints)
         return points > 0 ? CGFloat(points) : nil
@@ -74,44 +68,25 @@ enum BlockHeightStore {
 
     /* Only ever called with a real answer. `Chrome.blockHeight` returns nil for
        "could not tell" precisely so this is never handed a failure dressed up
-       as a number — see the comment above about what happens when it is. */
+       as a number. */
     static func put(_ points: CGFloat,
                     defaults: UserDefaults = .standard,
                     screen: UIScreen = .main) {
         defaults.set(Double(points), forKey: keyPoints)
         defaults.set(displayKey(screen), forKey: keyDisplay)
-        defaults.set(version, forKey: keyVersion)
     }
 
-    /* Whether it is still worth starting a capture at all — i.e. whether this
-       display has an answer already, and whether the attempts are used up. */
+    /* Whether it is worth starting a capture at all — now purely "is there an
+       answer for this display yet". No launch budget: a device that has never
+       produced one tries again on every restart, for as long as it takes. */
     static func shouldMeasure(_ defaults: UserDefaults = .standard,
                               screen: UIScreen = .main) -> Bool {
-        if get(defaults, screen: screen) != nil { return false }
-        return sessionsSpent(defaults, screen: screen) < maxSessions
-    }
-
-    /* Counted per launch rather than per frame: within one process the consent
-       alert has already been shown, so retrying costs the user nothing and the
-       player retries freely. It is the NEXT launch that would prompt again. */
-    static func noteSessionSpent(_ defaults: UserDefaults = .standard,
-                                 screen: UIScreen = .main) {
-        defaults.set(sessionsSpent(defaults, screen: screen) + 1, forKey: keySessions)
-        defaults.set(displayKey(screen), forKey: keyDisplay)
-        defaults.set(version, forKey: keyVersion)
-    }
-
-    private static func sessionsSpent(_ defaults: UserDefaults,
-                                      screen: UIScreen) -> Int {
-        guard defaults.integer(forKey: keyVersion) == version,
-              defaults.string(forKey: keyDisplay) == displayKey(screen)
-        else { return 0 }
-        return defaults.integer(forKey: keySessions)
+        get(defaults, screen: screen) == nil
     }
 
     /* Throw the answer away and measure again. */
     static func clear(_ defaults: UserDefaults = .standard) {
-        for k in [keyPoints, keyDisplay, keyVersion, keySessions] {
+        for k in [keyPoints, keyDisplay] + legacyKeys {
             defaults.removeObject(forKey: k)
         }
     }

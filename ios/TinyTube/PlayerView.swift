@@ -351,7 +351,7 @@ struct PlayerView: View {
             if !glowedThisVideo {
                 glowedThisVideo = true
                 glow()
-                measureOnce()
+                measureUntilItWorks()
             }
         case PlayerWebView.PlayerState.paused:
             paused = true
@@ -363,20 +363,39 @@ struct PlayerView: View {
         }
     }
 
-    /* Once per install, and only while a video is actually playing — a capture
-       taken against the loading rectangle has no seek bar in it. See
-       ScreenMeasurement for why "once" matters so much here. */
-    private func measureOnce() {
+    /* Until it works, and only while a video is actually playing — a capture
+       taken against the loading rectangle has no seek bar in it.
+
+       Once per install UNTIL ONE SUCCEEDS, rather than once per install full
+       stop: a device that has an answer never captures again, and one that has
+       never managed it tries on every restart. The launch budget that used to
+       stop that is gone — see BlockHeightStore for what it cost. */
+    private func measureUntilItWorks() {
         guard BlockHeightStore.shouldMeasure() else { return }
-        BlockHeightStore.noteSessionSpent()
         measurement.measure(scale: UIScreen.main.scale) { points in
             /* A failure stores NOTHING. `Chrome.blockHeight` returns nil for
                "could not tell" precisely so a blank frame cannot be written
                down as an answer. */
-            guard let points,
-                  PlayerChrome.isPlausible(points, screenHeight: UIScreen.main.bounds.height)
-            else { return }
+            let ok = points.map {
+                PlayerChrome.isPlausible($0, screenHeight: UIScreen.main.bounds.height)
+            }
+            MeasurementDebug.note {
+                $0.plausible = ok
+                if let points, ok == false {
+                    $0.outcome = "measured \(Int(points))pt but refused as implausible "
+                        + "(must be >0 and <= a quarter of \(Int(UIScreen.main.bounds.height))pt)"
+                }
+            }
+            guard let points, ok == true else {
+                MeasurementDebug.persist()
+                return
+            }
             BlockHeightStore.put(points)
+            MeasurementDebug.note {
+                $0.storedPoints = Double(points)
+                $0.outcome = "measured \(Int(points))pt and stored"
+            }
+            MeasurementDebug.persist()
             blockPoints = points
         }
     }

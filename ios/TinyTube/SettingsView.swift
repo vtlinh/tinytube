@@ -62,6 +62,7 @@ struct SettingsView: View {
                 about
                 whenAVideoEnds
                 holdToUnlock
+                measurementDebug
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -97,6 +98,69 @@ struct SettingsView: View {
                     .font(.footnote)
                     .foregroundStyle(Color.secondary)
             }
+        }
+    }
+
+    /* TEMPORARY — remove with MeasurementDebug once the blocker measurement is
+       known to work on real hardware.
+
+       It lives here because there is nowhere else to read it. The IPA is
+       sideloaded from a Windows machine, so there is no Xcode console, and the
+       failure is silent by construction: a frame Chrome cannot read is skipped
+       rather than reported, so "no frames arrived" and "frames arrived and had
+       no seek bar in them" look identical from outside and need different
+       fixes.
+
+       Behind the parent gate, like everything else in Settings. */
+    private var measurementDebug: some View {
+        Section {
+            /* ONE Text rather than a row per field, and deliberately.
+               SwiftUI's ViewBuilder takes at most ten children, this dump has
+               well over twenty, and the comment on `body` above records that
+               this file has already blown Swift's type-checking budget once by
+               growing a section inline. Building the lines as plain strings
+               costs the type checker nothing and is selectable to copy out. */
+            Text(MeasurementDebug.report().joined(separator: "\n"))
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            measurementStrip
+
+            Button("Forget the measurement and try again", role: .destructive) {
+                BlockHeightStore.clear()
+                MeasurementDebug.clear()
+            }
+        } header: {
+            heading("Blocker measurement (debug)", help: """
+                Temporary diagnostics for the player's bottom blocker, which is \
+                measured from a captured frame rather than hardcoded.
+
+                If "blocker in use" says FALLBACK, the measurement failed and \
+                YouTube's seek bar is reachable in the player.
+                """)
+        }
+    }
+
+    /* The strip as Chrome received it, when there is one. */
+    @ViewBuilder
+    private var measurementStrip: some View {
+        if let path = MeasurementDebug.load()?.framePath,
+           let image = UIImage(contentsOfFile: path) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("The strip Chrome was given")
+                    .font(.caption).foregroundStyle(Color.secondary)
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .border(Color.secondary.opacity(0.4))
+                Text("Flat colour: the capture yielded nothing. A tall narrow band: "
+                     + "the orientation transform is wrong. A seek bar you can see "
+                     + "here: Chrome's analysis is at fault.")
+                    .font(.caption2).foregroundStyle(Color.secondary)
+            }
+            .padding(.vertical, 4)
         }
     }
 
