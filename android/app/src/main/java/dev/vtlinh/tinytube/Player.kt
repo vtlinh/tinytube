@@ -42,6 +42,31 @@ object Player {
         return host.endsWith(".googlevideo.com")
     }
 
+    /* The same question, asked of a navigation rather than of a URL — and the
+       answer differs for the MAIN FRAME.
+     *
+     * ALLOWED_HOSTS has to contain www.youtube.com: the embed iframe, the
+     * IFrame API script and the player's XHRs all come from there. The match is
+     * host-only, so it accepts /watch, /results and every other real page on
+     * that host just as readily — which is fine for a subframe and is not fine
+     * for the top document. And the top document was reachable: while an ad is
+     * playing the overlay deliberately stops intercepting so the ad stays
+     * usable, and a tap on the branding YouTube draws over an ad is a
+     * main-frame navigation to https://www.youtube.com/watch?v=… . That loaded
+     * the whole mobile site — search box, recommendations, links out — inside
+     * the child's player, permanently: the wrapper carrying the tick loop and
+     * the Bridge had just been replaced, so no onAd(false) and no onEnded ever
+     * arrived to take the overlay back or close the screen.
+     *
+     * So the main frame may only ever be the wrapper's own origin. Nothing else
+     * is supposed to navigate it — the page is loaded by the app, not by a
+     * link — and refusing outright means no future YouTube link needs to be
+     * enumerated. Everything else is unchanged and still goes through
+     * isPlayerUrl, so the iframe, the API script and the media keep loading. */
+    fun isPlayerNavigation(url: String, mainFrame: Boolean): Boolean =
+        if (mainFrame) hostOf(url) != null && hostOf(url) == hostOf(ORIGIN)
+        else isPlayerUrl(url)
+
     /* Scheme-aware host extraction. Only http(s) has a host worth trusting:
        "javascript:", "intent:", "file:" and friends must never be treated as
        navigable, and returning null for them makes isPlayerUrl refuse. */
@@ -50,8 +75,14 @@ object Player {
             ?: return null
         var host = m.groupValues[2].lowercase()
         /* strip userinfo — "https://www.youtube.com@attacker.example/" has host
-           attacker.example, and reading up to the '@' would get it backwards */
-        host.indexOf('@').let { if (it >= 0) host = host.substring(it + 1) }
+           attacker.example, and reading up to the '@' would get it backwards.
+           The LAST '@', not the first: userinfo may not carry a raw one, so
+           that is where a browser splits, and it is where the request actually
+           goes. Reading the first made "https://a@evil.example@yt3.ggpht.com/x"
+           come out as "evil.example@yt3.ggpht.com" here and as
+           "yt3.ggpht.com" on iOS — the same lock giving two answers, which is
+           the one thing this hand-written parser exists to prevent. */
+        host.lastIndexOf('@').let { if (it >= 0) host = host.substring(it + 1) }
         /* strip port */
         host.indexOf(':').let { if (it >= 0) host = host.substring(0, it) }
         return host.ifEmpty { null }

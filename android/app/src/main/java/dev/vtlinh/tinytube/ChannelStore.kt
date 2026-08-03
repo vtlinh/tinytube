@@ -51,10 +51,23 @@ class ChannelStore private constructor(private val app: Context) :
                and would otherwise erase the one recorded the first time. */
             (handle ?: previous?.handle)?.let { put("handle", it) }
             (avatarUrl ?: previous?.avatarUrl)?.let { put("avatar_url", it) }
+            /* And the group, for the same reason and with a worse failure.
+               CONFLICT_REPLACE deletes the conflicting row and inserts a fresh
+               one, so every column not named here reverts to NULL. Clearing
+               uploads_at that way is deliberate — a re-approval refetches.
+               Clearing group_id was not: re-approving one member of a pair
+               dropped it out of its group and left the group holding one
+               channel, which then vanished from both lists entirely. */
+            previous?.groupId?.let { put("group_id", it) }
         }
-        return writableDatabase.insertWithOnConflict(
+        val added = writableDatabase.insertWithOnConflict(
             Schema.CHANNELS, null, values, SQLiteDatabase.CONFLICT_REPLACE,
         ) != -1L
+        /* The rule below: EVERY mutation ends here. This one cannot strand a
+           group now that group_id is carried forward, which is exactly why it
+           was the one writer that skipped it — and exactly how it got missed. */
+        if (added) tidy()
+        return added
     }
 
     /* When this channel's uploads were last fetched, or null for never.

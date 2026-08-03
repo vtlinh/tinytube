@@ -66,7 +66,14 @@ object ChannelFeeds {
             val now = System.currentTimeMillis()
             for (channel in channels.all()) {
                 val last = channels.uploadsFetchedAt(channel.id)
-                if (last != null && now - last < REFRESH_INTERVAL_MILLIS) continue
+                /* `now < last` is the clock-moved-backwards case, and it is
+                   not hypothetical: a timezone change, a manual set or a bad
+                   NTP step writes uploads_at into the future, after which
+                   `now - last` is negative, compares as due-in-the-past, and
+                   parks the channel until real time catches up — a week, if the
+                   clock was a week ahead. ChannelFeeds.swift's `due` has always
+                   had this term; the Kotlin half had not. */
+                if (last != null && now >= last && now - last < REFRESH_INTERVAL_MILLIS) continue
 
                 val fetched = fetchUploads(context, channel.id)
                 if (fetched.isEmpty()) continue

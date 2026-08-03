@@ -34,7 +34,21 @@ struct TouchReporter: UIViewRepresentable {
         recogniser.delaysTouchesBegan = false
         recogniser.delaysTouchesEnded = false
         recogniser.delegate = context.coordinator
-        view.addGestureRecognizer(recogniser)
+        /* ⚠️ ON THE WINDOW, NOT ON THIS VIEW.
+         *
+         * UIKit delivers a touch to the recognisers attached to the touch's
+         * hit-test view and to that view's ANCESTORS. This view refuses to be
+         * the hit-test view — that is the whole point of it, see below — and in
+         * PlayerView's ZStack it is a SIBLING layered above the web view rather
+         * than an ancestor of it. So a recogniser added here was never sent a
+         * single touch and `onTouch` never ran: the idle countdown expired
+         * mid-scrub every time, which is precisely the moment an adult is using
+         * the player and the one thing this file exists to prevent.
+         *
+         * The window IS an ancestor of everything, and with
+         * cancelsTouchesInView false this stays observation rather than
+         * interception. */
+        view.observer = recogniser
         return view
     }
 
@@ -42,10 +56,45 @@ struct TouchReporter: UIViewRepresentable {
         context.coordinator.onTouch = onTouch
     }
 
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        (view as? PassthroughView)?.observer = nil
+    }
+
     /* Hit-tests as if it were not there, so the web view underneath still gets
-       everything. The gesture recogniser sees the touch either way. */
+       everything, and carries the window-level recogniser for as long as it is
+       on screen. */
     final class PassthroughView: UIView {
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
+
+        /* Attached when this view joins a window and taken off when it leaves,
+           so nothing outlives the lifted overlay. */
+        var observer: UIGestureRecognizer? {
+            didSet {
+                if let oldValue { oldValue.view?.removeGestureRecognizer(oldValue) }
+                attach()
+            }
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            attach()
+        }
+
+        private func attach() {
+            guard let observer else { return }
+            guard let window else {
+                observer.view?.removeGestureRecognizer(observer)
+                return
+            }
+            if observer.view !== window {
+                observer.view?.removeGestureRecognizer(observer)
+                window.addGestureRecognizer(observer)
+            }
+        }
+
+        deinit {
+            if let g = observer { g.view?.removeGestureRecognizer(g) }
+        }
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {

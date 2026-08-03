@@ -27,6 +27,10 @@ struct PlayerWebView: UIViewRepresentable {
     let onState: (Int) -> Void
     let onEnded: () -> Void
     let onError: () -> Void
+    /* The page's tick loop reports every ad transition. The shim below has
+       always defined Bridge.onAd; for a while the page never called it and
+       nothing here handled it, so the overlay swallowed every ad. */
+    let onAd: (Bool) -> Void
 
     /* YouTube's IFrame API state codes. The same two Android names, for the
        same reason: `state == 1` at a call site says nothing. */
@@ -45,7 +49,7 @@ struct PlayerWebView: UIViewRepresentable {
     """
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onState: onState, onEnded: onEnded, onError: onError)
+        Coordinator(onState: onState, onEnded: onEnded, onError: onError, onAd: onAd)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -102,14 +106,17 @@ struct PlayerWebView: UIViewRepresentable {
         private let onState: (Int) -> Void
         private let onEnded: () -> Void
         private let onError: () -> Void
+        private let onAd: (Bool) -> Void
         private(set) var loaded: String?
 
         init(onState: @escaping (Int) -> Void,
              onEnded: @escaping () -> Void,
-             onError: @escaping () -> Void) {
+             onError: @escaping () -> Void,
+             onAd: @escaping (Bool) -> Void) {
             self.onState = onState
             self.onEnded = onEnded
             self.onError = onError
+            self.onAd = onAd
         }
 
         func load(_ id: String, into web: WKWebView) {
@@ -131,7 +138,16 @@ struct PlayerWebView: UIViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-            decisionHandler(Player.isPlayerURL(url) ? .allow : .cancel)
+            /* Whether this replaces the TOP document is the load-bearing part.
+               The allowlist has to contain www.youtube.com for the embed, the
+               API script and the player's XHRs, and it matches on host — so
+               /watch and /results are equally acceptable to it. Fine for a
+               subframe; not fine for the main frame, which is the child's
+               player. A nil targetFrame is a new window and is not the main
+               frame's business either, so it takes the stricter answer. See
+               Player.isPlayerNavigation. */
+            let mainFrame = action.targetFrame?.isMainFrame ?? true
+            decisionHandler(Player.isPlayerNavigation(url, mainFrame: mainFrame) ? .allow : .cancel)
         }
 
         func userContentController(
@@ -150,6 +166,7 @@ struct PlayerWebView: UIViewRepresentable {
                 if let n = payload["value"] as? NSNumber { onState(n.intValue) }
             case "ended": onEnded()
             case "error": onError()
+            case "ad": onAd((payload["value"] as? NSNumber)?.boolValue ?? false)
             default: break
             }
         }

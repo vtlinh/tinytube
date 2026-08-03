@@ -8,7 +8,8 @@
     <!-- Status bar. The Parent button is visible rather than hidden behind a
          long-press, because a parent has to be able to find it; what stops a
          child using it is the device lock behind it, not obscurity.
-         Long-pressing the title still opens About.
+         Nothing on this screen has a hidden action: About used to open on a
+         long-press of the title and is part of Settings now, behind the gate.
 
          Kept short deliberately. It is a heading on a screen whose whole
          point is the posters below it, and every dp it takes is a dp of
@@ -103,7 +104,7 @@
              of the app, and the approved list is the parental control. Tapping
              a row filters the grid to that channel; it cannot remove one and
              it cannot open YouTube. Both of those live behind the gate, in
-             SettingsActivity. -->
+             ApprovedChannelsActivity. -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/channels"
             android:layout_width="match_parent"

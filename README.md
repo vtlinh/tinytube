@@ -41,10 +41,14 @@ Curation never leaves the phone. There is no server-side list of who may watch
 what and nothing to deploy when you approve something — the approved channels
 are SQLite on the device, and so is the grid built from them.
 
-The Worker does three jobs. It re-serves the app's release assets, because the
-repository is private and a device with no credential would get a 404 and could
-never find an update; that path holds a read-only GitHub token and its routes
-are fixed, so the credential cannot be pointed anywhere. It answers `/uploads` —
+The Worker does three jobs. It re-serves the app's release assets at fixed,
+stable paths — that path holds a read-only GitHub token and its routes are
+fixed, so the credential cannot be pointed anywhere. Those routes were added
+while this repository was **private**, when a device with no credential would
+have got a 404 and could never have found an update. The repository is public
+now, so the credential is no longer what makes them reachable; what keeps them
+is that `/app/version.json` and `/app/app-release.apk` are compiled into every
+installed Android app, and renaming or removing either strands every phone. It answers `/uploads` —
 what has this channel posted — so the phone doesn't download two megabytes of
 YouTube's web app per channel and parse it. And it answers `/channel` — which
 channel is this page for — so approving one doesn't download a channel page just
@@ -54,11 +58,14 @@ to read an id out of it.
 
 The two routes that take anything from the caller are kept away from the
 credential: neither reads the token, every input is matched against a fixed
-pattern, and every URL either fetches is built from a validated value. `/channel`
-deliberately does not accept a URL — "send me the page you're on" is the obvious
-design and the one that would put a caller's string into `fetch()` — so it takes
-a handle or a channel id and builds the address itself. Nothing a caller sends
-reaches `fetch()`.
+pattern, and every URL either fetches is built from a validated value.
+`/channel` **does** accept a URL — the app sends the page it is standing on,
+because reading YouTube, including reading its addresses, is the Worker's job —
+and that is not the exception it looks like: the caller's string is never
+fetched. `channelTargetFromUrl` parses it, demands a host YouTube serves channel
+pages from and a path of exactly `/channel/UC…` or `/@handle`, and **rebuilds**
+the address from what it extracted. The most a caller can name is a different
+YouTube channel. Nothing a caller sends reaches `fetch()`.
 
 ## Approving a channel
 
@@ -68,9 +75,11 @@ that browser, so your own subscriptions are a place to approve from.
 
 The **+** is live only on an actual channel page — a URL starting `/@handle`
 or `/channel/`. On a channel you have already approved it becomes **−**, which
-removes it. Every approved channel is listed at the bottom of **Settings**,
-under **Channels** — the list itself, not a button that opens one: tap a row to
-go and look at that channel again, or **✕** to remove it.
+removes it. Every approved channel is on a screen of its own, opened by the
+list button in parent mode's bar — not inside Settings, which is the gear beside
+it. Tap a row to go and look at that channel again, or **✕** to remove it, and
+select several to gather them into a named group. **The approved channels**
+below has the whole of it.
 
 Removing a channel drops its videos from the grid immediately, its watch
 history with it, and its avatar and thumbnails off the disk.
@@ -419,9 +428,15 @@ it to a fixed `android-latest` release.
 - **Notifications**: asked for on first launch, because the notification is the
   only thing that says an update is ready. If they're off, the settings screen
   says so and offers to turn them on — and its **Check for updates** button
-  works regardless. Tapping the notification itself opens the grid rather than
-  the settings: a notification is reachable from the lock screen, so it must not
-  lead past the gate. Its **Install** action still works in one tap.
+  works regardless. Tapping the notification opens the **grid**, never the
+  settings screen directly: a notification sits on the lock screen where a child
+  can reach it, so it must not lead PAST the gate — but it may lead TO it. What
+  it actually does is ask, with an extra the grid consumes on arrival: the same
+  challenge the Parent button runs, and settings only on a pass. A failed answer
+  leaves the child on the grid. **And it does not ask twice** — a parent already
+  in parent mode, or in the settings inside it, has just passed that gate, so
+  the tap goes straight through; backgrounding the app owes the gate again. Its
+  **Install** action still works in one tap without opening anything.
 
 Two one-time hurdles on the very first update: the app needs Android's "Install
 unknown apps" permission, and Android shows one confirmation while the app
@@ -465,16 +480,24 @@ carrying a lineage proving the old key authorised the new one. It was not used:
 it cannot be verified anywhere but CI.
 
 The key now lives in `ANDROID_KEYSTORE_B64` and `ANDROID_KEYSTORE_PASSWORD`,
-written out by `android.yml` at build time. Two things guard it:
+written out by `android.yml` at build time. **One** thing guards it, and it is
+worth being exact about which:
 
-- `build.gradle.kts` refuses to assemble a release with no key rather than
-  emitting an unsigned APK. An unsigned build is not a broken artifact — it is a
-  working one that installs on none of the phones that matter.
 - `android.yml` reads the certificate fingerprint back out of the APK it just
   built and fails unless it matches. The build-reuse hash covers `android/` and
   the key no longer lives there, so swapping the secret would change what ships
   without forcing a rebuild; this checks the artifact instead of inferring from
   the tree.
+
+`build.gradle.kts` does **not** refuse to assemble an unsigned release, and this
+paragraph said it did. With no key — `android/signing.p12` missing, or
+`ANDROID_KEYSTORE_PASSWORD` blank — `canSign` is false, the release build type
+simply gets no signing config, `assembleRelease` succeeds, and the output is
+`app-release-unsigned.apk`. An unsigned build is not a broken artifact: it is a
+working one that installs on none of the phones that matter, which is why the
+check above is on the finished APK rather than on the build. In CI the first
+thing that notices a missing key is `apksigner` failing to find
+`app-release.apk`; locally you get an unsigned APK and no warning.
 
 **Keep a copy somewhere durable.** A GitHub secret is write-only — nothing reads
 it back — so the secret is not a backup. Lose the keystore and every installed
@@ -570,7 +593,6 @@ match, so anything that can only exist on one platform belongs in it.
 | **Approving from your own subscriptions** | Yes — sign in to Google inside parent mode | **Best-effort, and expected to break** | Google blocks account sign-in from embedded webviews. Android evades the check by dropping one user-agent token; the iOS equivalent is adding two. Same workaround, same fragility, and no sanctioned replacement — see the spike below. |
 | **App lifetime before it stops launching** | Indefinite | **7 days** | Free-tier provisioning profiles expire after a week. Re-sideload to reset it. |
 | **How many can be installed** | No limit | **3 sideloaded apps** at once, across all apps | A free Apple ID limit, not something this app can spend. |
-| **Where poster frames live** | Memory only, re-fetched each launch | Memory **and disk**, in the app's Caches directory | Fell out of the platforms' defaults rather than a decision: Android's loader is a hand-written `LruCache` over an uncached HTTP client, iOS's `AsyncImage` uses the shared `URLCache`. Removing a channel clears its pictures on both. |
 
 ### The two spikes that shaped the iOS app
 
@@ -686,9 +708,13 @@ neither needs anyone to go hunting through Actions runs:
 They exist for different reasons, which is worth keeping straight. The Android
 one is what the **app itself** polls to update; the iOS one is for a **person
 with a browser**, because nothing on iOS self-updates. What they share is why
-they go through the Worker at all: the repository is private, so its release
-assets answer 404 to anyone without a credential, and the Worker holds a
-read-only one.
+they go through the Worker at all — and the reason has changed. They were added
+while this repository was private, when its release assets answered 404 to
+anyone without a credential and the Worker held a read-only one. Public assets
+need no credential, so what keeps the Android path is that it is compiled into
+every installed app: the URL above is what a phone polls, and moving it strands
+every copy already out there. The iOS one stays because a stable link a person
+can bookmark beats hunting through Actions runs.
 
 `/ios/version.json` says which build the iOS link is currently serving. Nothing
 reads it — it is there to answer "is this the one I already installed?".

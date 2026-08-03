@@ -2,17 +2,21 @@
  *
  * Three jobs, and the credential is kept apart from two of them on purpose.
  *
- * RELEASE ASSETS. The repository is private, so its release assets answer 404
- * to anyone without a credential and an installed app could never discover an
- * update — nothing on the device could recover from that, the update mechanism
- * being the thing that broke. This holds a read-only GitHub token and re-serves
- * them. Those routes are fixed: none takes a URL, a repo or a path from the
- * caller, so the credential cannot be pointed anywhere.
+ * RELEASE ASSETS. These re-serve the release assets under stable, spellable
+ * paths. They were added while the repository was PRIVATE, when its assets
+ * answered 404 to anyone without a credential and an installed app could never
+ * have discovered an update — nothing on the device could recover from that,
+ * the update mechanism being the thing that broke. The repository is public
+ * now, so the credential is no longer what makes them reachable; what keeps
+ * them here is that `/app/version.json` and `/app/app-release.apk` are compiled
+ * into every installed Android app, so removing or renaming them strands every
+ * phone. The token stays because these routes still call the GitHub API, and
+ * they remain fixed: none takes a URL, a repo or a path from the caller, so the
+ * credential cannot be pointed anywhere.
  *
  * The iOS ones serve a DIFFERENT purpose from the Android ones, and it is worth
  * not confusing them. /app/* exists because an installed app has to be able to
- * find its own update; /ios/* exists because a private repository's release
- * assets 404 in a browser, so without it the owner cannot hand themselves a
+ * find its own update; /ios/* exists so the owner can hand themselves a stable
  * link to the latest IPA without going hunting through Actions runs for it.
  * Nothing on iOS self-updates and nothing reads /ios/version.json to decide
  * anything — it is there so a person can see what the link is currently
@@ -246,7 +250,11 @@ export function parseUploadsPage(html, limit = MAX_VIDEOS) {
  * cosmetic and a mangled one beats a missing one. */
 export function jsonUnescape(s) {
   return s.replace(/\\(u[0-9a-fA-F]{4}|.)/g, (whole, esc) => {
-    if (esc[0] === "u") return String.fromCharCode(parseInt(esc.slice(1), 16));
+    /* Length, not first character: a short \u12 does not match the four-hex
+     * branch, so `.` matches the bare "u" and esc is "u". Testing esc[0] made
+     * that parseInt("") -> NaN -> a U+0000 spliced into the title, which is
+     * the opposite of leaving an unrecognised escape alone. */
+    if (esc.length === 5) return String.fromCharCode(parseInt(esc.slice(1), 16));
     switch (esc) {
       case '"': case "\\": case "/": return esc;
       case "n": return "\n";
@@ -279,10 +287,22 @@ export function parseFeed(xml) {
   return out;
 }
 
+/* A numeric reference above U+10FFFF (or an unparseable one) is left as it was
+ * written rather than decoded. String.fromCodePoint THROWS on those, and a
+ * throw here escapes parseFeed, uploadsFor and the request itself — one
+ * malformed entity in an Atom feed would turn /uploads and /channel into a 500
+ * and discard a perfectly good uploads page along with it. Every parser in this
+ * file returns what it could read rather than throwing. */
+function codePoint(digits, radix, whole) {
+  const n = parseInt(digits, radix);
+  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return whole;
+  return String.fromCodePoint(n);
+}
+
 export function xmlUnescape(s) {
   return s
-    .replace(/&#x([0-9A-Fa-f]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#([0-9]+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&#x([0-9A-Fa-f]+);/g, (whole, h) => codePoint(h, 16, whole))
+    .replace(/&#([0-9]+);/g, (whole, d) => codePoint(d, 10, whole))
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
     .replace(/&amp;/g, "&"); /* last, so "&amp;lt;" stays "&lt;" */
@@ -317,11 +337,21 @@ async function fetchText(url, headers) {
    * same hour cost YouTube one page rather than a hundred. Shorter than the
    * app's own once-a-day rule so a channel that just posted is not stale for
    * long once somebody does ask. */
-  const r = await fetch(url, {
-    headers,
-    cf: { cacheTtl: 1800, cacheEverything: true },
-  });
-  return r.ok ? await r.text() : null;
+  /* A rejected fetch is a null, exactly like a non-ok one. fetch() rejects on a
+   * reset connection, a DNS failure or a subrequest limit, and uploadsFor awaits
+   * both halves with Promise.all — so an unguarded rejection on the feed would
+   * throw away a page that had already come back with a hundred videos, and take
+   * the whole request out with it. One source failing degrades the answer; it
+   * does not destroy it. */
+  try {
+    const r = await fetch(url, {
+      headers,
+      cf: { cacheTtl: 1800, cacheEverything: true },
+    });
+    return r.ok ? await r.text() : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 /* ---- channel resolution ---- */
@@ -358,17 +388,24 @@ export function parseChannelId(html) {
 
 /* A human name, so the approved list reads as names rather than 24-character
  * ids. Only ever cosmetic — nothing depends on it — so any failure falls back
- * to the id rather than blocking an approval. */
+ * to the id rather than blocking an approval.
+ *
+ * Both sources are HTML and both are entity-escaped, so both are decoded on the
+ * way out. "Ben &amp; Holly&#39;s Little Kingdom" is what an og:title attribute
+ * actually carries, and the phone stores whatever comes back verbatim — an
+ * undecoded name sits in the approved list until the channel is approved again.
+ * The other two title paths already decode (parseUploadsPage through
+ * jsonUnescape, parseFeed through xmlUnescape); this is the same step. */
 export function parseChannelTitle(html) {
   const og = html.match(/<meta[^>]+property="og:title"[^>]+content="([^"]{1,120})"/);
   if (og) {
-    const t = og[1].trim();
+    const t = xmlUnescape(og[1]).trim();
     if (t) return t;
   }
   const title = html.match(/<title>([^<]{1,120})<\/title>/);
   if (title) {
     /* the page title is "Name - YouTube" */
-    const t = title[1].replace(/ - YouTube$/, "").trim();
+    const t = xmlUnescape(title[1]).replace(/ - YouTube$/, "").trim();
     if (t) return t;
   }
   return null;
@@ -618,8 +655,10 @@ export default {
     }
 
     /* Same terms as /uploads: POST, and `env` is deliberately not passed on, so
-       nothing here can reach the GitHub credential. The input is a handle, a
-       video id or a channel id — never a URL. See the note above channel(). */
+       nothing here can reach the GitHub credential. The input is the URL the
+       app is standing on — which is not the exception it looks like, because
+       that string is never fetched: channelTargetFromUrl takes it apart and
+       BUILDS the address. See the note above channel(). */
     if (url.pathname === "/channel") {
       if (request.method !== "POST") return json({ error: "use POST" }, 405);
       return channel(request);

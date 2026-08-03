@@ -47,6 +47,22 @@ import TinyTubeCore
    anywhere, and capture stops the moment a measurement succeeds. */
 final class ScreenMeasurement {
 
+    /* ⚠️ ONE INSTANCE, HELD FOR THE LIFE OF THE PROCESS, and that is about
+       STOPPING rather than about tidiness.
+     *
+     * This used to be a `private let` on PlayerView, which is a STRUCT: any
+     * re-evaluation of the parent's body builds a new PlayerView value with a
+     * new ScreenMeasurement and drops the old one. Nothing else retained it, so
+     * an in-flight capture lost its owner — the frame handler's `guard let self`
+     * then failed on every frame, `stopCapture` was never called, and the system
+     * recording indicator stayed up over whatever the device did next. A whole-
+     * screen recording that nothing can stop is the exact opposite of the
+     * promise in the header above.
+     *
+     * A capture is wanted at most once per install anyway, so one shared
+     * instance is also the honest shape for it. */
+    static let shared = ScreenMeasurement()
+
     /* The same bottom fraction Android reads, so both platforms hand `Chrome`
        the same shape of input. */
     static let stripFraction = 0.4
@@ -54,6 +70,10 @@ final class ScreenMeasurement {
     private let recorder = RPScreenRecorder.shared()
     private var running = false
     private var delivered = false
+
+    /* Belt and braces for any instance that is not the shared one: going away
+       must not leave the screen being recorded. */
+    deinit { stop() }
 
     /* Starts a capture and calls back exactly once, with the measured height in
        POINTS, or nil if this device could not be measured.

@@ -12,8 +12,14 @@ enum WatchStore {
 
     /* Kept only as long as the widest window can ask about. A row older than
        the last rung of the ladder can never change an answer, so it is storage
-       spent on nothing. */
-    static var keepDays: Int { ChannelSort.windowsInDays.max() ?? 365 }
+       spent on nothing.
+
+       PLUS A FORTNIGHT, which WatchStore.kt has always had and this did not:
+       slack so a device whose clock moved does not lose the year it was
+       supposed to keep. Two platforms pruning different history from the same
+       plays would order "most watched" differently, which is the one thing this
+       table exists to decide. */
+    static var keepDays: Int { (ChannelSort.windowsInDays.max() ?? 365) + 14 }
     private static var keepMillis: Int64 { Int64(keepDays) * 24 * 60 * 60 * 1000 }
 
     /* One row per play rather than a counter per channel: "most watched in the

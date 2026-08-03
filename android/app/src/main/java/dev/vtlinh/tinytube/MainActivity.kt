@@ -252,8 +252,17 @@ class MainActivity : AppCompatActivity() {
         /* A channel approved and then removed while its videos were on screen —
            or a group dissolved because it dropped to one member — would
            otherwise leave the grid filtered to nothing, with a heading naming
-           something that is gone. */
-        if (filter != null && filterTitle() == null) filter = null
+           something that is gone.
+         *
+         * Dropping the filter is only half of it: the grid still holds the
+         * narrowed list until something recomputes it, and the coroutine in
+         * onResume returns early when nothing was refetched — which is exactly
+         * the ungroup case, where no channel and no video changed. So redraw
+         * here rather than hoping. */
+        if (filter != null && filterTitle() == null) {
+            filter = null
+            applyVideos()
+        }
     }
 
     /* Set when the gate was opened by the update notification rather than by

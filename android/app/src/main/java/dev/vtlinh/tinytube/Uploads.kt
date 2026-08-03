@@ -58,19 +58,26 @@ object Uploads {
         return out
     }
 
+    /* TYPE-STRICT, and `opt` rather than `optString`/`optLong` is what makes it
+     * so. org.json's opt*-with-a-default family COERCES: it turns a JSON number
+     * into a string and a numeric string into a long, while Swift's `as?` casts
+     * refuse both. So `{"id": 12345678901}` built a valid-looking eleven
+     * character id and a playable tile on Android and was dropped on iOS, and
+     * `"published": "1700000000"` dated a video on Android and left it undated —
+     * sorting to the bottom of the grid — on iOS. One reply, two different
+     * grids. Read the type the Worker actually sends, on both platforms. */
     private fun full(entry: JSONObject): Video? {
-        val id = entry.optString("id")
+        val id = entry.opt("id") as? String ?: return null
         if (!VideoId.isValid(id)) return null
-        val title = entry.optString("title").trim().ifEmpty { id }
-        /* 0 is not a real upload time and JSONObject cannot tell a missing
-           number from a zero, so it reads as "no date" — which sorts last
-           rather than to 1970. */
-        val published = entry.optLong("published", 0L).takeIf { it > 0 }
+        val title = (entry.opt("title") as? String)?.trim()?.ifEmpty { null } ?: id
+        /* 0 is not a real upload time, and neither is a negative one, so both
+           read as "no date" — which sorts last rather than to 1970. */
+        val published = (entry.opt("published") as? Number)?.toLong()?.takeIf { it > 0 }
         return Video(
             id = id,
             title = title,
             publishedAt = published,
-            thumbUrl = thumb(entry.optString("thumb"), id),
+            thumbUrl = thumb(entry.opt("thumb") as? String, id),
         )
     }
 

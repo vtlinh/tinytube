@@ -68,6 +68,41 @@ class PlayerTest {
         for (u in bad) assertFalse("should have refused: $u", Player.isPlayerUrl(u))
     }
 
+    /* The allowlist above must contain www.youtube.com — the embed iframe, the
+       IFrame API script and the player's XHRs are all served from it — and it
+       matches on host, so it accepts every real page on that host too. That is
+       correct for a SUBFRAME and wrong for the top document: while an ad plays
+       the overlay stops intercepting, and a tap on the branding YouTube draws
+       over one is a main-frame navigation to /watch that used to load the whole
+       mobile site inside the child's player, with no way back. */
+    @Test fun `a main-frame navigation may only be the wrapper's own origin`() {
+        val youtubePages = listOf(
+            "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+            "https://www.youtube.com/results?search_query=x",
+            "https://www.youtube.com/",
+            "https://youtube.com/feed/trending",
+            "https://i.ytimg.com/vi/aaaaaaaaaaa/hqdefault.jpg",
+        )
+        for (u in youtubePages) {
+            assertTrue("still fine in a subframe: $u", Player.isPlayerNavigation(u, mainFrame = false))
+            assertFalse("must not replace the player: $u", Player.isPlayerNavigation(u, mainFrame = true))
+        }
+
+        /* The wrapper's own origin is the one thing the top document may be —
+           it is what the app loads there. */
+        assertTrue(Player.isPlayerNavigation(Player.ORIGIN, mainFrame = true))
+        assertTrue(Player.isPlayerNavigation("${Player.ORIGIN}/", mainFrame = true))
+
+        /* and a lookalike of it is still not it */
+        assertFalse(
+            Player.isPlayerNavigation(
+                "https://www.youtube-nocookie.com.attacker.example/",
+                mainFrame = true,
+            ),
+        )
+        assertFalse(Player.isPlayerNavigation("javascript:alert(1)", mainFrame = true))
+    }
+
     /* Non-http schemes have no host to check. intent:// in particular is how a
        page hands control to another installed app. */
     @Test fun `refuses non-http schemes outright`() {
@@ -90,6 +125,16 @@ class PlayerTest {
         assertEquals("www.youtube.com", Player.hostOf("https://WWW.YouTube.COM/x"))
         assertEquals("www.youtube.com", Player.hostOf("https://www.youtube.com:443/x"))
         assertEquals("attacker.example", Player.hostOf("https://www.youtube.com@attacker.example/x"))
+        assertEquals("www.youtube.com", Player.hostOf("https://user:pw@www.youtube.com/x"))
+        /* The LAST '@' is the split, which is where a browser splits and where
+           the request goes. Reading the first gave "evil.example@yt3.ggpht.com"
+           here and "yt3.ggpht.com" on iOS — one lock, two answers, and pinned
+           on the Swift side only, which is why neither suite noticed. */
+        assertEquals("attacker.example", Player.hostOf("https://a@b@attacker.example/"))
+        assertEquals(
+            "yt3.ggpht.com",
+            Player.hostOf("https://a@evil.example@yt3.ggpht.com/x"),
+        )
     }
 
     @Test fun `builds a page for a valid id`() {

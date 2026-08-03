@@ -133,6 +133,13 @@ test("unescapes json escapes in titles", () => {
 test("leaves an unknown escape alone", () => {
   assert.equal(jsonUnescape("a\\qb"), "a\\qb");
   assert.equal(jsonUnescape("trailing\\"), "trailing\\");
+  /* The one that used to be dropped: a \u with fewer than four hex digits does
+   * not match the four-hex branch, so "u" alone is the escape. Testing the
+   * first character instead of the length turned it into parseInt("") -> NaN
+   * -> a U+0000 spliced into a title a child's tile then drew. */
+  assert.equal(jsonUnescape("a\\u12"), "a\\u12");
+  assert.equal(jsonUnescape("a\\u12b"), "a\\u12b");
+  assert.ok(!jsonUnescape("a\\u12").includes(String.fromCharCode(0)), "no NUL spliced in");
 });
 
 /* Every one of these is a real response: an error, a consent interstitial, the
@@ -179,6 +186,25 @@ test("unescapes xml entities and does not double-unescape", () => {
   assert.equal(xmlUnescape("Ten &amp; Two"), "Ten & Two");
   assert.equal(xmlUnescape("caf&#233;"), "café");
   assert.equal(xmlUnescape("&amp;lt;"), "&lt;");
+});
+
+/* String.fromCodePoint THROWS above U+10FFFF, and a throw here does not stay
+ * here: it escapes parseFeed, uploadsFor and the request, so one malformed
+ * entity turned /uploads and /channel into a 500 and threw away a hundred-video
+ * page that had already parsed. Out of range is left as written. */
+test("an out-of-range numeric reference is left alone rather than thrown on", () => {
+  assert.equal(xmlUnescape("&#x110000;"), "&#x110000;");
+  assert.equal(xmlUnescape("&#99999999;"), "&#99999999;");
+  assert.equal(xmlUnescape("&#xFFFFFFFFFFFF;"), "&#xFFFFFFFFFFFF;");
+  /* still inside range, so still decoded */
+  assert.equal(xmlUnescape("&#x10FFFF;"), String.fromCodePoint(0x10ffff));
+});
+
+test("a feed carrying one is a parsed entry, not a thrown request", () => {
+  const d = parseFeed(feed(feedEntry("aaaaaaaaaaa", "&#x110000;", "2026-07-29T15:58:06+00:00")));
+  assert.equal(d.size, 1);
+  assert.equal(d.get("aaaaaaaaaaa").title, "&#x110000;");
+  assert.equal(d.get("aaaaaaaaaaa").published, 1785340686);
 });
 
 /* ---- the sort keys ---- */
@@ -287,6 +313,26 @@ test("reads the channel title, falling back to the page title", () => {
   );
   assert.equal(parseChannelTitle("<html>nothing</html>"), null);
   assert.equal(parseChannelTitle(""), null);
+});
+
+/* Both sources are HTML and both are escaped. The phone stores this string
+ * verbatim as the channel's name, so an undecoded one sits in the approved list
+ * and on the child's Channels tab until the channel is approved again. */
+test("decodes entities in the channel title, from either source", () => {
+  assert.equal(
+    parseChannelTitle(
+      `<meta property="og:title" content="Ben &amp; Holly&#39;s Little Kingdom">`,
+    ),
+    "Ben & Holly's Little Kingdom",
+  );
+  assert.equal(
+    parseChannelTitle("<html><head><title>Ten &amp; Two - YouTube</title></head>"),
+    "Ten & Two",
+  );
+  assert.equal(
+    parseChannelTitle(`<meta property="og:title" content="A &quot;B&quot;">`),
+    'A "B"',
+  );
 });
 
 /* Cosmetic, but the phone stores it and later fetches and draws it — so an

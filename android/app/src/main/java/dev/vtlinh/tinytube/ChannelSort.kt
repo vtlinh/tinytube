@@ -87,5 +87,14 @@ object ChannelSort {
         }
     }
 
-    private val BY_NAME = compareBy<Channel> { it.title.trim().ifEmpty { it.id }.lowercase() }
+    /* Name, then id. The id is load-bearing rather than decoration, and it is
+       here for the platform that does NOT have this file: two channels whose
+       titles trim and lowercase to the same string compare equal, Kotlin's sort
+       is stable and would hold them in the store's order, and Swift's is not —
+       so the approved list and the child's Channels tab would swap those rows
+       between redraws on iOS only. Bought explicitly on both sides so the two
+       agree by construction rather than by luck. Same reason ChannelGroups
+       sorts headers by name-then-id and Library by key-then-index. */
+    private val BY_NAME =
+        compareBy<Channel>({ it.title.trim().ifEmpty { it.id }.lowercase() }, { it.id })
 }

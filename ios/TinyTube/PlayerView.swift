@@ -36,11 +36,18 @@ struct PlayerView: View {
     @State private var paused = false
     @State private var showingAd = false
     @State private var failures = 0
+    /* This video's play has been written to the watch history. Reset when the
+       index moves, never by a pause — pausing is not a second view. */
+    @State private var counted = false
     @State private var blockPoints = PlayerChrome.currentPoints()
     @State private var holdTask: Task<Void, Never>?
     @State private var liftTask: Task<Void, Never>?
 
-    private let measurement = ScreenMeasurement()
+    /* The shared one, NOT a fresh instance. A View is a struct: a `let` here was
+       rebuilt on every body re-evaluation, dropping an in-flight capture's only
+       owner and leaving the screen recording with nothing left to stop it. See
+       ScreenMeasurement.shared. */
+    private let measurement = ScreenMeasurement.shared
 
     /* A list where everything fails would otherwise be walked end to end in a
        moment — or, in RANDOM's case, never stop at all. */
@@ -82,7 +89,8 @@ struct PlayerView: View {
                         videoId: current.id,
                         onState: applyState,
                         onEnded: playNext,
-                        onError: handleError
+                        onError: handleError,
+                        onAd: { ad in showingAd = ad }
                     )
                     .ignoresSafeArea()
                     .id(current.id)
@@ -138,7 +146,14 @@ struct PlayerView: View {
                setting, so the player asks and AppDelegate answers. */
             OrientationLock.lockToLandscape()
         }
-        .onDisappear { OrientationLock.unlock() }
+        .onDisappear {
+            OrientationLock.unlock()
+            /* The player closing ends any capture with it. Nothing else would:
+               the 8-second watchdog is a backstop, not a policy, and a whole-
+               screen recording outliving the screen that asked for it is the
+               one thing this must never do. */
+            measurement.stop()
+        }
         /* GONE THE WHOLE TIME THE PLAYER IS UP, lifted overlay or not — the same
            rule Android applies to its status and navigation bars.
          *
@@ -154,11 +169,17 @@ struct PlayerView: View {
          * for the scrubber. */
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
-        .onAppear { recordWatch() }
+        /* ⚠️ `failures` IS NOT RESET HERE. It used to be, and that made the
+           "give up after three unplayable videos" bound dead code: handleError
+           moves the index, this fired, the counter went back to 0 and could
+           never exceed 1. A grid where everything is unplayable then looped
+           error → playNext → error forever on a black screen, with no system
+           back button, no visible chevron and every tap swallowed — nothing a
+           child could do. It resets on real playback instead, in applyState,
+           exactly as PlayerActivity does. */
         .onChange(of: index) { _ in
             glowedThisVideo = false
-            failures = 0
-            recordWatch()
+            counted = false
         }
         .onChange(of: scenePhase) { phase in
             /* Backgrounded mid-video: put the overlay back rather than
@@ -341,11 +362,25 @@ struct PlayerView: View {
     // MARK: - Playback
 
     private func applyState(_ state: Int) {
+        /* Pause to play is somebody pressing play, and that is the clearest
+           statement there is that they are finished with the controls. It has
+           to be the TRANSITION, not the state: treating every PLAYING report as
+           "they pressed play" would drop the overlay on the far side of a
+           buffering stall, seconds into a scrub nobody had finished. Mirrors
+           PlayerActivity's `resumed`. */
+        let resumed = state == PlayerWebView.PlayerState.playing && paused
+
         switch state {
         case PlayerWebView.PlayerState.playing:
             paused = false
-            /* Playback resuming arms the countdown that pausing disarmed. */
-            restartIdleTimer()
+            /* Counted here, on the transition into real playback, and NOT on
+               the index changing. `handleError` walks the index forward on every
+               unplayable video, so counting there charged the failures to the
+               ladder — and a tile tapped and abandoned before its first frame is
+               not something anybody watched. PlayerActivity has always done it
+               this way. */
+            failures = 0
+            noteWatched()
             /* The first glow of a video waits for this rather than firing when
                the screen opened, against a black rectangle. */
             if !glowedThisVideo {
@@ -355,20 +390,39 @@ struct PlayerView: View {
             }
         case PlayerWebView.PlayerState.paused:
             paused = true
-            /* And pausing disarms it, so the overlay does not drop back over an
-               adult who paused precisely in order to look at something. */
-            restartIdleTimer()
         default:
             break
         }
+
+        /* Play pressed puts the overlay back at once; anything else re-arms the
+           countdown, which is also what disarms it on a pause so the overlay
+           does not drop over an adult who paused to look at something. */
+        if resumed && overlayLifted { lower() } else { restartIdleTimer() }
     }
+
+    /* Has this PROCESS already spent one of the three attempts?
+     *
+     * measureOnce runs on the first PLAYING of EVERY video, so without this the
+     * budget was spent per video rather than per launch: three videos in one
+     * sitting with AirPlay or screen mirroring on — where `recorder.isAvailable`
+     * is false, which ScreenMeasurement calls "try again another day" —
+     * exhausted it, `shouldMeasure` was false forever, and the blocker was stuck
+     * on its 16-point fallback for the life of the install. BlockHeightStore's
+     * own comment says what the counter means: within one process the consent
+     * alert has already been shown, so retrying costs the user nothing, and it
+     * is the NEXT LAUNCH that would prompt again. The latch is here rather than
+     * inside the store so the store stays a plain counter. */
+    private static var attemptChargedThisProcess = false
 
     /* Once per install, and only while a video is actually playing — a capture
        taken against the loading rectangle has no seek bar in it. See
        ScreenMeasurement for why "once" matters so much here. */
     private func measureOnce() {
         guard BlockHeightStore.shouldMeasure() else { return }
-        BlockHeightStore.noteSessionSpent()
+        if !Self.attemptChargedThisProcess {
+            Self.attemptChargedThisProcess = true
+            BlockHeightStore.noteSessionSpent()
+        }
         measurement.measure(scale: UIScreen.main.scale) { points in
             /* A failure stores NOTHING. `Chrome.blockHeight` returns nil for
                "could not tell" precisely so a blank frame cannot be written
@@ -381,8 +435,16 @@ struct PlayerView: View {
         }
     }
 
-    private func recordWatch() {
-        guard let current else { return }
+    /* Count this video once, when it actually starts.
+     *
+     * On PLAYING rather than on the tap that opened it or on the index moving:
+     * a video abandoned before its first frame is not something anybody
+     * watched, and the list this feeds is meant to say what is actually being
+     * watched. Once per video, because pausing is not a second view.
+     * Counterpart of PlayerActivity.noteWatched. */
+    private func noteWatched() {
+        guard !counted, let current else { return }
+        counted = true
         WatchStore.record(videoId: current.id, now: Int64(Date().timeIntervalSince1970 * 1000))
     }
 
@@ -397,6 +459,10 @@ struct PlayerView: View {
             onClose()
             return
         }
+        /* A parent who lifted the overlay to scrub the last one has not asked
+           for the next one to arrive unprotected. PlayerActivity.playNext does
+           the same on its own line. */
+        if overlayLifted { lower() }
         index = next
     }
 

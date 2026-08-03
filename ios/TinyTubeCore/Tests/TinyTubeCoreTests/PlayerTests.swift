@@ -69,6 +69,34 @@ final class PlayerTests: XCTestCase {
         }
     }
 
+    /* The allowlist must contain www.youtube.com — the embed iframe, the API
+       script and the player's XHRs all come from it — and it matches on host,
+       so it accepts every real page on that host too. Correct for a SUBFRAME
+       and wrong for the top document, which is the child's player. */
+    func testAMainFrameNavigationMayOnlyBeTheWrappersOwnOrigin() {
+        for url in ["https://www.youtube.com/watch?v=aaaaaaaaaaa",
+                    "https://www.youtube.com/results?search_query=x",
+                    "https://www.youtube.com/",
+                    "https://youtube.com/feed/trending",
+                    "https://i.ytimg.com/vi/aaaaaaaaaaa/hqdefault.jpg"] {
+            XCTAssertTrue(
+                Player.isPlayerNavigation(url, mainFrame: false),
+                "still fine in a subframe: \(url)"
+            )
+            XCTAssertFalse(
+                Player.isPlayerNavigation(url, mainFrame: true),
+                "must not replace the player: \(url)"
+            )
+        }
+
+        XCTAssertTrue(Player.isPlayerNavigation(Player.origin, mainFrame: true))
+        XCTAssertTrue(Player.isPlayerNavigation(Player.origin + "/", mainFrame: true))
+        XCTAssertFalse(
+            Player.isPlayerNavigation("https://www.youtube-nocookie.com.attacker.example/", mainFrame: true)
+        )
+        XCTAssertFalse(Player.isPlayerNavigation("javascript:alert(1)", mainFrame: true))
+    }
+
     /* No host, no navigation. These are how a page escapes a web view into the
        device rather than into another site. */
     func testRefusesNonHttpSchemes() {
@@ -104,8 +132,41 @@ final class PlayerTests: XCTestCase {
        literal. */
     func testThePageCarriesTheIdAndNoQuoteBreakingIt() {
         let page = Player.pageFor(videoId: "dQw4w9WgXcQ")!
-        XCTAssertTrue(page.contains("videoId: 'dQw4w9WgXcQ'"))
+        XCTAssertTrue(page.contains("ourId = 'dQw4w9WgXcQ'"))
         XCTAssertTrue(page.contains(Player.origin) || page.contains("youtube.com/iframe_api"))
+    }
+
+    /* Ported from PlayerTest.kt, and the reason this file now has it: the
+       Kotlin page's 500ms tick loop reports every ad transition and ends a
+       video a fraction early so YouTube's terminal end screen never renders,
+       and NONE of it was in the Swift page. PlayerView's `showingAd` was
+       therefore never assigned — an ad sat under a clear overlay that swallowed
+       every tap — and a video played to its natural end drew a grid of related
+       videos on a child's screen. Both platforms build the same page; these
+       assertions are what says so. */
+    func testThePageReportsStateAndAdsBack() {
+        let page = Player.pageFor(videoId: "dQw4w9WgXcQ")!
+        XCTAssertTrue(page.contains("Bridge.onState"))
+        XCTAssertTrue(page.contains("Bridge.onEnded"))
+        XCTAssertTrue(page.contains("Bridge.onError"))
+        XCTAssertTrue(page.contains("Bridge.onAd"))
+    }
+
+    func testThePageEndsEarlySoTheEndScreenNeverRenders() {
+        let page = Player.pageFor(videoId: "dQw4w9WgXcQ")!
+        XCTAssertTrue(page.contains("function tick()"), "the ad/end poll has to exist")
+        XCTAssertTrue(page.contains("looksLikeAd"))
+        XCTAssertTrue(page.contains("pauseVideo()"))
+    }
+
+    /* The parameters that actually do something. controls is deliberately not
+       among them — controls: 0 leaves the mobile embed's centre play/pause and
+       title anyway, so the chrome is covered rather than asked away. */
+    func testThePageTurnsOffTheParametersThatLeadElsewhere() {
+        let page = Player.pageFor(videoId: "dQw4w9WgXcQ")!
+        XCTAssertTrue(page.contains("iv_load_policy: 3"), "annotations must be off")
+        XCTAssertTrue(page.contains("disablekb: 1"), "keyboard shortcuts must be off")
+        XCTAssertTrue(page.contains("rel: 0"), "related videos must be off")
     }
 
     /* THE PLAYER RUNS ON THE NOCOOKIE DOMAIN, and this pins it because moving

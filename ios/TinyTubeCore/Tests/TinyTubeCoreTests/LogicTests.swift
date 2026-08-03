@@ -161,6 +161,29 @@ final class ChannelSortTests: XCTestCase {
         )
     }
 
+    /* Two titles that trim and lowercase to the same string compare EQUAL, and
+       Swift's sort is not stable — so without an explicit tiebreaker this list
+       reorders itself between redraws here while Kotlin holds it. Both sorts
+       break the tie on the id, and both suites pin it. */
+    func testEqualNamesAreBrokenByTheIdNotByTheOrderIn() {
+        let first = Channel(id: "UC" + String(repeating: "b", count: 22), title: "Numberblocks", addedAt: 2)
+        let second = Channel(id: "UC" + String(repeating: "a", count: 22), title: " numberblocks ", addedAt: 1)
+        let expected = [second.id, first.id]
+
+        XCTAssertEqual(ChannelSort.sort([first, second], mode: .aToZ).map(\.id), expected)
+        XCTAssertEqual(ChannelSort.sort([second, first], mode: .aToZ).map(\.id), expected)
+
+        let counts: [[String: Int]] = [[first.id: 3, second.id: 3], [:], [:]]
+        XCTAssertEqual(
+            ChannelSort.sort([first, second], mode: .mostWatched, countsByWindow: counts).map(\.id),
+            expected
+        )
+        XCTAssertEqual(
+            ChannelSort.sort([second, first], mode: .mostWatched, countsByWindow: counts).map(\.id),
+            expected
+        )
+    }
+
     func testTheLadderIsSevenThirtyThreeSixtyFive() {
         XCTAssertEqual(ChannelSort.windowsInDays, [7, 30, 365])
     }

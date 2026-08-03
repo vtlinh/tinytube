@@ -10,10 +10,12 @@ import TinyTubeCore
    THE PHONE DOES NOT FETCH THE PAGE TO FIND OUT. Reading a channel page is the
    Worker's job, for the same reason the uploads parsing is: otherwise every
    approval downloads megabytes of somebody else's web app to read one
-   24-character string out of it. The phone sends a HANDLE or a CHANNEL ID —
-   never the URL — and the Worker builds every URL it fetches from the validated
-   value. See the note above channel() in worker.js for why that distinction is
-   what lets the route take input at all.
+   24-character string out of it. The phone sends THE URL it is standing on,
+   as-is — see the note further down — and that is not a way to point the Worker
+   at an arbitrary host: the string is never fetched. The Worker parses it,
+   demands a YouTube channel-page host and a path of exactly /channel/UC… or
+   /@handle, and BUILDS the address it fetches. See the note above channel() in
+   worker.js for why that distinction is what lets the route take input at all.
 
    Curation has not moved. The reply says which channel a page is for; whether a
    child may watch it is ChannelStore, on this device. */

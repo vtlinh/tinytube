@@ -133,13 +133,28 @@ public enum ChannelSort {
                 let ca = counts[a.id] ?? 0
                 let cb = counts[b.id] ?? 0
                 if ca != cb { return ca > cb }
-                return sortKey(a) < sortKey(b)
+                return before(a, b)
             }
         }
     }
 
     private static func byName(_ channels: [Channel]) -> [Channel] {
-        channels.sorted { sortKey($0) < sortKey($1) }
+        channels.sorted(by: before)
+    }
+
+    /* Name, then id. The id is load-bearing rather than decoration: two channels
+       whose titles trim and lowercase to the same string compare equal, and
+       SWIFT'S SORT IS NOT STABLE — so the approved list and the child's Channels
+       tab could swap those rows between redraws, on this platform only, with
+       Kotlin holding them in the store's order. ChannelSort.kt buys the same
+       tiebreaker so the two agree by construction rather than by luck; the
+       sibling files here already did (ChannelGroups by name-then-id, Library by
+       key-then-index) and this one was missed. */
+    private static func before(_ a: Channel, _ b: Channel) -> Bool {
+        let ka = sortKey(a)
+        let kb = sortKey(b)
+        if ka != kb { return ka < kb }
+        return a.id < b.id
     }
 
     private static func sortKey(_ c: Channel) -> String {

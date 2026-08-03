@@ -81,12 +81,20 @@ enum VideoStore {
          * posts daily pushes a video off the end of its hundred every day, and
          * without this each one leaves a poster on disk for the life of the
          * install. Read here rather than after the write: afterwards there is
-         * nothing left to read. */
+         * nothing left to read.
+         *
+         * BOTH SIDES USE `thumbnailURL`, NOT `thumb_url`. The column is
+         * nullable — Uploads.thumb answers nil for a reply with no thumb, or one
+         * from an unexpected host — and the grid then draws the DERIVED
+         * i.ytimg.com URL, which is the name the JPEG is cached under. Reading
+         * the column alone made those posters invisible to this comparison, so a
+         * video dropping off the end of the hundred left its file on disk for
+         * the life of the install. */
         let before: [String] = (try? Database.shared.read(
-            "SELECT thumb_url FROM videos WHERE channel_id = ?",
+            "SELECT video_id, thumb_url FROM videos WHERE channel_id = ?",
             [.text(channelId)],
-            row: { $0.stringOrNil(0) }
-        ))?.compactMap { $0 } ?? []
+            row: { Video(id: $0.string(0), title: "", thumbURL: $0.stringOrNil(1)).thumbnailURL }
+        )) ?? []
 
         do {
             try Database.shared.transaction {
@@ -124,7 +132,7 @@ enum VideoStore {
             return
         }
 
-        let kept = Set(videos.compactMap { $0.thumbURL })
+        let kept = Set(videos.map { $0.thumbnailURL })
         ImageStore.forget(before.filter { !kept.contains($0) })
     }
 

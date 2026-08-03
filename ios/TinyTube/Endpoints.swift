@@ -28,8 +28,10 @@ enum Endpoints {
 
     static var uploads: URL { URL(string: "\(worker)/uploads")! }
 
-    /* Which channel a page is for. Takes a handle or a channel id — never a
-       URL, which is what lets this route take input at all. See ChannelResolver
-       and the note above channel() in worker.js. */
+    /* Which channel a page is for. Takes THE URL the app is standing on — which
+       is not the exception it looks like, because that string is never fetched:
+       the Worker parses it, demands a YouTube channel-page host and a path of
+       exactly /channel/UC… or /@handle, and BUILDS the address it fetches. See
+       ChannelResolver and the note above channel() in worker.js. */
     static var channel: URL { URL(string: "\(worker)/channel")! }
 }

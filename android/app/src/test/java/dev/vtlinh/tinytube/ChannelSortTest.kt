@@ -44,6 +44,30 @@ class ChannelSortTest {
         )
     }
 
+    /* Two titles that trim and lowercase to the same string compare EQUAL, and
+       Swift's sort is not stable — so without an explicit tiebreaker the two
+       platforms answer differently and iOS answers differently between redraws.
+       Both sorts break the tie on the id, and both suites pin it. */
+    @Test fun `equal names are broken by the id, not by the order in`() {
+        val first = Channel(id = "UC" + "b".repeat(22), title = "Numberblocks", addedAt = 2)
+        val second = Channel(id = "UC" + "a".repeat(22), title = " numberblocks ", addedAt = 1)
+        val expected = listOf(second.id, first.id)
+
+        assertEquals(expected, ChannelSort.sort(listOf(first, second), ChannelSort.Mode.A_Z).map { it.id })
+        assertEquals(expected, ChannelSort.sort(listOf(second, first), ChannelSort.Mode.A_Z).map { it.id })
+
+        /* and the same key breaks a most-watched tie */
+        val counts = listOf(mapOf(first.id to 3, second.id to 3), emptyMap(), emptyMap())
+        assertEquals(
+            expected,
+            ChannelSort.sort(listOf(first, second), ChannelSort.Mode.MOST_WATCHED, counts).map { it.id },
+        )
+        assertEquals(
+            expected,
+            ChannelSort.sort(listOf(second, first), ChannelSort.Mode.MOST_WATCHED, counts).map { it.id },
+        )
+    }
+
     /* ---- the ladder ---- */
 
     @Test fun `the ladder is seven, thirty, three hundred and sixty five days`() {
