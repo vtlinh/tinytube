@@ -49,6 +49,23 @@ class YouTubeUrlsTest {
         assertNull(YouTubeUrls.handleFromUrl("javascript:/@nope"))
     }
 
+    /* Both extractors read the PATH, not the URL. Scanning the whole string
+       meant `/@SomeChannel?u=/channel/UC…` was a live approve button — the page
+       is a handle page, so isChannelPage said yes — that approved the id out of
+       the QUERY: a different channel from the one in the URL bar, into a
+       child's grid. The mirror case wrote the wrong handle against a right id.
+       Swift answered nil to both all along; this is the Kotlin half. */
+    @Test fun `an id or handle in the query is not the page's own`() {
+        assertNull(YouTubeUrls.channelIdFromUrl("https://m.youtube.com/@SomeChannel?u=/channel/$ok"))
+        assertNull(YouTubeUrls.channelIdFromUrl("https://m.youtube.com/results?q=/channel/$ok"))
+        assertNull(YouTubeUrls.channelIdFromUrl("https://m.youtube.com/@SomeChannel#/channel/$ok"))
+        assertNull(YouTubeUrls.handleFromUrl("https://m.youtube.com/channel/$ok?x=/@Someone"))
+        assertNull(YouTubeUrls.handleFromUrl("https://m.youtube.com/watch?v=aaaaaaaaaaa&u=/@Someone"))
+        /* and the real ones still read */
+        assertEquals("SomeChannel", YouTubeUrls.handleFromUrl("https://m.youtube.com/@SomeChannel?u=/channel/$ok"))
+        assertEquals(ok, YouTubeUrls.channelIdFromUrl("https://m.youtube.com/channel/$ok?x=/@Someone"))
+    }
+
     /* Reading a channel page is the Worker's job now, so the tests that pinned
        channelIdFromHtml, channelTitleFromHtml and channelAvatarFromHtml went
        with it — see worker.test.mjs, which runs in the same CI job this does.

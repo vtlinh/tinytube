@@ -21,6 +21,20 @@ on:
     workflows: ["android", "ios"]
     types: [completed]
 
+# ONE MERGE JOB PER COMMIT, and this is not decoration.
+#
+# Both platform workflows trigger this, and on a PR where ios-app skips — any
+# Android-only or docs-only change — the ios run finishes within seconds of the
+# android one. Both jobs then read the same all-green check-runs list, both
+# reach the merge, and the loser's `gh pr merge` fails but does not stop it
+# dispatching a SECOND publish. android.yml's android-latest concurrency group
+# does not collapse those (cancel-in-progress: false), so they queue; the second
+# one's reuse is refused by the versionCode guard and it rebuilds and ships a
+# higher build number wrapping identical source, to every installed device.
+concurrency:
+  group: auto-merge-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
 # A permissions block REPLACES the defaults rather than adding to them, so
 # every scope this job touches has to be listed. Leaving one out does not fail
 # loudly: the call 403s with "Resource not accessible by integration", naming
@@ -182,7 +196,16 @@ jobs:
               esac
             done
           else
-            echo "Could not read the commit's check runs; proceeding on this run's result alone."
+            # FAILS CLOSED. This used to fall through and merge on one
+            # platform's result, with iOS never consulted — so a transient 5xx,
+            # a secondary rate limit, or a `checks` scope regression like the
+            # one the header above describes would merge a PR whose ios-core or
+            # ios-app was red or still queued, and the next lines would publish
+            # an APK for a change whose other half was never verified. Not
+            # merging costs nothing: the other workflow's completion raises this
+            # event again.
+            echo "Could not read the commit's check runs — treating that as not-yet."
+            exit 0
           fi
 
           # And anything else reporting on the commit — the Cloudflare Workers
@@ -197,7 +220,11 @@ jobs:
                    | .name] | join(", ")' 2>/dev/null); then
             FAILED="$OUT"
           else
-            echo "Could not read the commit's check runs; proceeding on the android result alone."
+            # Same fail-closed rule as above: an unreadable answer is not an
+            # answer, and a commit carrying a genuinely failed check would
+            # otherwise merge on it.
+            echo "Could not read the commit's check runs — treating that as not-yet."
+            exit 0
           fi
           if [ -n "$FAILED" ]; then
             echo "Not merging PR #$PR — failing checks: $FAILED"
@@ -205,7 +232,18 @@ jobs:
           fi
 
           echo "Merging PR #$PR"
-          gh pr merge "$PR" --repo "$REPO" --merge
+          # CHECKED, because this script runs under `set -uo pipefail` and NOT
+          # -e: without the test every line below ran regardless of whether the
+          # merge happened. A PR whose branch had drifted into conflict, or one
+          # the sibling workflow_run event had already merged, therefore went on
+          # to dispatch a publish — on a main whose android/ tree is not the one
+          # the offered run built, so the reuse is refused, main is rebuilt, and
+          # a brand-new versionCode wrapping identical code goes to every
+          # installed phone. Repeated on every red-then-green cycle.
+          if ! gh pr merge "$PR" --repo "$REPO" --merge; then
+            echo "Could not merge PR #$PR — not publishing anything."
+            exit 1
+          fi
 
           # A push made with GITHUB_TOKEN deliberately does not trigger further
           # workflow runs, which would leave this merge sitting on main with no
@@ -230,11 +268,22 @@ jobs:
           # direction to be wrong in is the one where an app change quietly
           # never ships.
           # BOTH platforms publish now, each filtered to its own half. iOS
-          # publishes an IPA to ios-latest for the same reason Android
-          # publishes an APK to android-latest: the repository is private, so a
-          # release asset is the only thing the Worker can re-serve at a fixed
-          # URL. What differs is who reads it — an installed Android app polls
-          # for its update, while the iOS link is for a person with a browser.
+          # publishes an IPA to ios-latest for the same reason Android publishes
+          # an APK to android-latest: a release asset at a fixed URL is what the
+          # Worker re-serves, and `/app/version.json` and `/app/app-release.apk`
+          # are compiled into every installed Android app. What differs is who
+          # reads it — an installed Android app polls for its update, while the
+          # iOS link is for a person with a browser.
+          #
+          # THE PATTERNS BELOW MIRROR EACH WORKFLOW'S OWN "does this change the
+          # artifact" LIST — android.yml's APK case and ios.yml's IPA case — not
+          # the whole directory. Matching android/* published for a test-only PR:
+          # that PR's own run built no APK, so the dispatched publish has nothing
+          # to reuse, rebuilds main and ships a new versionCode to every device
+          # for a change that cannot affect the app. The iOS version of that also
+          # buys ten macOS minutes to archive an unchanged IPA. If either list
+          # changes there, change it here — they are the same question asked
+          # twice.
           PUB_ANDROID=yes
           PUB_IOS=yes
           if FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
@@ -242,10 +291,13 @@ jobs:
             PUB_IOS=no
             for f in $FILES; do
               case "$f" in
-                android/*) PUB_ANDROID=yes ;;
+                android/app/src/main/*|android/app/build.gradle.kts|\
+                android/build.gradle.kts|android/gradle.properties|\
+                android/settings.gradle.kts) PUB_ANDROID=yes ;;
               esac
               case "$f" in
-                ios/*) PUB_IOS=yes ;;
+                ios/TinyTube/*|ios/TinyTubeCore/Sources/*|\
+                ios/project.yml|ios/TinyTubeCore/Package.swift) PUB_IOS=yes ;;
               esac
             done
           else
@@ -258,7 +310,7 @@ jobs:
           # the time — and handing android's run id to the iOS publish offers
           # it an artifact that isn't there. The reuse check would refuse it and
           # fall through to a full macOS build: correct output, ten minutes of
-          # a 200-minute budget spent for nothing, on every iOS merge.
+          # macOS runner time spent for nothing, on every iOS merge.
           #
           # Empty is a fine answer. It means "nothing offered", and the publish
           # simply builds — which is the same thing an unusable offer produces,
@@ -278,7 +330,7 @@ jobs:
             echo "Dispatching the android publish on main, offering run $OFFER's APK"
             gh workflow run android.yml --repo "$REPO" --ref main -f reuse_run_id="$OFFER"
           else
-            echo "PR #$PR touched nothing under android/ — not publishing an APK."
+            echo "PR #$PR changed nothing that goes into the APK — not publishing one."
           fi
 
           if [ "$PUB_IOS" = "yes" ]; then
@@ -286,5 +338,5 @@ jobs:
             echo "Dispatching the ios publish on main, offering run ${OFFER:-<none>}'s IPA"
             gh workflow run ios.yml --repo "$REPO" --ref main -f reuse_run_id="$OFFER"
           else
-            echo "PR #$PR touched nothing under ios/ — not publishing an IPA."
+            echo "PR #$PR changed nothing that goes into the IPA — not publishing one."
           fi

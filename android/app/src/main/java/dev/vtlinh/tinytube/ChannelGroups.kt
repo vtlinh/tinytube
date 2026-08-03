@@ -48,6 +48,7 @@ object ChannelGroups {
         val ordered = groups.sortedWith(
             compareBy<Group> { it.name.trim().lowercase() }.thenBy { it.id },
         )
+        val drawn = mutableSetOf<String>()
         for (group in ordered) {
             val members = byGroup[group.id].orEmpty()
             /* A group with fewer than two members should not exist — see
@@ -55,12 +56,19 @@ object ChannelGroups {
                into that state through some path nobody thought of does not put
                a header with nothing under it on a parent's screen. */
             if (members.size < 2) continue
+            drawn += group.id
             rows += Row.Header(group, members.size)
             rows += ChannelSort.sort(members, mode, countsByWindow)
                 .map { Row.Item(it, grouped = true) }
         }
 
-        val loose = channels.filter { it.groupId == null }
+        /* Loose is "not under a header that was drawn", NOT "groupId is null".
+           A channel naming a group that was skipped above — or one that no
+           longer exists — used to fall out of BOTH halves and vanish from the
+           list entirely: still approved, still filling the child's grid, still
+           playing, and invisible on the one screen that can un-approve it. A
+           defensive skip must never hide a channel from the parent. */
+        val loose = channels.filter { it.groupId == null || it.groupId !in drawn }
         rows += ChannelSort.sort(loose, mode, countsByWindow)
             .map { Row.Item(it, grouped = false) }
         return rows

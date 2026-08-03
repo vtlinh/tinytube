@@ -83,6 +83,28 @@ final class UploadsTests: XCTestCase {
         XCTAssertNil(Uploads.parse(reply(full(a, published: 0)), known: [:]).first?.publishedAt)
     }
 
+    /* Kotlin's org.json COERCES and these `as?` casts do not, so a reply
+       carrying the wrong type used to build a different grid on each platform.
+       Both are type-strict now, and both suites pin the same three cases. */
+    func testAValueOfTheWrongTypeIsNotCoerced() {
+        XCTAssertTrue(
+            Uploads.parse(#"{"videos":[{"id":12345678901,"title":"x"}]}"#, known: [:]).isEmpty
+        )
+        XCTAssertTrue(
+            Uploads.parse(#"{"videos":[{"id":null,"title":"x"}]}"#, known: [:]).isEmpty
+        )
+        XCTAssertNil(
+            Uploads.parse(#"{"videos":[{"id":"\#(a)","published":"1700000000"}]}"#, known: [:])
+                .first?.publishedAt,
+            "a numeric string is not a date"
+        )
+        XCTAssertEqual(
+            Uploads.parse(#"{"videos":[{"id":"\#(a)","title":2026}]}"#, known: [:]).first?.title,
+            a,
+            "a number is not a title"
+        )
+    }
+
     /* Whatever is stored here is later fetched and drawn. */
     func testAThumbnailFromAnywhereElseIsDropped() {
         for bad in ["https://attacker.example/x.jpg",

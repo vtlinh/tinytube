@@ -62,13 +62,6 @@ object YouTubeUrls {
             host.endsWith(".gstatic.com")
     }
 
-    /* The channel id sitting in the URL itself, for /channel/UC… pages. */
-    fun channelIdFromUrl(url: String): String? {
-        if (Player.hostOf(url) == null) return null
-        val m = Regex("/channel/(UC[A-Za-z0-9_-]{22})(?:[/?#]|$)").find(url) ?: return null
-        return m.groupValues[1].takeIf { isValidChannelId(it) }
-    }
-
     /* Hosts that serve channel pages. Narrower than PARENT_HOSTS, which also
        covers the images and media a page pulls in — none of those is ever
        somewhere a channel can be approved from. */
@@ -82,8 +75,28 @@ object YouTubeUrls {
         return m.groupValues[1].ifEmpty { "/" }
     }
 
-    private val CHANNEL_PATH = Regex("^/channel/UC[A-Za-z0-9_-]{22}(?:/.*)?$")
-    private val HANDLE_PATH = Regex("^/@[A-Za-z0-9._\\-]{3,30}(?:/.*)?$")
+    /* ANCHORED AT THE START OF THE PATH, and the same two patterns do the
+       asking and the extracting.
+     *
+     * They were once separate: isChannelPage matched the path, while
+     * channelIdFromUrl and handleFromUrl scanned the WHOLE URL, query and
+     * fragment included. On `…/@SomeChannel?u=/channel/UCaaa…` that made the
+     * approve button live for the handle and the extractor return the id out
+     * of the QUERY — a different channel from the one named in the URL bar,
+     * approved into a child's grid. The mirror case stored the wrong handle
+     * against a right id. Swift read the first path segment and answered
+     * neither, which is how the two platforms came to disagree; one pair of
+     * anchored patterns is what stops them drifting again. */
+    private val CHANNEL_PATH = Regex("^/channel/(UC[A-Za-z0-9_-]{22})(?:/.*)?$")
+    private val HANDLE_PATH = Regex("^/@([A-Za-z0-9._\\-]{3,30})(?:/.*)?$")
+
+    /* The channel id sitting in the URL itself, for /channel/UC… pages. */
+    fun channelIdFromUrl(url: String): String? {
+        if (Player.hostOf(url) == null) return null
+        val path = pathOf(url) ?: return null
+        val m = CHANNEL_PATH.find(path) ?: return null
+        return m.groupValues[1].takeIf { isValidChannelId(it) }
+    }
 
     /* Is the parent standing on a channel, such that "approve" means something
        unambiguous?
@@ -104,8 +117,8 @@ object YouTubeUrls {
        resolved — ChannelResolver asks the Worker. */
     fun handleFromUrl(url: String): String? {
         if (Player.hostOf(url) == null) return null
-        val m = Regex("/@([A-Za-z0-9._\\-]{3,30})(?:[/?#]|$)").find(url) ?: return null
-        return m.groupValues[1]
+        val path = pathOf(url) ?: return null
+        return HANDLE_PATH.find(path)?.groupValues?.get(1)
     }
 
     /* READING A CHANNEL PAGE MOVED TO THE WORKER.

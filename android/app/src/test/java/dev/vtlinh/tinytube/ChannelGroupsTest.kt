@@ -58,6 +58,29 @@ class ChannelGroupsTest {
         assertTrue(rows.filterIsInstance<ChannelGroups.Row.Header>().isEmpty())
     }
 
+    /* The half of that which nothing used to check. Skipping the HEADER must
+       not skip the CHANNEL: it is still approved and still feeding the child's
+       grid, and the list is the only place a parent can take it away. */
+    @Test fun `the survivor of an undrawn group is still listed, as loose`() {
+        val channels = listOf(ch("c1", "Only", cartoons.id), ch("c2", "Loose"))
+        val rows = ChannelGroups.arrange(channels, listOf(cartoons), ChannelSort.Mode.A_Z)
+        val items = rows.filterIsInstance<ChannelGroups.Row.Item>()
+        assertEquals(listOf("c2", "c1"), items.map { it.channel.id })
+        assertTrue("it is not under a header, so it is not grouped",
+            items.none { it.grouped })
+    }
+
+    /* Same thing by the other route: a group_id pointing at a group that is not
+       in the list at all. Nothing should be able to make a channel disappear. */
+    @Test fun `a channel naming a group that does not exist is still listed`() {
+        val channels = listOf(ch("c1", "Orphan", "gone"), ch("c2", "Loose"))
+        val rows = ChannelGroups.arrange(channels, emptyList(), ChannelSort.Mode.A_Z)
+        assertEquals(
+            listOf("c2", "c1"),
+            rows.filterIsInstance<ChannelGroups.Row.Item>().map { it.channel.id },
+        )
+    }
+
     @Test fun `group needs two, ungroup needs one group`() {
         val a = ch("c1", "A", cartoons.id)
         val b = ch("c2", "B", cartoons.id)

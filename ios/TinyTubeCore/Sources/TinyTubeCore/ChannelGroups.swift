@@ -58,6 +58,7 @@ public enum ChannelGroups {
             return a.id < b.id
         }
 
+        var drawn: Set<String> = []
         for group in ordered {
             let members = channels.filter { $0.groupId == group.id }
             /* A group with fewer than two members should not exist — see
@@ -65,12 +66,22 @@ public enum ChannelGroups {
                into that state by some path nobody thought of does not put an
                empty header on a parent's screen. */
             if members.count < 2 { continue }
+            drawn.insert(group.id)
             rows.append(.header(group: group, size: members.count))
             rows += ChannelSort.sort(members, mode: mode, countsByWindow: countsByWindow)
                 .map { .item(channel: $0, grouped: true) }
         }
 
-        let loose = channels.filter { $0.groupId == nil }
+        /* Loose is "not under a header that was drawn", NOT "groupId is nil".
+           A channel naming a group that was skipped above — or one that no
+           longer exists — used to fall out of BOTH halves and vanish from the
+           list entirely: still approved, still filling the child's grid, still
+           playing, and invisible on the one screen that can un-approve it. A
+           defensive skip must never hide a channel from the parent. */
+        let loose = channels.filter { channel in
+            guard let groupId = channel.groupId else { return true }
+            return !drawn.contains(groupId)
+        }
         rows += ChannelSort.sort(loose, mode: mode, countsByWindow: countsByWindow)
             .map { .item(channel: $0, grouped: false) }
         return rows

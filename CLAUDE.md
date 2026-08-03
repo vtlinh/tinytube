@@ -28,8 +28,10 @@ channels. Don't do it again:
 ## Both platforms, always
 
 **A change to one platform must not publish the other.** `android.yml`'s push
-trigger and auto-merge's publish filter name `android/**` and nothing else, so
-an `ios/**` change ships no APK — and the Swift tests live in `ios.yml` rather than inside `android.yml` for
+trigger names `android/**` and nothing else, and auto-merge's publish filter is
+narrower still — it mirrors each workflow's own "does this change the artifact"
+list, so a test-only change ships nothing either. An `ios/**` change ships no
+APK — and the Swift tests live in `ios.yml` rather than inside `android.yml` for
 exactly that reason: a CI tweak for iOS sitting in that file would have shipped
 a new `versionCode` to every Android device for a change that cannot affect
 them. When an iOS release pipeline exists it owes Android the same courtesy.
@@ -101,9 +103,15 @@ ios/TinyTube/                    the app target
   Gate.swift            LocalAuthentication; arithmetic only with no lock
   ChallengeView.swift   that arithmetic fallback
   PlayerChrome.swift    the blocker's height: measured, else 16pt
+  PlayerStage.swift     touch observation + the landscape lock, in UIKit
   BlockHeightStore.swift  it, remembered — per display, per version
   ScreenMeasurement.swift ReplayKit capture; feeds Chrome, once ever
   BrowserUserAgent.swift  the Safari suffix that lets Google sign in
+  ImageStore.swift      avatars + posters on disk, PERMANENTLY — what the
+                        removing-a-channel rule below turns on
+  CachedImage.swift     the view that reads it; REPLACED AsyncImage
+  ImageCache.swift      a forwarder to ImageStore, kept for one call site
+  TinyTubeApp.swift     the @main entry point
   Assets.xcassets/      the launcher icon; GENERATED, see art/ above
 ios/TinyTubeTests/               app-target tests; run on a simulator in CI
 ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
@@ -140,14 +148,19 @@ android/                         the app
     ApprovedChannelsActivity.kt the approved list, with groups, open and remove
     Tooltip.kt      the ? beside each settings heading
     ChannelFeeds.kt asks the Worker, once a day per channel
+    ChannelResolver.kt which channel a page is for; asks the Worker
     VideoStore.kt   the grid, in SQLite
     WatchStore.kt   what was played, on the device only — feeds the sort
+    Thumbnails.kt   avatars + posters on disk, PERMANENTLY — what the
+                    removing-a-channel rule below turns on
     BlockHeightStore.kt the measured player inset, per display
     MainActivity.kt the grid + the read-only Channels tab
     BottomTabs.kt   the two-tab bottom bar, shared by the child's screens
     PlayerActivity.kt the locked-down WebView
     ParentActivity.kt YouTube in a WebView, behind ChallengeActivity
-      Updater.kt      self-update against android-latest
+    ParentSession.kt is a parent looking at this NOW — what lets the
+                    update notification skip a gate already passed
+    Updater.kt      self-update against android-latest
   app/src/test/                  plain JVM tests, no emulator
 ```
 
@@ -198,8 +211,16 @@ Free because a push to a branch with NO OPEN PULL REQUEST triggers nothing:
 `android.yml` and `ios.yml` both filter their `push` trigger to `main`, so the
 only thing that builds a branch is the `pull_request` event. Open the PR early
 and every subsequent push is a full run of both platforms; open it at the end
-and the whole change costs one. That is the entire reason for this rule — the
-minutes are a real budget, and macOS runners bill at ten times the rate.
+and the whole change costs one.
+
+The reason used to be money: macOS runners bill at ten times the rate and a
+free-plan PRIVATE repository gets about 200 macOS minutes a month. **That
+premise is gone** — this repository is public, and GitHub-hosted minutes on the
+standard `macos-15` label are not billed on public repositories. The rule stays
+anyway, for the reasons that survive: a run per push is CI noise, a green
+run on a half-finished branch says nothing, and a macOS build still takes ten
+real minutes of waiting whoever is paying. Where you see a minutes budget quoted
+elsewhere in this file or in `ios.yml`, read it the same way.
 
 A DRAFT pull request does not help. Drafts still fire `pull_request` events and
 still build; the only thing draft status changes is that auto-merge leaves them
@@ -307,8 +328,8 @@ that difference is the point rather than an inconsistency. Android decides
 inside `build`, which is an ordinary runner it was going to start anyway. iOS
 decides in `changes`, on ubuntu, BEFORE `ios-app` is allowed to run, because
 `ios-app` is macOS: starting it merely to discover there was nothing to compile
-would spend about ten minutes of a ~200-minute monthly budget on every iOS
-merge. So the reuse path never touches a Mac at all — `publish` is an ubuntu
+would spend about ten minutes of macOS runner time, and ten real minutes of
+waiting, on every iOS merge. So the reuse path never touches a Mac at all — `publish` is an ubuntu
 job that downloads the IPA and uploads it to `ios-latest`.
 
 Two traps that placement creates, both already sprung once elsewhere in this
@@ -451,10 +472,16 @@ stops, green publishes.
   one call on each platform rather than a checklist at every call site. Its
   row, its videos, its watch history AND its cached pictures — the last of
   which is the one that gets forgotten, because it is not in the database: the
-  database holds the URLs, and the images live in an image cache. On iOS that
-  cache is disk-backed (`AsyncImage` uses the shared `URLCache`), on Android it
-  is memory only. Read the URLs BEFORE deleting the rows; afterwards there is
-  nothing left to read and every picture stays.
+  database holds the URLs, and the images live in an image store. **Both stores
+  keep a disk half, and both are permanent**: `Thumbnails.kt` writes into
+  `filesDir` — not `cacheDir`, precisely so Android cannot reclaim it — and
+  `ImageStore.swift` writes into Application Support. Neither expires anything,
+  so removal is the only thing that ever reclaims a byte. Don't go looking in
+  `URLCache.shared` on iOS: `AsyncImage` and the URL cache were REPLACED by
+  `ImageStore` and `CachedImage`, and `ImageCache.swift` is a forwarder kept so
+  the call site in `ChannelStore.remove` still compiles. Read the URLs BEFORE
+  deleting the rows; afterwards there is nothing left to read and every picture
+  stays.
 - **The app's watch history never leaves the device, and stays small.** It
   exists for one feature — ordering the approved list by what is actually being
   watched — and is one row per play in the same SQLite file. Nothing in this app
@@ -622,11 +649,14 @@ stops, green publishes.
   could be stored as a result, 3 when the measurement moved from the red to the
   track and every number it had ever written became wrong.
 
-  iOS has its own `BlockHeightStore` with its own `version`, starting at 1 —
-  no iOS build has persisted a wrong answer yet. The NUMBERS need not agree
-  across platforms; the RULE does. On iOS the version also resets the
-  give-up counter, so a build that fixes the measurement gets another go on a
-  device that had stopped trying.
+  iOS has its own `BlockHeightStore` with its own `version`, and the same ledger
+  applies: it is at **2**, bumped when the capture read the bottom rows of
+  ReplayKit's BUFFER as though they were the bottom of the screen — which in the
+  player's forced landscape is a band down one SIDE, so `Chrome` never found a
+  seek bar on any device. The NUMBERS need not agree across platforms; the RULE
+  does. On iOS the version also resets the give-up counter, and that is what made
+  the bump load-bearing rather than tidy: every device that ran the broken build
+  had spent all three attempts and would never have asked again.
 - **A failed measurement must never be stored.** `Chrome.blockHeightOrNull`
   returns null for "could not tell" precisely so the Activity can distinguish
   it from a real answer that happens to equal the fallback. Latching on the

@@ -112,10 +112,13 @@ jobs:
 
   # Does this change touch the iOS app at all?
   #
-  # A macOS runner bills at 10x, so a free-plan private repository gets about
-  # 200 macOS minutes a month. Building the app on every pull request would
-  # spend that on Android-only and docs-only changes. This job is seconds on
-  # ubuntu and decides whether the expensive one runs.
+  # A macOS runner bills at 10x and is slow — about ten real minutes. It used
+  # to be a hard budget too: a free-plan PRIVATE repository gets roughly 200
+  # macOS minutes a month. This repository is public now, where GitHub-hosted
+  # minutes are not billed, so what is left is the waiting rather than the
+  # money — still reason enough not to build the app on Android-only and
+  # docs-only changes. This job is seconds on ubuntu and decides whether the
+  # expensive one runs.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -215,10 +218,9 @@ jobs:
       # THIS DECISION IS MADE HERE, ON UBUNTU, and that placement is the whole
       # saving. android.yml can afford to make the same call inside its build
       # job because that job is an ordinary runner; ios-app is macOS and bills
-      # at 10x, so starting it merely to discover there is nothing to do would
-      # cost about ten minutes of a ~200-minute monthly budget on every single
-      # iOS merge. Deciding first means an unchanged tree spends no macOS
-      # minutes at all.
+      # at 10x and is slow, so starting it merely to discover there is nothing
+      # to do would cost about ten minutes of waiting on every single iOS merge.
+      # Deciding first means an unchanged tree starts no Mac at all.
       #
       # Same content hash as android.yml uses, pointed at the other subtree:
       # `git rev-parse HEAD:ios` is the SHA git already stores for ios/. If it

@@ -21,10 +21,11 @@ import java.util.concurrent.TimeUnit
  * made, and it is made here now too: the Worker fetches and reads, the phone
  * sends an identifier and gets an answer back.
  *
- * What is sent is a HANDLE or a CHANNEL ID — never the URL. The Worker builds
- * every URL it fetches from the validated value, which is what lets /channel
- * take input at all without becoming a way to point the Worker at an arbitrary
- * host. See the note above channel() in worker.js.
+ * What is sent is THE URL the app is standing on, as-is — see the note further
+ * down. That is not a way to point the Worker at an arbitrary host: the string
+ * is never fetched. The Worker parses it, demands a YouTube channel-page host
+ * and a path of exactly /channel/UC… or /@handle, and BUILDS the address it
+ * fetches from what it extracted. See the note above channel() in worker.js.
  *
  * Curation has not moved. The reply says which channel a page is for; whether a
  * child may watch it is ChannelStore, on this device. */

@@ -145,10 +145,19 @@ object Schema {
      * the key, so renaming a group stays a one-row update if it is ever asked
      * for. Nothing renames one today.
      *
-     * ON DELETE SET NULL is deliberate: dissolving a group must leave its
-     * channels approved and loose. A cascade here would delete the CHANNELS,
-     * which is to say it would silently un-approve them — the worst possible
-     * reading of "ungroup". */
+     * `channels.group_id` is nullable — a loose channel has none — and it
+     * carries NO foreign key at all. That is the point rather than an omission:
+     * dissolving a group must leave its channels APPROVED and loose, and a
+     * cascade here would delete the CHANNELS, which is to say silently
+     * un-approve them.
+     *
+     * What that costs, and what pays it. With no constraint, deleting a groups
+     * row leaves every member pointing at a group that is gone, so nothing in
+     * the database restores them to loose. `ChannelStore.tidy()` is what does —
+     * it nulls group_id BEFORE deleting the group — which is why every writer in
+     * that file ends there. `ChannelGroups.arrange` covers the rest: a channel
+     * naming a group with no header falls through to the loose list rather than
+     * out of the list, so an orphan is untidy and never invisible. */
     private val V6 = listOf(
         """
         CREATE TABLE IF NOT EXISTS groups (

@@ -59,6 +59,31 @@ final class ChannelGroupsTests: XCTestCase {
         XCTAssertTrue(headers(rows).isEmpty)
     }
 
+    /* The half of that which nothing used to check. Skipping the HEADER must
+       not skip the CHANNEL: it is still approved and still feeding the child's
+       grid, and the list is the only place a parent can take it away. */
+    func testTheSurvivorOfAnUndrawnGroupIsStillListedAsLoose() {
+        let rows = ChannelGroups.arrange(
+            channels: [ch("c1", "Only", group: cartoons.id), ch("c2", "Loose")],
+            groups: [cartoons],
+            mode: .aToZ
+        )
+        XCTAssertEqual(["c2", "c1"], items(rows))
+        let grouped = rows.contains { if case .item(_, let g) = $0 { return g } else { return false } }
+        XCTAssertFalse(grouped, "it is not under a header, so it is not grouped")
+    }
+
+    /* Same thing by the other route: a groupId pointing at a group that is not
+       in the list at all. Nothing should be able to make a channel disappear. */
+    func testAChannelNamingAGroupThatDoesNotExistIsStillListed() {
+        let rows = ChannelGroups.arrange(
+            channels: [ch("c1", "Orphan", group: "gone"), ch("c2", "Loose")],
+            groups: [],
+            mode: .aToZ
+        )
+        XCTAssertEqual(["c2", "c1"], items(rows))
+    }
+
     func testGroupNeedsTwoAndUngroupNeedsOneGroup() {
         let a = ch("c1", "A", group: cartoons.id)
         let b = ch("c2", "B", group: cartoons.id)

@@ -50,12 +50,19 @@ enum ChannelStore {
         do {
             /* REPLACE on the id, which also clears uploads_at — so re-approving
                a channel refetches it, which is what someone re-adding one would
-               expect. */
+               expect.
+             *
+             * REPLACE deletes the conflicting row and inserts a fresh one, so
+             * every column not named here reverts to NULL. That is wanted for
+             * uploads_at and wanted for nothing else, which is why group_id is
+             * in the list: without it, re-approving one member of a pair dropped
+             * it out of its group and left the group holding one channel, which
+             * then vanished from both lists entirely. */
             try Database.shared.write(
                 """
                 INSERT OR REPLACE INTO channels
-                    (channel_id, title, added_at, handle, avatar_url)
-                VALUES (?, ?, ?, ?, ?)
+                    (channel_id, title, added_at, handle, avatar_url, group_id)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 [
                     .text(channelId),
@@ -67,8 +74,13 @@ enum ChannelStore {
                        recorded the first time. */
                     .text(handle ?? previous?.handle),
                     .text(avatarURL ?? previous?.avatarURL),
+                    .text(previous?.groupId),
                 ]
             )
+            /* The rule above: EVERY mutation ends here. This one cannot strand a
+               group now that group_id is carried forward, which is exactly why
+               it was the one writer that skipped it — and how it got missed. */
+            tidy()
             return true
         } catch {
             return false

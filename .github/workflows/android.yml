@@ -333,9 +333,14 @@ jobs:
       # Only when an APK is actually being assembled: a tests-only run needs no
       # key, and demanding one would fail every docs-adjacent build.
       #
-      # No fallback and no continue-on-error. build.gradle.kts refuses to
-      # assemble an unsigned release anyway; this says so earlier and names the
-      # reason.
+      # No fallback and no continue-on-error, and NOT because gradle would stop:
+      # it would not. With no key `canSign` is false, the release build type
+      # gets no signing config and assembleRelease happily emits
+      # app-release-unsigned.apk. So this step failing loudly here is what says
+      # the key is missing at the moment the reason is legible — otherwise the
+      # first symptom is apksigner further down failing to find
+      # app-release.apk. That fingerprint assertion on the finished APK is the
+      # only real guard; this one just moves the error earlier.
       - name: Restore the signing keystore
         if: steps.reuse.outputs.reused != 'yes' && needs.changes.outputs.apk == 'true'
         env:

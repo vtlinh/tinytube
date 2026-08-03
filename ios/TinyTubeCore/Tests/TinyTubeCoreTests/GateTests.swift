@@ -150,6 +150,29 @@ final class YouTubeUrlsTests: XCTestCase {
         XCTAssertNil(YouTubeUrls.handleFromURL("file:///@handle"))
     }
 
+    /* Both extractors read the PATH, not the URL. Kotlin scanned the whole
+       string, so `/@SomeChannel?u=/channel/UC…` — a live approve button, the
+       page being a handle page — approved the id out of the QUERY: a different
+       channel from the one in the URL bar, into a child's grid. Pinned on both
+       platforms now rather than on this one only, which is what let them
+       disagree. */
+    func testAnIdOrHandleInTheQueryIsNotThePagesOwn() {
+        XCTAssertNil(YouTubeUrls.channelIdFromURL("https://m.youtube.com/@SomeChannel?u=/channel/\(ok)"))
+        XCTAssertNil(YouTubeUrls.channelIdFromURL("https://m.youtube.com/results?q=/channel/\(ok)"))
+        XCTAssertNil(YouTubeUrls.channelIdFromURL("https://m.youtube.com/@SomeChannel#/channel/\(ok)"))
+        XCTAssertNil(YouTubeUrls.handleFromURL("https://m.youtube.com/channel/\(ok)?x=/@Someone"))
+        XCTAssertNil(YouTubeUrls.handleFromURL("https://m.youtube.com/watch?v=aaaaaaaaaaa&u=/@Someone"))
+        /* and the real ones still read */
+        XCTAssertEqual(
+            YouTubeUrls.handleFromURL("https://m.youtube.com/@SomeChannel?u=/channel/\(ok)"),
+            "SomeChannel"
+        )
+        XCTAssertEqual(
+            YouTubeUrls.channelIdFromURL("https://m.youtube.com/channel/\(ok)?x=/@Someone"),
+            ok
+        )
+    }
+
     func testPathsAreReadWithoutQueryOrFragment() {
         XCTAssertEqual(YouTubeUrls.pathOf("https://www.youtube.com/a/b?x=1#f"), "/a/b")
         XCTAssertEqual(YouTubeUrls.pathOf("https://www.youtube.com"), "/")

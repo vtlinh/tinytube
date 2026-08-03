@@ -51,6 +51,9 @@ struct MainView: View {
     @State private var playing: PlayingList?
     @State private var gating = false
     @State private var showChallenge = false
+    /* The arithmetic was answered correctly and parent mode is owed, but the
+       challenge cover has not finished dismissing yet. See the covers below. */
+    @State private var challengePassed = false
     @State private var showParent = false
 
     private struct PlayingList: Identifiable {
@@ -115,9 +118,29 @@ struct MainView: View {
                 Task { await reload() }
             }
         }
-        .fullScreenCover(isPresented: $showChallenge) {
+        /* ⚠️ THE HANDOFF GOES THROUGH onDismiss, NOT THROUGH ONE UPDATE.
+         *
+         * Flipping both flags together — `showChallenge = false; showParent =
+         * true` — asks this view to dismiss one fullScreenCover and present
+         * another in the same state update, on a deployment target of iOS 16.0,
+         * and the request to present arrives while the first is still
+         * dismissing: the challenge closes and parent mode never opens. This is
+         * the same trap ParentView documents for chained `.sheet` and
+         * SettingsView for chained `.alert`.
+         *
+         * It bites on exactly the devices the arithmetic exists for — a phone
+         * with no passcode is the only way Gate returns .needsChallenge — so a
+         * correct answer would appear to do nothing and parent mode would be
+         * unreachable. `passed` records the answer and the presentation waits
+         * for the cover to be properly gone. */
+        .fullScreenCover(isPresented: $showChallenge, onDismiss: {
+            if challengePassed {
+                challengePassed = false
+                showParent = true
+            }
+        }) {
             ChallengeView(
-                onPass: { showChallenge = false; showParent = true },
+                onPass: { challengePassed = true; showChallenge = false },
                 onCancel: { showChallenge = false }
             )
         }

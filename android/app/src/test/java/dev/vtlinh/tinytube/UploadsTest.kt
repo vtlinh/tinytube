@@ -88,6 +88,23 @@ class UploadsTest {
         assertNull(Uploads.parse(reply(full(a, published = 0)), emptyMap()).single().publishedAt)
     }
 
+    /* org.json COERCES and Swift's `as?` casts do not, so a reply carrying the
+       wrong type used to build a different grid on each platform: a number for
+       an id became a valid-looking eleven-character string and a playable tile
+       here while iOS dropped it, and a numeric STRING for published dated a
+       video here and left it undated — bottom of the grid — there. The type the
+       Worker actually sends is the only one either platform reads. */
+    @Test fun `a value of the wrong type is not coerced into one of the right type`() {
+        assertTrue(Uploads.parse("""{"videos":[{"id":12345678901,"title":"x"}]}""", emptyMap()).isEmpty())
+        assertTrue(Uploads.parse("""{"videos":[{"id":null,"title":"x"}]}""", emptyMap()).isEmpty())
+
+        val stringDate = Uploads.parse("""{"videos":[{"id":"$a","published":"1700000000"}]}""", emptyMap())
+        assertNull("a numeric string is not a date", stringDate.single().publishedAt)
+
+        val numberTitle = Uploads.parse("""{"videos":[{"id":"$a","title":2026}]}""", emptyMap())
+        assertEquals("a number is not a title", a, numberTitle.single().title)
+    }
+
     /* Whatever is stored here is later fetched and drawn. It does not get to
        be an arbitrary URL somebody sent us. */
     @Test fun `a thumbnail from anywhere but youtube's own hosts is dropped`() {

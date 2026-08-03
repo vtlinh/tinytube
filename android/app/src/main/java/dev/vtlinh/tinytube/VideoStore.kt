@@ -88,14 +88,27 @@ object VideoStore {
          * without this each one leaves a poster on disk for the life of the
          * install. Read here rather than after the write, for the same reason
          * ChannelStore.remove reads before deleting: afterwards there is
-         * nothing left to read. */
+         * nothing left to read.
+         *
+         * BOTH SIDES USE `thumbnailUrl`, NOT `thumb_url`. The column is
+         * nullable — Uploads.thumb answers null for a reply with no thumb, or
+         * one from an unexpected host — and the grid then draws the DERIVED
+         * i.ytimg.com URL, which is the name the JPEG is cached under. Reading
+         * the column alone made those posters invisible to this comparison, so
+         * a video dropping off the end of the hundred left its file on disk for
+         * the life of the install. ChannelStore.imageUrlsFor already reads it
+         * this way. */
         val before = mutableListOf<String>()
         try {
             d.rawQuery(
-                "SELECT thumb_url FROM ${Schema.VIDEOS} WHERE channel_id = ?",
+                "SELECT video_id, thumb_url FROM ${Schema.VIDEOS} WHERE channel_id = ?",
                 arrayOf(channelId),
             ).use { c ->
-                while (c.moveToNext()) c.getString(0)?.let { before.add(it) }
+                while (c.moveToNext()) {
+                    val id = c.getString(0) ?: continue
+                    val stored = if (c.isNull(1)) null else c.getString(1)
+                    before.add(Video(id = id, title = "", thumbUrl = stored).thumbnailUrl)
+                }
             }
         } catch (e: Exception) {}
 
@@ -134,7 +147,7 @@ object VideoStore {
            transaction that rolled back would blank tiles the grid is still
            showing. */
         if (!wrote) return
-        val kept = videos.mapNotNull { it.thumbUrl }.toSet()
+        val kept = videos.map { it.thumbnailUrl }.toSet()
         Thumbnails.forget(before.filterNot { it in kept })
     }
 

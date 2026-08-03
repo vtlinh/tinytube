@@ -751,15 +751,21 @@ class PlayerActivity : AppCompatActivity() {
     private inner class LockedClient : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url?.toString().orEmpty()
-            /* true == "I handled it", which here means "this does not happen" */
-            return !Player.isPlayerUrl(url)
+            /* true == "I handled it", which here means "this does not happen".
+               isForMainFrame is the load-bearing argument: the wrapper document
+               is loaded by loadDataWithBaseURL, which does not come through
+               here at all, so any main-frame navigation that does is something
+               the page attempted — and the only host it may name is the
+               wrapper's own. See Player.isPlayerNavigation. */
+            return !Player.isPlayerNavigation(url, request.isForMainFrame)
         }
 
         @Suppress("OverridingDeprecatedMember", "DEPRECATION")
         override fun shouldOverrideUrlLoading(view: WebView, url: String?): Boolean {
-            /* API < 24 path. Same rule; without it the modern override is
-               simply not consulted on those devices and everything navigates. */
-            return !Player.isPlayerUrl(url.orEmpty())
+            /* API < 24 path, which minSdk 26 means nothing reaches — kept
+               because losing an override silently is how everything navigates.
+               No frame information here, so it takes the stricter answer. */
+            return !Player.isPlayerNavigation(url.orEmpty(), mainFrame = true)
         }
     }
 

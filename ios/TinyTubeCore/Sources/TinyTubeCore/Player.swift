@@ -38,6 +38,24 @@ public enum Player {
         return host.hasSuffix(".googlevideo.com")
     }
 
+    /* The same question, asked of a navigation rather than of a URL — and the
+       answer differs for the MAIN FRAME. Ported from Player.kt, where the whole
+       reasoning is written out; the short version is that allowedHosts must
+       contain www.youtube.com for the embed, the API script and the player's
+       XHRs, the match is host-only, and that makes /watch and /results equally
+       acceptable — fine for a subframe, not fine for the top document, which a
+       tap on the branding YouTube draws over an ad would otherwise replace with
+       the whole mobile site inside a child's player.
+
+       So the main frame may only ever be the wrapper's own origin, which is
+       also what the app itself loads there. Everything else is unchanged and
+       still goes through isPlayerURL. */
+    public static func isPlayerNavigation(_ url: String, mainFrame: Bool) -> Bool {
+        guard mainFrame else { return isPlayerURL(url) }
+        guard let host = hostOf(url), let ours = hostOf(origin) else { return false }
+        return host == ours
+    }
+
     /* The host of an http(s) URL, lowercased, or nil.
      *
      * Parsed by hand rather than with URLComponents, deliberately. This has to
@@ -98,7 +116,10 @@ public enum Player {
        README. */
     public static let origin = "https://www.youtube-nocookie.com"
 
-    /* The page loaded into the player's web view.
+    /* The page loaded into the player's web view. Line for line what
+       Player.kt builds, and it has to stay that way — see the tick loop below,
+       which was missing here for a while and took ad detection and end-screen
+       suppression with it.
      *
      * The id is re-validated here rather than trusted from the caller. It is
      * interpolated into a JS string literal, so this is the point where a bad
@@ -120,23 +141,71 @@ public enum Player {
         <div id="p"></div>
         <script src="https://www.youtube.com/iframe_api"></script>
         <script>
-        var player;
-        function onYouTubeIframeAPIReady() {
-          player = new YT.Player('p', {
-            videoId: '\(videoId)',
-            playerVars: {
-              autoplay: 1, playsinline: 1, rel: 0, fs: 0,
-              modestbranding: 1, iv_load_policy: 3, disablekb: 1
-            },
-            events: {
-              onStateChange: function (e) {
-                Bridge.onState(e.data);
-                if (e.data === YT.PlayerState.ENDED) Bridge.onEnded();
+          // YouTube's controls are left ON, deliberately. Nothing in the API
+          // turns the mobile embed's own centre play/pause and title bar off,
+          // so the approach is the other way round: let YouTube draw whatever
+          // it wants and put a native layer over the whole thing.
+          //
+          // The end screen is a separate thing and cannot be turned off by any
+          // player parameter. Playback is ended a fraction before the video
+          // runs out instead, so the terminal end screen never gets to render.
+          var player;
+          var ourId = '\(videoId)';
+          var wasAd = null;
+
+          function onYouTubeIframeAPIReady() {
+            player = new YT.Player('p', {
+              videoId: ourId,
+              playerVars: {
+                autoplay: 1,
+                playsinline: 1,
+                rel: 0,
+                controls: 1,        // left on deliberately; see the note above
+                disablekb: 1,       // no keyboard shortcuts into other videos
+                fs: 0,              // already fullscreen; the button only confuses
+                iv_load_policy: 3   // no annotation cards linking out
               },
-              onError: function (e) { Bridge.onError(String(e.data)); }
-            }
-          });
-        }
+              events: {
+                onReady: function(e){ e.target.playVideo(); tick(); },
+                onStateChange: function(e){
+                  Bridge.onState(e.data);
+                  if (e.data === YT.PlayerState.ENDED) Bridge.onEnded();
+                },
+                onError: function(e){ Bridge.onError(String(e.data)); }
+              }
+            });
+          }
+
+          // Best-effort ad detection. The IFrame API has no ad event, and the
+          // player is cross-origin so its DOM cannot be inspected — but during
+          // an ad getVideoData() reports the ad's video id rather than ours.
+          // That is undocumented and may stop being true; the overlay treats
+          // "probably an ad" as a reason to stop intercepting touches, so being
+          // wrong costs a tappable player rather than a blocked one.
+          function looksLikeAd() {
+            try {
+              var d = player && player.getVideoData && player.getVideoData();
+              if (!d || !d.video_id) return false;
+              return d.video_id !== ourId;
+            } catch (e) { return false; }
+          }
+
+          function tick() {
+            try {
+              var ad = looksLikeAd();
+              if (ad !== wasAd) { wasAd = ad; Bridge.onAd(ad); }
+
+              // End a moment early so the end screen never renders. Not during
+              // an ad, and not for a live stream, where getDuration() is 0 and
+              // this would fire immediately.
+              if (!ad) {
+                var d = player.getDuration ? player.getDuration() : 0;
+                var t = player.getCurrentTime ? player.getCurrentTime() : 0;
+                if (d > 1 && d - t <= 0.4) { player.pauseVideo(); Bridge.onEnded(); return; }
+              }
+            } catch (e) {}
+            setTimeout(tick, 500);
+          }
         </script>
         </body>
         </html>
