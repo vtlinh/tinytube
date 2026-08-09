@@ -634,6 +634,11 @@ const SETTINGS_KEY = 'tinytube:settings:v1'
    and everything that READS settings is handed a FLATTENED view (account
    fields plus the active child's) so no caller has to know any of this. */
 export const CHILD_DEFAULTS = {
+  /* The child's OWN Google account, if they have one. Not used to sign in and
+     not required — it exists so that a child who signs in on a shared device
+     is recognised as a child, and the parent's controls lock. See
+     `settingsLock`. */
+  email: null,
   ageRange: [1, 15], // everything; superseded by birthday when set
   birthday: null, // 'YYYY-MM'; the child's age is computed from this (born the 1st)
   /* minutes per period, or null for "no limit over this one". 0 means no
@@ -670,6 +675,34 @@ export const DEFAULTS = { ...ACCOUNT_DEFAULTS, ...CHILD_DEFAULTS }
    account that was already syncing keeps its history instead of finding an
    empty first child. New children get UUIDs. */
 export const FIRST_CHILD_ID = 'default'
+
+/** An email as it is compared: trimmed and lowercased, or null. Addresses are
+ * typed by a parent on a phone keyboard, so "Bob@Gmail.com " and
+ * "bob@gmail.com" have to be the same person or the lock misses. */
+export function normEmail(email) {
+  const t = String(email ?? '').trim().toLowerCase()
+  return t || null
+}
+
+/** Why the parent's controls are locked, or null when they are open.
+ *
+ * Two reasons, and the ORDER of the checks is the interesting part. A child
+ * signed in with their own account gets `{kind:'child'}`; nobody signed in at
+ * all gets `{kind:'signed-out'}`, because settings that anyone can open on an
+ * unclaimed device are not a parental control.
+ *
+ * The escape hatch is not optional. Signing in is the only way out of both
+ * states, so the sign-in control must stay live inside a locked screen — and
+ * a build with no `GOOGLE_CLIENT_ID` cannot sign in AT ALL, which would make
+ * this a permanent lock with no recovery. There, sync is inert and so is
+ * this: no client id, no lock. */
+export function settingsLock(children, session, clientId = GOOGLE_CLIENT_ID) {
+  if (!clientId) return null
+  const who = normEmail(session?.email)
+  if (!who) return { kind: 'signed-out' }
+  const child = (children ?? []).find(c => normEmail(c.email) && normEmail(c.email) === who)
+  return child ? { kind: 'child', name: child.name, email: who } : null
+}
 
 /** A parent-added channel, reduced to the decision: which channel, for what
  * ages, on or off. Everything else about a channel is the channel's own and
@@ -709,6 +742,7 @@ export function normalizeSettings(parsed = {}) {
           // Worker's now, and a stored copy would only go stale
           customChannels: (c.customChannels ?? []).map(decisionOnly),
           playback: playbackMode(c.playback),
+          email: normEmail(c.email),
           id: c.id ?? `child-${i}`,
           name: c.name ?? `Child ${i + 1}`,
         }))
@@ -725,6 +759,7 @@ export function normalizeSettings(parsed = {}) {
             quota: normalizeQuota(parsed.quota ?? { ...CHILD_DEFAULTS.quota, perDay: parsed.quotaMins ?? CHILD_DEFAULTS.quota.perDay }),
             customChannels: (parsed.customChannels ?? []).map(decisionOnly),
             playback: playbackMode(parsed.playback),
+            email: normEmail(parsed.email),
             id: FIRST_CHILD_ID,
             name: parsed.children?.[0]?.name ?? 'Child 1',
           },
@@ -798,6 +833,7 @@ export function storeApi(settings, update, updateChild = update) {
     setVideoLength: ([minVideoMins, maxVideoMins]) => updateChild({ minVideoMins, maxVideoMins }),
     setHideWatched: hideWatched => updateChild({ hideWatched: !!hideWatched }),
     setPlayback: mode => updateChild({ playback: playbackMode(mode) }),
+    setChildEmail: email => updateChild({ email: normEmail(email) }),
     setBirthday: birthday => updateChild({ birthday }),
     /* Only the decision is kept, whatever the caller hands over: a search
        result arrives with a title, avatar, subscriber counts and topics, and

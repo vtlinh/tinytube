@@ -460,3 +460,12 @@ tr.out-of-range img {
 .settings-label > i {
   color: #9db0c4; /* the icon may stay quiet; the word may not */
 }
+
+/* A locked Parents Mode: the fieldset disables every form control, but the
+   two sliders are dragged by a plain div that `disabled` cannot reach, so the
+   whole block stops taking pointers as well. The header sits outside it —
+   signing in is the way out and its control has to stay live. */
+.settings-locked {
+  opacity: 0.55;
+  pointer-events: none;
+}
