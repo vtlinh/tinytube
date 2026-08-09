@@ -27,6 +27,12 @@ on:
     # its own workflow: a Pages redeploy is idempotent — no versionCode, no
     # installed device watching — so the reason those filters exclude CI does
     # not apply here.
+    #
+    # This trigger only covers HAND-pushed commits. auto-merge merges with
+    # GITHUB_TOKEN, whose pushes fire no workflow events (GitHub's recursion
+    # guard), so an auto-merged web change reaches this workflow the same way
+    # the app publishes do: auto-merge dispatches it explicitly, filtered to
+    # the same paths listed here.
     paths:
       - "web/**"
       - ".github/workflows/pages.yml"
