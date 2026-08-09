@@ -656,9 +656,9 @@ async function uploads(request) {
  * ------------------------------------------------------------------------- */
 
 /* The web app's OAuth client id (a PUBLIC identifier, compiled into the page
-   too). Empty disables /sync/* with a 503 — the deploy that fills it in is the
-   deploy that turns sync on. */
-export const GOOGLE_CLIENT_ID = "";
+   too — keep the two copies equal, the other is web/src/lib.js). Empty
+   disables /sync/* with a 503. */
+export const GOOGLE_CLIENT_ID = "559900350228-kamkqhee408lf7nh0kg5p9njgo71qjtt.apps.googleusercontent.com";
 
 const JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const GOOGLE_ISSUERS = new Set(["accounts.google.com", "https://accounts.google.com"]);

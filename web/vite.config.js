@@ -11,7 +11,12 @@ export default defineConfig(({ command }) => ({
   // events never fire on this machine (endpoint security), so the dev server
   // kept serving stale modules until restarted.
   server: { strictPort: true, watch: { usePolling: true } },
-  define: { __COMMIT_SHA__: JSON.stringify(execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()) },
+  define: {
+    __COMMIT_SHA__: JSON.stringify(execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()),
+    // what Settings shows as "Version N": the pages deploy's run number
+    // (pages.yml sets BUILD_VERSION), 'dev' anywhere else
+    __BUILD_VERSION__: JSON.stringify(process.env.BUILD_VERSION ?? 'dev'),
+  },
   // globals so testing-library auto-cleans between tests
   test: { include: ['tests/**/*.test.{js,jsx}'], environment: 'jsdom', globals: true },
 }))

@@ -106,6 +106,38 @@ export function overlaps([lo, hi], minAge, maxAge) {
   return minAge <= hi && lo <= maxAge
 }
 
+// ---------------------------------------------------------------------------
+// birthday — the parent enters WHEN THE CHILD WAS BORN (mm/yy) rather than an
+// age, so the filter keeps up on its own instead of being a number that went
+// stale a birthday ago. Born on the 1st of the month, by declaration.
+
+/** 'YYYY-MM' -> whole years old today (day-of-month is always the 1st), or
+ * null for anything unparsable or in the future. */
+export function ageFromBirthday(birthday, now = Date.now()) {
+  const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(birthday ?? '')
+  if (!m) return null
+  const d = new Date(now)
+  const months = (d.getFullYear() - +m[1]) * 12 + (d.getMonth() + 1 - +m[2])
+  return months < 0 ? null : Math.floor(months / 12)
+}
+
+/** What the channel filter compares against: the single age computed from the
+ * birthday when one is set (clamped to the 1-15 the ratings use), else the
+ * legacy manual range. */
+export function effectiveAgeRange(settings, now = Date.now()) {
+  const age = ageFromBirthday(settings.birthday, now)
+  if (age == null) return settings.ageRange
+  const a = Math.max(1, Math.min(15, age))
+  return [a, a]
+}
+
+/** UI text 'mm/yy' -> 'YYYY-MM', or null when it isn't one. 2-digit years are
+ * this century: a child's birthday is never 19xx. */
+export function parseBirthdayInput(text) {
+  const m = /^\s*(0?[1-9]|1[0-2])\s*\/\s*(\d{2})\s*$/.exec(text ?? '')
+  return m ? `20${m[2]}-${String(m[1]).padStart(2, '0')}` : null
+}
+
 /**
  * Curated channels from videos.json with the parent's per-channel edits
  * applied — overrides[channel_id] may adjust min_age/max_age or set hidden.
@@ -122,7 +154,8 @@ export function curatedChannels(db, overrides = {}) {
  * already-curated channel.
  */
 export function mergeChannels(db, customVideosById, settings) {
-  const { ageRange, customChannels, overrides, minVideoMins = 0 } = settings
+  const { customChannels, overrides, minVideoMins = 0 } = settings
+  const ageRange = effectiveAgeRange(settings)
   const curated = curatedChannels(db, overrides).filter(
     ch => !ch.hidden && !ch.disabled && overlaps(ageRange, ch.min_age, ch.max_age),
   )
@@ -138,17 +171,163 @@ export function mergeChannels(db, customVideosById, settings) {
 }
 
 // ---------------------------------------------------------------------------
+// channelGroups — channels gathered into named groups, ported from the
+// Android app's ChannelGroups.kt with its rules intact, because they are
+// fiddlier than they look:
+//
+//   THE INVARIANT: a group has AT LEAST TWO channels. Grouping is offered only
+//   for two or more; a group that loses members until one is left dissolves
+//   (tidyGroups, run after every mutation rather than at remembered call
+//   sites). There is no group of one.
+//
+//   THE ORDER: groups first, A-Z among themselves whatever else is going on —
+//   a parent looking for a group wants it where it was last time. Channels
+//   sort A-Z inside a group and in the loose list below.
+//
+// Groups live in settings as {groups: [{id, name}], groupOf: {channel_id ->
+// group id}}, so they ride the settings sync like everything else.
+
+/** The list, flattened: [{type:'header', group, size} | {type:'item', channel, grouped}].
+ * A group whose visible members fall below two is SKIPPED, not drawn — and its
+ * members then count as loose, because a defensive skip must never hide a
+ * channel from the list entirely. */
+export function arrangeChannels(channels, groups = [], groupOf = {}) {
+  const byTitle = (a, b) =>
+    (a.channel_title ?? '').toLowerCase().localeCompare((b.channel_title ?? '').toLowerCase()) ||
+    a.channel_id.localeCompare(b.channel_id)
+  const byGroup = {}
+  for (const ch of channels) {
+    const gid = groupOf[ch.channel_id]
+    if (gid) (byGroup[gid] ??= []).push(ch)
+  }
+  // name then id: the id is a real tiebreaker, not decoration — a list that
+  // reorders itself between redraws for equal keys is the kind of thing
+  // nobody reports and everybody notices
+  const ordered = [...groups].sort(
+    (a, b) => a.name.trim().toLowerCase().localeCompare(b.name.trim().toLowerCase()) || a.id.localeCompare(b.id),
+  )
+  const rows = []
+  const drawn = new Set()
+  for (const group of ordered) {
+    const members = byGroup[group.id] ?? []
+    if (members.length < 2) continue
+    drawn.add(group.id)
+    rows.push({ type: 'header', group, size: members.length })
+    for (const ch of [...members].sort(byTitle)) rows.push({ type: 'item', channel: ch, grouped: true })
+  }
+  const loose = channels.filter(ch => !drawn.has(groupOf[ch.channel_id]))
+  for (const ch of [...loose].sort(byTitle)) rows.push({ type: 'item', channel: ch, grouped: false })
+  return rows
+}
+
+/** Ids belonging to a group, off the membership map. */
+export function groupMembers(groupId, groupOf) {
+  return new Set(Object.keys(groupOf).filter(id => groupOf[id] === groupId))
+}
+
+/* Two or more, because a group of one is not a group. */
+export function canGroup(selectedIds) {
+  return selectedIds.size >= 2
+}
+
+/* Offered only when everything selected is already in ONE group — "ungroup"
+   across two groups would mean "empty two different groups", which is a bigger
+   thing than the word promises. */
+export function canUngroup(selectedIds, groupOf) {
+  if (!selectedIds.size) return false
+  const ids = [...selectedIds]
+  const first = groupOf[ids[0]]
+  return first != null && ids.every(id => groupOf[id] === first)
+}
+
+/** The name to prefill the dialog with, or null for an empty box. Filled only
+ * for "add these loose channels to this whole group" — one group involved,
+ * ALL of it selected, plus at least one loose channel. */
+export function prefillGroupName(selectedIds, groups, groupOf) {
+  const involved = new Set([...selectedIds].map(id => groupOf[id]).filter(Boolean))
+  if (involved.size !== 1) return null
+  const [groupId] = involved
+  const members = groupMembers(groupId, groupOf)
+  if (![...members].every(id => selectedIds.has(id))) return null
+  if (![...selectedIds].some(id => !groupOf[id])) return null
+  return groups.find(g => g.id === groupId)?.name ?? null
+}
+
+function emptiedBy(group, groupOf, selectedIds) {
+  const members = groupMembers(group.id, groupOf)
+  // size guard: a memberless group should not exist, and treating "nothing
+  // left to move" as "fully selected" would hand its name to any selection
+  return members.size > 0 && [...members].every(id => selectedIds.has(id))
+}
+
+/** Names a NEW group may not take: every current group's, except one about to
+ * be emptied by this very selection — its name comes free. */
+export function groupNamesInUse(groups, groupOf, selectedIds) {
+  return groups.filter(g => !emptiedBy(g, groupOf, selectedIds)).map(g => g.name)
+}
+
+/** The group whose ROW a new group of this name takes over (same name, every
+ * member selected), or null. Absorbing rather than inserting matters because
+ * the emptied group only dissolves in the tidy that runs AFTER. */
+export function absorbingGroup(name, groups, groupOf, selectedIds) {
+  const trimmed = name.trim().toLowerCase()
+  return groups.find(g => g.name.trim().toLowerCase() === trimmed && emptiedBy(g, groupOf, selectedIds))?.id ?? null
+}
+
+/** 'empty' | 'taken' | null, as the dialog judges it: trimmed, case-insensitive. */
+export function groupNameError(name, existingNames) {
+  const trimmed = name.trim()
+  if (!trimmed) return 'empty'
+  return existingNames.some(n => n.trim().toLowerCase() === trimmed.toLowerCase()) ? 'taken' : null
+}
+
+/** THE INVARIANT, enforced: drop groups with fewer than two members and every
+ * membership pointing at a dropped (or unknown) group. Run after EVERY
+ * mutation — a removal, an ungroup of half a group, and a move into another
+ * group each strand whatever is left behind. */
+export function tidyGroups({ groups, groupOf }) {
+  const counts = {}
+  for (const gid of Object.values(groupOf)) counts[gid] = (counts[gid] ?? 0) + 1
+  const kept = groups.filter(g => (counts[g.id] ?? 0) >= 2)
+  const keptIds = new Set(kept.map(g => g.id))
+  return {
+    groups: kept,
+    groupOf: Object.fromEntries(Object.entries(groupOf).filter(([, gid]) => keptIds.has(gid))),
+  }
+}
+
+function withoutIds(groupOf, ids) {
+  const idSet = new Set(ids)
+  return Object.fromEntries(Object.entries(groupOf).filter(([id]) => !idSet.has(id)))
+}
+
+/** Move the selected ids into a group of this name — absorbing the emptied
+ * same-name group's row when there is one — then tidy. Returns the settings
+ * patch. */
+export function groupInto(settings, selectedIds, name) {
+  const absorbed = absorbingGroup(name, settings.groups, settings.groupOf, selectedIds)
+  const id = absorbed ?? crypto.randomUUID()
+  const groups = absorbed ? settings.groups : [...settings.groups, { id, name: name.trim() }]
+  const groupOf = { ...settings.groupOf }
+  for (const cid of selectedIds) groupOf[cid] = id
+  return tidyGroups({ groups, groupOf })
+}
+
+// ---------------------------------------------------------------------------
 // useSettings
 
 const SETTINGS_KEY = 'tinytube:settings:v1'
 
 export const DEFAULTS = {
   apiKey: '',
-  ageRange: [1, 15], // everything
+  ageRange: [1, 15], // everything; superseded by birthday when set
+  birthday: null, // 'YYYY-MM'; the child's age is computed from this (born the 1st)
   quotaMins: 180, // watch quota per rolling 12h window; 0 = no watching (there is no "off")
   minVideoMins: 0, // hide videos shorter than this; 0 = show everything
   customChannels: [], // parent-added, same flat shape as channels.json entries: [{channel_id, channel_title, thumbnail, min_age, max_age}]
   overrides: {}, // per curated channel_id: {min_age?, max_age?, hidden?, disabled?} edited in the table
+  groups: [], // channel groups [{id, name}] — see the channelGroups section
+  groupOf: {}, // channel_id -> group id membership
   passkeyId: null, // WebAuthn credential id (base64url); when set, the parent gate is biometric-only
 }
 
@@ -185,7 +364,11 @@ export function storeApi(settings, update) {
         customChannels: settings.customChannels.map(c => (c.channel_id === id ? { ...c, ...patch } : c)),
       }),
     removeCustomChannel: id =>
-      update({ customChannels: settings.customChannels.filter(c => c.channel_id !== id) }),
+      update({
+        customChannels: settings.customChannels.filter(c => c.channel_id !== id),
+        // its group membership goes with it, and the tidy may dissolve the group
+        ...tidyGroups({ groups: settings.groups, groupOf: withoutIds(settings.groupOf, [id]) }),
+      }),
     setOverride: (id, patch) =>
       update({ overrides: { ...settings.overrides, [id]: { ...settings.overrides[id], ...patch } } }),
     restoreHidden: () =>
@@ -197,6 +380,14 @@ export function storeApi(settings, update) {
         ),
       }),
     setPasskey: id => update({ passkeyId: id }),
+    setBirthday: birthday => update({ birthday }),
+    /* Put the selected channels in a (possibly existing — `absorbing`) group,
+       or dissolve their membership. Both run `tidy` after, like the Android
+       stores do: every mutation can strand a group's last member. */
+    groupChannels: (ids, name) =>
+      update(groupInto(settings, ids, name)),
+    ungroupChannels: ids =>
+      update(tidyGroups({ ...settings, groupOf: withoutIds(settings.groupOf, ids) })),
   }
 }
 
@@ -486,10 +677,10 @@ export function useVideos(settings) {
 // a child switches devices.
 
 /* The Worker (see worker.js's SYNC section) and the web app's OAuth client id
-   (a public identifier). Empty client id = the Sync row does not render and
-   nothing here runs. */
+   (a public identifier — keep the two copies equal, the other is worker.js).
+   Empty client id = the Sync row does not render and nothing here runs. */
 export const SYNC_URL = 'https://tinytube.vtlinh87.workers.dev'
-export const GOOGLE_CLIENT_ID = ''
+export const GOOGLE_CLIENT_ID = '559900350228-kamkqhee408lf7nh0kg5p9njgo71qjtt.apps.googleusercontent.com'
 
 const SYNC_KEY = 'tinytube:sync:v1' // {token, email, expiresAt, deviceId, lastPushAt}
 const PUSH_DEBOUNCE_MS = 5_000

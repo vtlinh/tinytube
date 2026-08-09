@@ -30,12 +30,30 @@ Three things it does that a plain resize would not:
     crop them off.
 """
 
+import sys
+
 from PIL import Image
 
 MASTER = "art/app-icon.png"
 
 IOS = "ios/TinyTube/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
 ANDROID_RES = "android/app/src/main/res"
+
+# The web app's PWA icons (web/public/manifest.webmanifest names these
+# files; the names must not change). All FLATTENED like the iOS icon:
+# apple-touch-icon ignores alpha anyway, and Android's install banner puts
+# transparent corners on whatever the page background happens to be.
+WEB_ICONS = {
+    "web/public/icons/icon-192.png": 192,
+    "web/public/icons/icon-512.png": 512,
+    "web/public/icons/apple-touch-icon.png": 180,
+}
+
+# `--web-only` writes ONLY the web icons. The app icons are byte-committed
+# outputs of a possibly different Pillow, and app development is paused —
+# regenerating them would show up as an android/** change and dispatch an APK
+# publish for identical artwork.
+WEB_ONLY = "--web-only" in sys.argv[1:]
 
 # Android's density buckets. The legacy icon is 48dp, the adaptive layer 108dp.
 DENSITIES = {"mdpi": 1, "hdpi": 1.5, "xhdpi": 2, "xxhdpi": 3, "xxxhdpi": 4}
@@ -193,6 +211,14 @@ def main() -> None:
         for x in range(art.size[0]):
             px[x, y] = colour
     flat.paste(art, (0, 0), art)
+
+    for path, size in WEB_ICONS.items():
+        flat.resize((size, size), Image.LANCZOS).save(path, "PNG")
+        print(f"  {path}")
+    if WEB_ONLY:
+        print("--web-only: app icons left untouched")
+        return
+
     flat.resize((1024, 1024), Image.LANCZOS).save(IOS, "PNG")
     print(f"  {IOS}")
 
