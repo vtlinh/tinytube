@@ -21,7 +21,7 @@ import {
   lengthIndex,
   lengthLabel,
   minuteLabel,
-  shortDuration,
+  limitLabel,
   clampLengthRange,
   hydrateChannel,
   arrangeChannels,
@@ -765,7 +765,7 @@ function BirthdayRow({ value, onChange }) {
  * "no limit over this period" — which is a different thing from zero. */
 /** One period's limit, on that period's own scale: 0 to the whole window in
  * its own step, then one stop past the end for "no limit". */
-function LimitSlider({ value, onChange, label, maxMins, stepMins }) {
+function LimitSlider({ value, onChange, label, period, maxMins, stepMins }) {
   /* One stop short of the period, then "no limit": a cap equal to the window
      it governs forbids nothing, so it WAS "no limit" wearing a number. */
   const steps = maxMins / stepMins // index `steps` is the no-limit stop
@@ -782,7 +782,7 @@ function LimitSlider({ value, onChange, label, maxMins, stepMins }) {
         aria-label={label}
         onChange={e => onChange(+e.target.value === steps ? null : +e.target.value * stepMins)}
       />
-      <span className="thumb-label" style={{ left: pos(index) }}>{shortDuration(value)}</span>
+      <span className="thumb-label" style={{ left: pos(index) }}>{limitLabel(value, period)}</span>
     </div>
   )
 }
@@ -808,24 +808,28 @@ function QuotaDialog({ title, note, limits, periods = QUOTA_PERIODS, onSave, onC
             </div>
             <div className="modal-body">
               {note && <p className="text-secondary small">{note}</p>}
-              {periods.map(({ key, label, hint, maxMins, stepMins }) => (
+              {periods.map(period => {
+                const { key, label, hint, maxMins, stepMins } = period
+                return (
                 <div key={key} className="mb-3">
                   <div className="d-flex align-items-baseline gap-2">
                     <span>{label}</span>
                     <span className="text-secondary small">{hint}</span>
                     <span className="ms-auto fw-semibold text-nowrap">
-                      {draft[key] == null ? 'no limit' : fmtMins(draft[key])}
+                      {draft[key] == null ? 'no limit' : limitLabel(draft[key], period)}
                     </span>
                   </div>
                   <LimitSlider
                     label={label}
+                    period={period}
                     value={draft[key]}
                     maxMins={maxMins}
                     stepMins={stepMins}
                     onChange={v => setDraft(prev => ({ ...prev, [key]: v }))}
                   />
                 </div>
-              ))}
+                )
+              })}
             </div>
             <div className="modal-footer">
               {onClear && (

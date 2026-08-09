@@ -893,8 +893,10 @@ const EMPTY_USAGE = { window: { start: null, secs: 0 }, days: {}, hours: {} }
 export const QUOTA_PERIODS = [
   { key: 'per6h', label: 'Every 6 hours', hint: 'a rolling six hours', maxMins: 6 * 60, stepMins: 15 },
   { key: 'perDay', label: 'Each day', hint: 'resets at midnight', maxMins: 24 * 60, stepMins: 60 },
-  { key: 'perWeek', label: 'Each week', hint: 'resets on Sunday', maxMins: 7 * 24 * 60, stepMins: 4 * 60 },
-  { key: 'perMonth', label: 'Each month', hint: 'resets on the 1st', maxMins: 31 * 24 * 60, stepMins: 24 * 60 },
+  // a week is counted in DAYS, half a day at a time: four-hour steps made a
+  // parent drag through 42 stops to say "about three days"
+  { key: 'perWeek', label: 'Each week', hint: 'resets on Sunday', maxMins: 7 * 24 * 60, stepMins: 12 * 60, unit: 'd' },
+  { key: 'perMonth', label: 'Each month', hint: 'resets on the 1st', maxMins: 31 * 24 * 60, stepMins: 24 * 60, unit: 'd' },
 ]
 
 const pad2 = n => String(n).padStart(2, '0')
@@ -905,6 +907,22 @@ export function fmtMins(mins) {
   const h = Math.floor(mins / 60)
   const m = Math.round(mins % 60)
   return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`
+}
+
+/**
+ * A limit the way its own period says it: days for the week and the month
+ * (halves included, so 12 hours is 0.5d rather than a number of hours), one
+ * short token everywhere else. The SAME function draws the thumb and the line
+ * above it — they disagreed once, "2d" over "48h" for one value, and a
+ * settings screen that contradicts itself is worse than a terse one.
+ */
+export function limitLabel(mins, period) {
+  if (mins == null || !Number.isFinite(mins)) return '\u221e'
+  if (period?.unit === 'd') {
+    const days = mins / (24 * 60)
+    return `${Number.isInteger(days) ? days : days.toFixed(1)}d`
+  }
+  return shortDuration(mins)
 }
 
 /** The largest limit worth setting for a period: one step below its length,

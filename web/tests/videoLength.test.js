@@ -18,6 +18,7 @@ import {
   DEFAULTS,
   QUOTA_PERIODS,
   shortDuration,
+  limitLabel,
 } from '../src/lib.js'
 
 describe('the length scale', () => {
@@ -235,7 +236,7 @@ describe('each quota period has its own scale', () => {
     const by = Object.fromEntries(QUOTA_PERIODS.map(p => [p.key, p]))
     expect(by.per6h).toMatchObject({ maxMins: 360, stepMins: 15 })
     expect(by.perDay).toMatchObject({ maxMins: 1440, stepMins: 60 })
-    expect(by.perWeek).toMatchObject({ maxMins: 10080, stepMins: 240 })
+    expect(by.perWeek).toMatchObject({ maxMins: 10080, stepMins: 720, unit: 'd' }) // half a day
     expect(by.perMonth).toMatchObject({ maxMins: 44640, stepMins: 1440 }) // 31 days
   })
 
@@ -250,6 +251,23 @@ describe('each quota period has its own scale', () => {
   it('the default daily limit lands exactly on a stop', () => {
     const day = QUOTA_PERIODS.find(p => p.key === 'perDay')
     expect(DEFAULTS.quota.perDay % day.stepMins).toBe(0)
+  })
+})
+
+describe('limitLabel', () => {
+  const week = QUOTA_PERIODS.find(p => p.key === 'perWeek')
+  const day = QUOTA_PERIODS.find(p => p.key === 'perDay')
+
+  it('counts a week in days, halves included', () => {
+    expect(limitLabel(720, week)).toBe('0.5d')
+    expect(limitLabel(1440, week)).toBe('1d')
+    expect(limitLabel(9360, week)).toBe('6.5d')
+    expect(limitLabel(null, week)).toBe('∞')
+  })
+
+  it('leaves the shorter periods in their own units', () => {
+    expect(limitLabel(120, day)).toBe('2h')
+    expect(limitLabel(45, day)).toBe('45')
   })
 })
 
@@ -271,7 +289,7 @@ describe('the top of every scale is “no limit”, not a number', () => {
     const by = Object.fromEntries(QUOTA_PERIODS.map(p => [p.key, p]))
     expect(lastFiniteLimit(by.per6h)).toBe(345) // 5h45m, not 6h
     expect(lastFiniteLimit(by.perDay)).toBe(23 * 60)
-    expect(lastFiniteLimit(by.perWeek)).toBe(7 * 24 * 60 - 240)
+    expect(lastFiniteLimit(by.perWeek)).toBe(6.5 * 24 * 60) // 6½ days, not 7
     expect(lastFiniteLimit(by.perMonth)).toBe(30 * 24 * 60)
   })
 
