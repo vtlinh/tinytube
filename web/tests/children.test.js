@@ -167,6 +167,33 @@ describe('useWatchStore per child', () => {
     expect(first.result.current.watched.dQw4w9WgXcQ).toBeUndefined()
   })
 
+  /* Regression: there is ONE setStore for every child, so a write holding a
+     childId from an earlier render used to land on whoever was showing. A
+     /sync/pull for A resolving after the parent switched to B put A's rows —
+     and A's account-wide `remote` usage, which feeds the quota — into B's
+     store, and persisted B's history under A's key. Both children were wrong
+     until the next launch. */
+  it('drops a pull that resolves after the child changed under it', () => {
+    localStorage.setItem(watchKey('a'), JSON.stringify({ watched: { aaaaaaaaaaa: { pos: 1, dur: 2 } } }))
+    localStorage.setItem(watchKey('b'), JSON.stringify({ watched: { bbbbbbbbbbb: { pos: 3, dur: 4 } } }))
+    const { result, rerender } = renderHook(({ id }) => useWatchStore(id), { initialProps: { id: 'a' } })
+
+    // a's pull is on the wire, holding the applyRemote from a's render
+    const pullForA = result.current.applyRemote
+    rerender({ id: 'b' })
+
+    act(() => pullForA({
+      watched: [{ id: 'ccccccccccc', pos: 9, dur: 10, completed: true, updatedAt: 5 }],
+      usage: { days: { '2026-08-09': 999 }, hours: { 1: 999 } },
+    }))
+
+    // b is untouched: not a's row, and NOT a's usage — that is b's quota
+    expect(Object.keys(result.current.watched)).toEqual(['bbbbbbbbbbb'])
+    expect(result.current.remote).toEqual({ days: {}, hours: {} })
+    // and b's history was not written into a's file
+    expect(Object.keys(JSON.parse(localStorage.getItem(watchKey('a'))).watched)).toEqual(['aaaaaaaaaaa'])
+  })
+
   it('swaps the whole history when the child changes under it', () => {
     localStorage.setItem(watchKey('a'), JSON.stringify({ watched: { aaaaaaaaaaa: { pos: 1, dur: 2 } } }))
     localStorage.setItem(watchKey('b'), JSON.stringify({ watched: { bbbbbbbbbbb: { pos: 3, dur: 4 } } }))
