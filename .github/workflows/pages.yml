@@ -70,6 +70,26 @@ jobs:
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       - run: npm test
+      # The same version-advancement the Android app uses (android.yml's
+      # "Compute version name"): <year-2025>.<iso week>.<patch>, patch
+      # incrementing within a week. The previous version comes off the LIVE
+      # site's version.json — stamped below — the way Android reads its
+      # release's. Display-only, so a failed read just restarts the week at .1.
+      - name: Compute version name
+        run: |
+          YEAR=$(( $(date -u +%G) - 2025 ))
+          WEEK=$(( 10#$(date -u +%V) ))
+          PATCH=1
+          if curl -fsSL "https://vtlinh.github.io/tinytube/version.json" -o prev.json 2>/dev/null; then
+            PREV=$(sed -n 's/.*"versionName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' prev.json)
+            PY=${PREV%%.*}; REST=${PREV#*.}; PW=${REST%%.*}; PP=${REST##*.}
+            if [ "$PY" = "$YEAR" ] && [ "$PW" = "$WEEK" ] && [ -n "$PP" ]; then
+              PATCH=$(( PP + 1 ))
+            fi
+            rm -f prev.json
+          fi
+          echo "BUILD_VERSION=${YEAR}.${WEEK}.${PATCH}" >> "$GITHUB_ENV"
+          echo "Computed version name: ${YEAR}.${WEEK}.${PATCH}"
       - name: Build
         run: npm run build
         env:
@@ -77,8 +97,12 @@ jobs:
           # payload carries no repository object, so the upstream expression
           # would build cron refreshes against a "//" base.
           BASE_PATH: /tinytube/
-          # Settings shows this as "Version N"
-          BUILD_VERSION: ${{ github.run_number }}
+      # What the NEXT deploy's patch increment reads; `run` is the tiebreaker
+      # for a person asking which build is serving.
+      - name: Stamp version.json
+        run: |
+          printf '{"versionName": "%s", "run": %s}\n' "$BUILD_VERSION" "${{ github.run_number }}" > dist/version.json
+          cat dist/version.json
       - uses: actions/configure-pages@v5
         with:
           enablement: true

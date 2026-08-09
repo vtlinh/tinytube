@@ -56,7 +56,6 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
         </div>
         <h1 className="fs-3 fw-bold m-0">{page === 'channels' ? 'Channels' : 'Parents Mode'}</h1>
         <div className="d-flex align-items-center justify-content-end gap-3" style={{ flex: 1 }}>
-          <VersionLink />
           {dirty && (
             <>
               {/* discards the draft but stays on the page, unlike Back */}
@@ -82,6 +81,7 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
               </button>
             </>
           )}
+          <SyncMenu sync={sync} />
         </div>
       </div>
 
@@ -90,7 +90,6 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
           <BirthdayRow value={settings.birthday} onChange={draft.setBirthday} />
           <QuotaRow value={settings.quotaMins} onChange={draft.setQuotaMins} watchStore={watchStore} />
           <MinLengthRow value={settings.minVideoMins} onChange={draft.setMinVideoMins} />
-          <SyncRow sync={sync} />
           <ApiKeyRow apiKey={settings.apiKey} onChange={draft.setApiKey} />
           <div className="mb-4 d-flex align-items-center gap-3">
             <span className="text-secondary text-nowrap">
@@ -101,6 +100,10 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
               Manage channels
               <i className="fa-sharp-duotone fa-regular fa-chevron-right ms-2" />
             </button>
+          </div>
+          {/* the About position, like the Android app: the bottom of settings */}
+          <div className="text-center mt-5">
+            <VersionLink />
           </div>
         </>
       ) : (
@@ -142,61 +145,101 @@ function ConfirmModal({ title, body, onConfirm, onCancel }) {
 }
 
 /**
- * Cross-device sync, keyed by the parent's Google account. Immediate-effect
- * like passkey enrollment, NOT part of the draft: signing in starts a pull
- * that may rewrite settings, which a draft would silently clobber on Save.
- * Renders nothing until a Google OAuth client id is configured (lib.js).
+ * Cross-device sync, keyed by the parent's Google account, tucked behind the
+ * header's three-dot menu and worded plainly: "Sign in" / "Sign out".
+ * Immediate-effect like passkey enrollment, NOT part of the draft: signing in
+ * starts a pull that may rewrite settings, which a draft would silently
+ * clobber on Save. Renders nothing until an OAuth client id is configured.
+ *
+ * The sign-in itself is still Google underneath — the menu item triggers the
+ * One Tap prompt, and when the browser suppresses that (FedCM cooldown,
+ * blocked third-party cookies) it falls through to clicking an invisible
+ * rendered Google button, whose popup flow always works.
  */
-function SyncRow({ sync = {} }) {
-  const buttonRef = useRef(null)
-  const [error, setError] = useState(null)
+function SyncMenu({ sync = {} }) {
   const { session, signIn, signOut } = sync
+  const [open, setOpen] = useState(false)
+  const [error, setError] = useState(null)
+  const hiddenBtn = useRef(null)
+  const ready = useRef(false)
 
-  useEffect(() => {
-    if (session || !GOOGLE_CLIENT_ID) return
-    let cancelled = false
-    loadGoogleSignIn()
-      .then(google => {
-        if (cancelled || !buttonRef.current) return
+  const startSignIn = async () => {
+    setOpen(false)
+    setError(null)
+    try {
+      const google = await loadGoogleSignIn()
+      if (!ready.current) {
         google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
-          callback: resp => {
-            setError(null)
-            signIn(resp.credential).catch(e => setError(e.message))
-          },
+          callback: resp => signIn(resp.credential).catch(e => setError(e.message)),
         })
-        google.accounts.id.renderButton(buttonRef.current, { theme: 'filled_black', size: 'large' })
+        google.accounts.id.renderButton(hiddenBtn.current, { type: 'icon', size: 'medium' })
+        ready.current = true
+      }
+      google.accounts.id.prompt(moment => {
+        if (moment.isNotDisplayed?.() || moment.isSkippedMoment?.()) {
+          const btn = hiddenBtn.current?.querySelector('div[role="button"]')
+          if (btn) btn.click()
+          else setError('Sign-in was blocked by the browser — try again')
+        }
       })
-      .catch(e => {
-        if (!cancelled) setError(e.message)
-      })
-    return () => {
-      cancelled = true
+    } catch (e) {
+      setError(e.message)
     }
-  }, [session, signIn])
+  }
 
   if (!GOOGLE_CLIENT_ID) return null
   return (
-    <div className="mb-4 d-flex align-items-center gap-3 flex-wrap">
-      <span className="text-secondary text-nowrap" title="Sync settings, channels and watch history across devices">
-        <i className="fa-sharp-duotone fa-regular fa-cloud-arrow-up me-2" />
-        Sync
-      </span>
-      {session ? (
+    <div className="position-relative">
+      <button
+        type="button"
+        className="btn btn-outline-secondary"
+        aria-label="More options"
+        onClick={() => setOpen(o => !o)}
+      >
+        <i className="fa-sharp-duotone fa-regular fa-ellipsis-vertical" />
+      </button>
+      {open && (
         <>
-          <span>
-            <i className="fa-sharp-duotone fa-regular fa-circle-check text-success me-2" />
-            {session.email}
-          </span>
-          <button type="button" className="btn btn-outline-secondary btn-sm" onClick={signOut}>
-            <i className="fa-sharp-duotone fa-regular fa-right-from-bracket me-2" />
-            Sign out
-          </button>
+          {/* click-away layer under the menu */}
+          <div
+            className="position-fixed top-0 start-0 w-100 h-100"
+            style={{ zIndex: 1040 }}
+            onClick={() => setOpen(false)}
+          />
+          <div className="dropdown-menu dropdown-menu-end show position-absolute end-0 mt-1" style={{ zIndex: 1050 }}>
+            {session ? (
+              <>
+                <span className="dropdown-item-text text-secondary small">{session.email}</span>
+                <button
+                  type="button"
+                  className="dropdown-item"
+                  onClick={() => {
+                    signOut()
+                    setOpen(false)
+                  }}
+                >
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <button type="button" className="dropdown-item" onClick={startSignIn}>
+                Sign in
+              </button>
+            )}
+          </div>
         </>
-      ) : (
-        <div ref={buttonRef} />
       )}
-      {error && <span className="text-danger small">{error}</span>}
+      {/* the invisible real Google button the fallback clicks */}
+      <div
+        ref={hiddenBtn}
+        aria-hidden="true"
+        className="position-absolute overflow-hidden"
+        style={{ width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
+      />
+      {error && (
+        <div className="alert alert-warning position-absolute end-0 mt-2 py-1 px-2 small text-nowrap">{error}</div>
+      )}
     </div>
   )
 }
