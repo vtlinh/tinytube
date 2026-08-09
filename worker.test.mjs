@@ -580,3 +580,35 @@ test("validUsageBuckets demands a device id and fixed-pattern bucket keys", () =
   assert.equal(validUsageBuckets(null), null);
   assert.ok(DEVICE_ID.test(deviceId) && DAY_KEY.test("2026-08-09") && HOUR_KEY.test("496728"));
 });
+
+/* /videos: the pure mapping between Data API replies and the cached shape.
+   Ids re-validated, thumbnails rebuilt from the id, 18+ dropped — the cache is
+   shared across every account, so nothing unvalidated may enter it. */
+
+import { parseIsoDuration, apiVideoList } from "./worker.js";
+
+test("parseIsoDuration reads ISO8601 and refuses placeholders", () => {
+  assert.equal(parseIsoDuration("PT1H2M3S"), 3723);
+  assert.equal(parseIsoDuration("PT2M"), 120);
+  assert.equal(parseIsoDuration("PT45S"), 45);
+  assert.equal(parseIsoDuration("P0D"), null);
+  assert.equal(parseIsoDuration(undefined), null);
+});
+
+test("apiVideoList validates ids, attaches durations, drops 18+ and builds thumbnails", () => {
+  const items = [
+    { contentDetails: { videoId: "dQw4w9WgXcQ" }, snippet: { title: "Good" } },
+    { contentDetails: { videoId: "aqz-KE-bpKQ" }, snippet: { title: "Adult" } },
+    { contentDetails: { videoId: "short!" }, snippet: { title: "Bad id" } },
+    { contentDetails: {}, snippet: { title: "No id" } },
+  ];
+  const details = [
+    { id: "dQw4w9WgXcQ", contentDetails: { duration: "PT3M32S" } },
+    { id: "aqz-KE-bpKQ", contentDetails: { duration: "PT1M", contentRating: { ytRating: "ytAgeRestricted" } } },
+  ];
+  assert.deepEqual(apiVideoList(items, details), [
+    { id: "dQw4w9WgXcQ", title: "Good", duration: 212, thumbnail: thumbnailUrl("dQw4w9WgXcQ") },
+  ]);
+  assert.deepEqual(apiVideoList([], []), []);
+  assert.deepEqual(apiVideoList(undefined, undefined), []);
+});

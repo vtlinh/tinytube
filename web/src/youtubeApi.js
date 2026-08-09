@@ -172,25 +172,64 @@ export function evictChannelCache(channelId) {
 
 const inflight = {} // StrictMode double-effect / concurrent-render guard
 
+const WORKER_URL = 'https://tinytube.vtlinh87.workers.dev'
+
 /**
- * Cache-first channel videos: fresh (<24h) cache -> no network; stale/missing
- * with a key -> refetch; fetch failure or no key -> stale cache or [].
+ * The Worker's SHARED per-channel cache: which videos a channel has is a fact
+ * about the channel, not about a user, so one YouTube fetch a day serves
+ * every account (the channel LIST stays per account). The Worker populates
+ * the cache itself — nothing a browser sends can write it, which is what
+ * keeps one account's data out of another child's grid — and every id is
+ * re-validated here anyway, with the thumbnail rebuilt from it.
+ */
+async function fetchSharedVideos(channelId) {
+  const resp = await fetch(`${WORKER_URL}/videos`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ channel: channelId }),
+  })
+  if (!resp.ok) throw new Error(`videos: HTTP ${resp.status}`)
+  const body = await resp.json()
+  return (body.videos ?? [])
+    .filter(v => /^[A-Za-z0-9_-]{11}$/.test(v?.id ?? ''))
+    .map(v => ({
+      id: v.id,
+      title: typeof v.title === 'string' ? v.title : v.id,
+      duration: Number.isFinite(v.duration) ? v.duration : null,
+      thumbnail: `https://i.ytimg.com/vi/${v.id}/mqdefault.jpg`,
+    }))
+}
+
+/**
+ * Cache-first channel videos: fresh (<24h) local cache -> no network; then
+ * the Worker's shared cache (works with NO api key); then the parent's own
+ * key as the fallback; failure everywhere -> stale local cache or [].
  */
 export function getChannelVideosCached(apiKey, channelId) {
   const cached = readCache()[channelId]
   const fresh = cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS
-  if (fresh || !apiKey) return Promise.resolve(cached?.videos ?? [])
+  if (fresh) return Promise.resolve(cached.videos)
 
-  inflight[channelId] ??= fetchChannelVideos(apiKey, channelId)
-    .then(videos => {
+  inflight[channelId] ??= (async () => {
+    let videos = []
+    try {
+      videos = await fetchSharedVideos(channelId)
+    } catch (e) {
+      console.warn(`shared cache unreachable for ${channelId}`, e)
+    }
+    if (!videos.length && apiKey) {
+      try {
+        videos = await fetchChannelVideos(apiKey, channelId)
+      } catch (e) {
+        console.error(`fetch failed for ${channelId}, using stale cache`, e)
+      }
+    }
+    if (videos.length) {
       writeCache({ ...readCache(), [channelId]: { fetchedAt: Date.now(), videos } })
       return videos
-    })
-    .catch(e => {
-      console.error(`fetch failed for ${channelId}, using stale cache`, e)
-      return cached?.videos ?? []
-    })
-    .finally(() => delete inflight[channelId])
+    }
+    return cached?.videos ?? []
+  })().finally(() => delete inflight[channelId])
   return inflight[channelId]
 }
 
