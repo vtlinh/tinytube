@@ -47,7 +47,7 @@ export function EnrollGate({ onEnrolled }) {
  * The spent-quota screen. A grown-up can add time here without going all the
  * way into settings — but only past the gate: `onAddTime` runs the same
  * biometric (or, on a device with no lock, the arithmetic fallback) that
- * parent mode does, and the grant lasts the week rather than forever.
+ * parent mode does, and the grant dies at midnight rather than lasting.
  */
 export function QuotaGate({ onParents, onAddTime, onBack }) {
   const [asking, setAsking] = useState(false)
@@ -59,7 +59,7 @@ export function QuotaGate({ onParents, onAddTime, onBack }) {
 
       {asking ? (
         <>
-          <div className="text-secondary">How much more, for the rest of this week?</div>
+          <div className="text-secondary">How much more, for the rest of today?</div>
           <div className="d-flex gap-2 flex-wrap justify-content-center">
             {[15, 30, 60].map(mins => (
               <button

@@ -12,7 +12,8 @@ import {
   ageFromBirthday,
   effectiveAgeRange,
   effectiveQuota,
-  activeWeekOverride,
+  activeDayOverride,
+  lastFiniteLimit,
   activeBonusMins,
   quotaState,
   QUOTA_PERIODS,
@@ -140,7 +141,7 @@ function StatsTab({ watchStore, settings }) {
       {bonusMins > 0 && (
         <div className="mb-3">
           <i className="fa-sharp-duotone fa-regular fa-gift text-danger me-2" />
-          {fmtMins(bonusMins)} extra granted — until the end of this week
+          {fmtMins(bonusMins)} extra granted — until midnight
         </div>
       )}
       <table className="table align-middle">
@@ -765,8 +766,10 @@ function BirthdayRow({ value, onChange }) {
 /** One period's limit, on that period's own scale: 0 to the whole window in
  * its own step, then one stop past the end for "no limit". */
 function LimitSlider({ value, onChange, label, maxMins, stepMins }) {
-  const steps = maxMins / stepMins + 1 // the last one is "no limit"
-  // a value stored under an older, finer scale may sit between stops
+  /* One stop short of the period, then "no limit": a cap equal to the window
+     it governs forbids nothing, so it WAS "no limit" wearing a number. */
+  const steps = maxMins / stepMins // index `steps` is the no-limit stop
+  // a value stored under an older, coarser or finer scale may sit between stops
   const index = value == null ? steps : Math.min(steps - 1, Math.round(value / stepMins))
   const pos = i => `calc(${i / steps} * (100% - 44px) + 22px)`
   return (
@@ -836,7 +839,13 @@ function QuotaDialog({ title, note, limits, periods = QUOTA_PERIODS, onSave, onC
               <button
                 type="button"
                 className="btn btn-danger"
-                onClick={() => onSave(Object.fromEntries(periods.map(({ key }) => [key, draft[key]])))}
+                onClick={() =>
+                  onSave(
+                    Object.fromEntries(
+                      periods.map(p => [p.key, draft[p.key] != null && draft[p.key] >= p.maxMins ? null : draft[p.key]]),
+                    ),
+                  )
+                }
               >
                 <i className="fa-sharp-duotone fa-regular fa-check me-2" />
                 Save
@@ -861,9 +870,9 @@ function limitsSummary(limits) {
 // no reset button: raising a limit above what is used grants time, and every
 // period rolls over on its own
 function QuotaRow({ store, watchStore }) {
-  const [editing, setEditing] = useState(null) // 'standing' | 'week'
+  const [editing, setEditing] = useState(null) // 'standing' | 'today'
   const settings = store.settings
-  const week = activeWeekOverride(settings)
+  const today = activeDayOverride(settings)
   const bonus = activeBonusMins(settings)
   const inForce = effectiveQuota(settings)
   const { secsLeft } = quotaState(settings, watchStore)
@@ -892,33 +901,33 @@ function QuotaRow({ store, watchStore }) {
         {Number.isFinite(secsLeft) ? `${fmtMins(Math.max(0, Math.ceil(secsLeft / 60)))} left right now` : 'no limit'}
       </div>
 
-      {week && (
+      {today && (
         // red, because it is not what the settings above say: a limit that
         // silently differs from the one on screen is the confusing kind
         <div className="d-flex align-items-center gap-2 mt-2 text-danger">
           <i className="fa-sharp-duotone fa-regular fa-triangle-exclamation" />
           <span className="flex-grow-1" style={{ minWidth: 0 }}>
-            This week is overridden — {limitsSummary(inForce)}
+            Today is overridden — {limitsSummary(inForce)}
             {bonus > 0 && ` (+${fmtMins(bonus)} granted)`}
           </span>
           <button
             type="button"
             className="btn btn-sm btn-outline-danger flex-shrink-0"
-            aria-label="Edit this week’s quota"
-            onClick={() => setEditing('week')}
+            aria-label="Edit today’s quota"
+            onClick={() => setEditing('today')}
           >
             <i className="fa-sharp-duotone fa-regular fa-pencil" />
           </button>
         </div>
       )}
 
-      {!week && (
+      {!today && (
         <button
           type="button"
           className="btn btn-link btn-sm text-secondary ps-0"
-          onClick={() => setEditing('week')}
+          onClick={() => setEditing('today')}
         >
-          override for this week only
+          override for today only
         </button>
       )}
 
@@ -933,22 +942,22 @@ function QuotaRow({ store, watchStore }) {
           onCancel={() => setEditing(null)}
         />
       )}
-      {editing === 'week' && (
+      {editing === 'today' && (
         <QuotaDialog
-          title="This week only"
-          note="These limits replace the ones above until Sunday, then stop existing."
-          // no monthly limit here: a week cannot sensibly redraw a month, and
-          // the standing one keeps applying underneath (see setWeekLimits)
-          periods={QUOTA_PERIODS.filter(({ key }) => key !== 'perMonth')}
-          limits={week?.limits ?? settings.quota}
+          title="Today only"
+          note="These limits replace the ones above until midnight, then stop existing."
+          // only the periods a DAY can speak for: it cannot redraw a week or a
+          // month, and the standing ones keep applying underneath
+          periods={QUOTA_PERIODS.filter(({ key }) => key === 'per6h' || key === 'perDay')}
+          limits={today?.limits ?? settings.quota}
           onSave={limits => {
-            store.setWeekLimits(limits)
+            store.setDayLimits(limits)
             setEditing(null)
           }}
           onClear={
-            week
+            today
               ? () => {
-                  store.clearWeekOverride()
+                  store.clearDayOverride()
                   setEditing(null)
                 }
               : undefined
