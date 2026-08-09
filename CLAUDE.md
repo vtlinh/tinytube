@@ -9,6 +9,17 @@ child sees a grid of approved videos and can reach nothing else. Android ships;
 iOS is being built alongside it under the rule below. See `README.md` for the
 architecture and the approval workflow.
 
+**Development of the Android and iOS apps is PAUSED (2026-08).** Write no new
+code or tests under `android/` or `ios/`, and dispatch no APK/IPA publish. The
+active front is the WEB APP under `web/`, copied from
+[pathikrit/TinyTube](https://github.com/pathikrit/TinyTube) and published to
+this repository's GitHub Pages by `pages.yml`. It is a separate, self-contained
+npm project — see `web/AGENTS.md` — and the rules below about the two apps
+(including **Both platforms, always**) still bind whatever touches them, but do
+not require app-side counterparts for web work while the pause holds. The
+installed base still exists: the Worker keeps serving, and nothing here may
+break an installed phone.
+
 Everything is TinyTube: the label, the Kotlin package, the `applicationId`
 (`dev.vtlinh.tinytube`) and the Worker (`tinytube.vtlinh87.workers.dev`). The
 last two were renamed once, together, and that pairing was the only way it could
@@ -79,7 +90,14 @@ Two answers already bought with a spike, so don't re-derive them:
 ```
 worker.js / wrangler.toml        Cloudflare Worker: release assets, /uploads
                                  and /channel — ALL the YouTube parsing
-worker.test.mjs                  its parsers, under `node --test` (CI runs it)
+worker.test.mjs                  its parsers, under `node --test worker.test.mjs`
+                                 (CI runs it; named because bare `node --test`
+                                 would sweep up web/tests too)
+web/                             the WEB APP, copied verbatim from
+                                 pathikrit/TinyTube @ cbab6b8; a self-contained
+                                 npm project with its own AGENTS.md, tests and
+                                 .gitignore. Published to GitHub Pages
+                                 (vtlinh.github.io/tinytube) by pages.yml
 ios/project.yml                  the Xcode project, as a readable file; the
                                  .xcodeproj is GENERATED, never committed
 art/app-icon.png                 the launcher icon, as supplied artwork
@@ -126,6 +144,10 @@ ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
                                  ubuntu — see the reuse note below
 .github/workflows/auto-merge.yml merge a PR once both platforms pass
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
+.github/workflows/pages.yml      build web/ and publish it to GitHub Pages, on
+                                 pushes to main touching web/**, weekly (to
+                                 refresh videos.json) and on dispatch; never on
+                                 pull requests, so it cannot hold auto-merge
 android/                         the app
   signing.p12                    NOT in the repo — a secret, and gitignored
                                  here; CI writes it out. See README for why
@@ -169,7 +191,10 @@ android/                         the app
 ```bash
 gradle -p android testReleaseUnitTest   # runs in CI before anything is published
 gradle -p android assembleRelease
-node --test                             # the Worker's parsers; CI runs this too
+node --test worker.test.mjs             # the Worker's parsers; CI runs this too
+                                        # (named: bare `node --test` sweeps up
+                                        # web/tests, which are vitest files)
+(cd web && npm ci && npm test)          # the web app's suite; pages.yml runs it
 swift test --package-path ios/TinyTubeCore   # the iOS half; CI runs this too
 npx wrangler deploy --dry-run           # validates the worker bundles
 ```

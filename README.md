@@ -745,7 +745,7 @@ nothing in the app has to change to take it.
 gradle -p android testReleaseUnitTest   # id, player, gate, uploads and schema tests
 gradle -p android assembleRelease       # → android/app/build/outputs/apk/release/
 swift test --package-path ios/TinyTubeCore   # the same tests, in Swift
-node --test                             # the Worker's parsers
+node --test worker.test.mjs             # the Worker's parsers
 npx wrangler deploy --dry-run           # checks the Worker still bundles
 ```
 

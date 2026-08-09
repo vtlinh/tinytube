@@ -1,0 +1,89 @@
+# The web app under web/ — copied from https://github.com/pathikrit/TinyTube —
+# built and published to THIS repository's GitHub Pages
+# (https://vtlinh.github.io/tinytube/).
+#
+# Deliberately NO pull_request trigger. auto-merge.yml listens for "android"
+# and "ios" by name and re-checks that nothing else on the commit failed, so a
+# check this workflow added to a PR could hold a merge hostage on a Pages
+# concern. PRs that touch web/ merge on the app checks (which skip themselves,
+# untouched) and the deploy happens from main, after.
+#
+# And nothing here can publish an APK or an IPA: android.yml and ios.yml watch
+# android/** and ios/** on push, auto-merge's publish filter names the same
+# two directories, and web/** appears in neither.
+#
+# One-time repository setup, both in Settings:
+#   - Pages -> Source = "GitHub Actions" (configure-pages below tries to do
+#     this itself via `enablement`; if the token is not allowed to, flip the
+#     toggle by hand once and re-run)
+#   - a YOUTUBE_API_KEY Actions secret for the downloader — without it the
+#     Download step fails fast with setup instructions
+name: pages
+
+on:
+  push:
+    branches: [ "main" ]
+    # web/** plus this file. Unlike android.yml/ios.yml this filter MAY name
+    # its own workflow: a Pages redeploy is idempotent — no versionCode, no
+    # installed device watching — so the reason those filters exclude CI does
+    # not apply here.
+    paths:
+      - "web/**"
+      - ".github/workflows/pages.yml"
+  schedule:
+    - cron: "0 6 * * 0" # weekly (Sun): refresh videos.json from the approved channels
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Seed with currently deployed data (stale fallback for broken channels)
+        run: curl -fsSL "https://vtlinh.github.io/tinytube/videos.json" -o /tmp/seed.json || true
+      - run: npm ci
+      - name: Download
+        run: npm run download -- --seed /tmp/seed.json
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      - run: npm test
+      - name: Build
+        run: npm run build
+        env:
+          # Hardcoded rather than read off the event: the schedule trigger's
+          # payload carries no repository object, so the upstream expression
+          # would build cron refreshes against a "//" base.
+          BASE_PATH: /tinytube/
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: site
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
