@@ -89,8 +89,12 @@ Two answers already bought with a spike, so don't re-derive them:
 
 ```
 worker.js / wrangler.toml        Cloudflare Worker: release assets, /uploads
-                                 and /channel — ALL the YouTube parsing — and
-                                 /sync/*, the web app's per-account state in D1
+                                 and /channel — ALL the YouTube parsing —
+                                 /sync/*, the web app's per-account state in
+                                 D1, and /videos, the SHARED per-channel video
+                                 cache (one YouTube fetch a day per channel
+                                 serves every account; the Worker alone writes
+                                 it)
 worker.test.mjs                  its parsers, under `node --test worker.test.mjs`
                                  (CI runs it; named because bare `node --test`
                                  would sweep up web/tests too)
@@ -809,6 +813,18 @@ stops, green publishes.
   summed server-side — that summing is what makes the watch quota hold across
   devices, and why a device must never fold pulled totals back into the
   buckets it pushes).
+
+  **`/videos` is the shared-vs-per-user line, drawn deliberately.** Which
+  videos a channel has is a fact about the channel, so it is cached ONCE, in
+  D1's `channel_cache`, keyed by channel id and shared by every account —
+  which channels an account approved stays per-user in `sync_settings`. The
+  cache is written ONLY by the Worker's own fetches (Data API when the
+  `YOUTUBE_API_KEY` wrangler secret is set — durations, 18+ dropped — else the
+  same page+feed scrape /uploads uses): a browser-writable shared cache would
+  let one account put its own "videos" under a channel every other child then
+  sees. The caller contributes a channel id against `CHANNEL_ID` and nothing
+  else; an answer that parses to nothing is never cached (stale beats empty);
+  and the web client re-validates every id and rebuilds thumbnails anyway.
 - **The Worker's parsing is tested by `worker.test.mjs`, run in CI.** It reads a
   rendering of YouTube's own web app, so it breaks without anyone touching it —
   it is pinned against three entries lifted verbatim from a live page, plus the

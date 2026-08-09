@@ -241,3 +241,57 @@ describe('getChannelVideosCached', () => {
     expect(await getChannelVideosCached('', 'UCnothing000000000000000')).toEqual([]) // keyless, no cache
   })
 })
+
+describe('getChannelVideosCached via the shared Worker cache', () => {
+  // route by host: the Worker's /videos vs the Data API
+  const routedFetch = (workerBody, apiBodies = {}) =>
+    vi.fn(async url => {
+      const u = new URL(url)
+      if (u.hostname.endsWith('workers.dev')) {
+        if (!workerBody) return { ok: false, status: 503, json: async () => ({}) }
+        return { ok: true, json: async () => workerBody }
+      }
+      const body = apiBodies[u.pathname.split('/').pop()]
+      if (!body) return { ok: false, status: 404, json: async () => ({ error: { message: 'not found' } }) }
+      return { ok: true, json: async () => body }
+    })
+
+  it('uses the shared cache first and never spends the key on a hit — and works keyless', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(2_000_000)
+    const fetch = routedFetch({ channel_id: UC, videos: [{ id: 'dQw4w9WgXcQ', title: 'Shared', duration: 212 }] })
+    vi.stubGlobal('fetch', fetch)
+
+    const videos = await getChannelVideosCached('', UC) // NO key
+    expect(videos).toEqual([
+      { id: 'dQw4w9WgXcQ', title: 'Shared', duration: 212, thumbnail: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg' },
+    ])
+    expect(fetch.mock.calls.length).toBe(1) // only the worker; no Data API call
+  })
+
+  it('re-validates what the Worker sends: bad ids are dropped, thumbnails rebuilt', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(3_000_000)
+    vi.stubGlobal(
+      'fetch',
+      routedFetch({ videos: [{ id: 'not-a-video-id!', title: 'Evil', thumbnail: 'https://evil.example/x.jpg' }] }),
+    )
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(await getChannelVideosCached('', 'UCnovideos00000000000000')).toEqual([])
+  })
+
+  it('falls back to the parent key when the shared cache is empty or down', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(4_000_000)
+    const fetch = routedFetch(null, {
+      playlistItems: { items: [{ contentDetails: { videoId: 'aqz-KE-bpKQ' }, snippet: { title: 'Own' } }] },
+      videos: { items: [] },
+    })
+    vi.stubGlobal('fetch', fetch)
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const videos = await getChannelVideosCached('KEY', UC)
+    expect(videos).toHaveLength(1)
+    expect(videos[0].id).toBe('aqz-KE-bpKQ')
+  })
+})

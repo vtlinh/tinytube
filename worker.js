@@ -782,6 +782,13 @@ function ensureSchema(db) {
     db.prepare(
       "CREATE TABLE IF NOT EXISTS sync_usage (email TEXT NOT NULL, device_id TEXT NOT NULL, kind TEXT NOT NULL, bucket TEXT NOT NULL, secs INTEGER NOT NULL, PRIMARY KEY (email, device_id, kind, bucket))",
     ),
+    /* The SHARED half, keyed by channel and nothing else: which videos a
+       channel has is a fact about the channel, not about a user, so one fetch
+       a day serves every account. WHICH channels an account approved stays in
+       its own settings — per user, like everything else under sync_. */
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS channel_cache (channel_id TEXT PRIMARY KEY, data TEXT NOT NULL, fetched_at INTEGER NOT NULL)",
+    ),
   ]);
   return schemaReady;
 }
@@ -970,6 +977,123 @@ async function syncPush(request, db) {
   return json({ ok: true });
 }
 
+/* ------------------------------------------------------------------------- *
+ * /videos — the SHARED per-channel metadata cache the web app reads before
+ * spending anyone's API key. One YouTube fetch a day for a channel serves
+ * every account; the channel LIST stays per account in sync_settings.
+ *
+ * Written ONLY by this Worker, never from anything a caller sends: a
+ * browser-writable shared cache would let one account put its own "videos"
+ * under a channel every OTHER account's child then sees. The caller
+ * contributes exactly one thing — a channel id against CHANNEL_ID — and every
+ * URL fetched is built from that validated id plus a fixed base (YouTube's
+ * page, feed, or Data API with a key held as a Worker secret). env is not
+ * passed in; the route gets the D1 binding and the optional key.
+ *
+ * The Data API path (set the YOUTUBE_API_KEY wrangler secret to enable it)
+ * answers with real durations and drops 18+ age-restricted videos; without a
+ * key it falls back to the same page+feed scrape /uploads uses, which has
+ * neither. An answer that parses to NOTHING is never cached — a stale answer
+ * beats an empty one, and caching a failure would serve it to every user for
+ * a day.
+ * ------------------------------------------------------------------------- */
+
+const CHANNEL_CACHE_TTL_MS = 24 * 3600_000; // the standing once-a-day-per-channel clock
+
+/** PT1H2M3S -> seconds; null when unparsable (e.g. P0D live placeholders). */
+export function parseIsoDuration(iso) {
+  const m = typeof iso === "string" ? iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/) : null;
+  if (!m || (!m[1] && !m[2] && !m[3])) return null;
+  return (Number(m[1]) || 0) * 3600 + (Number(m[2]) || 0) * 60 + (Number(m[3]) || 0);
+}
+
+/** Data API replies -> the cached shape, every id re-validated, thumbnails
+ * BUILT from the id rather than trusted, 18+ dropped. Exported for the tests. */
+export function apiVideoList(playlistItems, videoDetails) {
+  const durations = {};
+  const restricted = new Set();
+  for (const v of videoDetails ?? []) {
+    if (!VIDEO_ID.test(v?.id ?? "")) continue;
+    durations[v.id] = parseIsoDuration(v.contentDetails?.duration);
+    if (v.contentDetails?.contentRating?.ytRating === "ytAgeRestricted") restricted.add(v.id);
+  }
+  const out = [];
+  for (const it of playlistItems ?? []) {
+    const id = it?.contentDetails?.videoId;
+    if (!VIDEO_ID.test(id ?? "") || restricted.has(id)) continue;
+    out.push({
+      id,
+      title: typeof it.snippet?.title === "string" ? it.snippet.title : id,
+      duration: durations[id] ?? null,
+      thumbnail: thumbnailUrl(id),
+    });
+  }
+  return out;
+}
+
+async function apiVideos(ytKey, channelId) {
+  const API = "https://www.googleapis.com/youtube/v3";
+  const playlist = longFormPlaylistId(channelId);
+  const pl = await fetch(
+    `${API}/playlistItems?part=snippet,contentDetails&playlistId=${playlist}&maxResults=50&key=${ytKey}`,
+  );
+  if (!pl.ok) throw new Error(`playlistItems: HTTP ${pl.status}`);
+  const items = (await pl.json()).items ?? [];
+  const ids = items.map((it) => it?.contentDetails?.videoId).filter((id) => VIDEO_ID.test(id ?? ""));
+  let details = [];
+  if (ids.length) {
+    const dv = await fetch(`${API}/videos?part=contentDetails&id=${ids.join(",")}&key=${ytKey}`);
+    if (dv.ok) details = (await dv.json()).items ?? [];
+  }
+  return apiVideoList(items, details);
+}
+
+async function channelVideos(request, db, ytKey) {
+  await ensureSchema(db);
+  const body = await readBody(request);
+  const channelId = body?.channel;
+  if (typeof channelId !== "string" || !CHANNEL_ID.test(channelId)) return json({ error: "bad channel" }, 400);
+
+  const row = await db
+    .prepare("SELECT data, fetched_at FROM channel_cache WHERE channel_id = ?1")
+    .bind(channelId)
+    .first();
+  if (row && Date.now() - row.fetched_at < CHANNEL_CACHE_TTL_MS) {
+    return json({ ...JSON.parse(row.data), cached: true });
+  }
+
+  let videos = [];
+  if (ytKey) {
+    try {
+      videos = await apiVideos(ytKey, channelId);
+    } catch {
+      videos = [];
+    }
+  }
+  if (!videos.length) {
+    const scraped = await uploadsFor(channelId, EMPTY).catch(() => null);
+    videos = (scraped ?? [])
+      .filter((v) => typeof v === "object" && VIDEO_ID.test(v?.id ?? ""))
+      .map((v) => ({ id: v.id, title: v.title, duration: null, thumbnail: thumbnailUrl(v.id) }));
+  }
+
+  if (!videos.length) {
+    // never cached; the stale row keeps answering until a fetch succeeds
+    if (row) return json({ ...JSON.parse(row.data), cached: true, stale: true });
+    return json({ channel_id: channelId, videos: [] });
+  }
+
+  const data = JSON.stringify({ channel_id: channelId, videos });
+  await db
+    .prepare(
+      "INSERT INTO channel_cache (channel_id, data, fetched_at) VALUES (?1, ?2, ?3) " +
+        "ON CONFLICT (channel_id) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at",
+    )
+    .bind(channelId, data, Date.now())
+    .run();
+  return json({ channel_id: channelId, videos });
+}
+
 function corsPreflight() {
   return new Response(null, {
     status: 204,
@@ -1024,6 +1148,16 @@ export default {
     if (url.pathname === "/channel") {
       if (request.method !== "POST") return json({ error: "use POST" }, 405);
       return channel(request);
+    }
+
+    /* The shared per-channel video cache. Same terms as /uploads — the one
+       caller input is a channel id against a fixed pattern — plus the D1
+       binding and the optional server-held Data API key; never env itself. */
+    if (url.pathname === "/videos") {
+      if (request.method === "OPTIONS") return corsPreflight();
+      if (request.method !== "POST") return json({ error: "use POST" }, 405);
+      if (!env.DB) return json({ error: "cache not configured" }, 503);
+      return channelVideos(request, env.DB, env.YOUTUBE_API_KEY ?? "");
     }
 
     /* The web app's per-account state. Same terms again, one binding wider:
