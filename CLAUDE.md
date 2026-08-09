@@ -144,8 +144,10 @@ ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
                                  ubuntu — see the reuse note below
 .github/workflows/auto-merge.yml merge a PR once both platforms pass
 .github/workflows/claude-autofix.yml  fix a PR whose android run went red
-.github/workflows/pages.yml      build web/ and publish it to GitHub Pages, on
-                                 pushes to main touching web/**, weekly (to
+.github/workflows/pages.yml      build web/ and publish it to GitHub Pages —
+                                 dispatched by auto-merge for merges touching
+                                 web/** (GITHUB_TOKEN merges fire no push
+                                 events), plus hand-pushes to main, weekly (to
                                  refresh videos.json) and on dispatch; never on
                                  pull requests, so it cannot hold auto-merge
 android/                         the app

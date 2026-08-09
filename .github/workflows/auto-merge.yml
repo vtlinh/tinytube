@@ -286,9 +286,11 @@ jobs:
           # twice.
           PUB_ANDROID=yes
           PUB_IOS=yes
+          PUB_PAGES=yes
           if FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' 2>/dev/null); then
             PUB_ANDROID=no
             PUB_IOS=no
+            PUB_PAGES=no
             for f in $FILES; do
               case "$f" in
                 android/app/src/main/*|android/app/build.gradle.kts|\
@@ -299,9 +301,17 @@ jobs:
                 ios/TinyTube/*|ios/TinyTubeCore/Sources/*|\
                 ios/project.yml|ios/TinyTubeCore/Package.swift) PUB_IOS=yes ;;
               esac
+              # Mirrors pages.yml's own push filter, INCLUDING its own workflow
+              # file — deliberately unlike the two app lists above. Their reason
+              # to exclude CI (a dispatch stamps a new versionCode onto every
+              # installed device) does not apply to a Pages redeploy, which is
+              # idempotent.
+              case "$f" in
+                web/*|.github/workflows/pages.yml) PUB_PAGES=yes ;;
+              esac
             done
           else
-            echo "Could not list PR #$PR's files; publishing both rather than risk not shipping."
+            echo "Could not list PR #$PR's files; publishing everything rather than risk not shipping."
           fi
 
           # WHICH run built what has to be looked up by workflow NAME, not
@@ -339,4 +349,19 @@ jobs:
             gh workflow run ios.yml --repo "$REPO" --ref main -f reuse_run_id="$OFFER"
           else
             echo "PR #$PR changed nothing that goes into the IPA — not publishing one."
+          fi
+
+          # The web deploy has to be dispatched from here too, and for a less
+          # obvious reason than the two above: pages.yml carries a push trigger
+          # on web/**, but this job merges with GITHUB_TOKEN, and pushes made
+          # with that token fire no workflow events — GitHub's recursion guard,
+          # and the same reason the app publishes are dispatched by hand rather
+          # than trusted to their own push triggers. Without this line a merged
+          # web change sits undeployed until the weekly cron notices it. No
+          # run id to offer: pages.yml has no reuse input, it just rebuilds.
+          if [ "$PUB_PAGES" = "yes" ]; then
+            echo "Dispatching the pages deploy on main"
+            gh workflow run pages.yml --repo "$REPO" --ref main
+          else
+            echo "PR #$PR changed nothing under web/ — not deploying the page."
           fi
