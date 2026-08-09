@@ -1,7 +1,7 @@
 /** App shell: view routing (gallery | player | gate | settings | quota), the
  * parent gate dispatch, and the browser boot. */
 
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import './styles.css'
@@ -33,6 +33,13 @@ export default function App() {
   const [view, setView] = useState('gallery') // 'gallery' | 'gate' | 'settings' | 'quota'
   const [biometric, setBiometric] = useState(null) // null = still checking
   const [granting, setGranting] = useState(null) // minutes waiting on the gate
+
+  /* The newest settings and history, readable from an async handler. A tap
+     handler that awaits a pull holds closure variables from the render it was
+     created in, and the whole point of that await is to read what the pull
+     just changed. */
+  const latest = useRef(null)
+  latest.current = { settings: store.settings, watchStore }
 
   useEffect(() => {
     isBiometricAvailable().then(setBiometric)
@@ -214,13 +221,28 @@ export default function App() {
       groupOf={store.settings.groupOf}
       hideWatched={store.settings.hideWatched}
       watchStore={watchStore}
-      onPlay={(list, index) => {
+      onPlay={async (list, index) => {
         // checked at tap time, not render time: a 12h window that expires while
         // the gallery sits idle must unblock immediately (expiry is lazy).
-        // usedSecs folds in the synced account-wide usage, so switching
+        // statsUsage folds in the synced account-wide usage, so switching
         // devices doesn't reset the meter
-        const over = quotaState(store.settings, watchStore).blocked
-        if (over) open(() => setView('quota'))()
+        if (!quotaState(store.settings, watchStore).blocked) {
+          /* Every playback is an occasion to catch up with the DB — a quota
+             or a channel list changed on another device reaches this one
+             here. Not awaited and throttled to PULL_MIN_MS inside `pull`, so
+             the tap is never held up by the network. */
+          sync.pull()
+          open(setCurrent)({ list, index })
+          return
+        }
+        /* At the limit, the DB is the whole answer rather than a refresh: a
+           grown-up may have granted time from another device, and that grant
+           is in `day.bonusMins` inside the settings blob. So this one is
+           forced past the throttle and awaited — then re-read from `latest`,
+           because the pull is what just moved it. */
+        await sync.pull({ force: true })
+        const now = latest.current
+        if (quotaState(now.settings, now.watchStore).blocked) open(() => setView('quota'))()
         else open(setCurrent)({ list, index })
       }}
       onParents={onParents}

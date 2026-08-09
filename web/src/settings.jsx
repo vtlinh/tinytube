@@ -81,6 +81,7 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
           <div className="text-secondary small">{settings.childName}</div>
         </div>
         <div className="d-flex align-items-center justify-content-end gap-3" style={{ flex: 1 }}>
+          <RefreshButton sync={sync} />
           <HeaderMenu store={store} sync={sync} />
         </div>
       </div>
@@ -215,6 +216,41 @@ function ConfirmModal({ title, body, onConfirm, onCancel, confirmLabel = 'Delete
  * Immediate-effect, like everything else on this screen: switching child
  * changes the grid and the quota under you at once.
  */
+/** Pull from the DB right now, past the throttle. Everything syncs on its own
+ * — on boot, on a child switch, on every playback — so this exists for the
+ * moment a parent has just changed something on the other device and wants to
+ * SEE it here rather than trust that it will arrive. Absent entirely when
+ * nobody is signed in: sync is inert then, and a button that cannot do
+ * anything is worse than no button. */
+function RefreshButton({ sync = {} }) {
+  const { session, pull, pulling } = sync
+  const [done, setDone] = useState(false)
+  if (!session || !pull) return null
+  return (
+    <button
+      type="button"
+      className="btn btn-outline-secondary"
+      aria-label="Refresh from sync"
+      title="Fetch the latest settings and history from your other devices"
+      disabled={pulling}
+      onClick={async () => {
+        setDone(false)
+        await pull({ force: true })
+        // a tick of acknowledgement: a pull that changed nothing looks
+        // identical to one that never happened
+        setDone(true)
+        setTimeout(() => setDone(false), 2000)
+      }}
+    >
+      <i
+        className={`fa-sharp-duotone fa-regular ${
+          done ? 'fa-check' : `fa-arrows-rotate${pulling ? ' fa-spin' : ''}`
+        }`}
+      />
+    </button>
+  )
+}
+
 function HeaderMenu({ store, sync = {} }) {
   const { session, signIn, signOut } = sync
   const [open, setOpen] = useState(false)
