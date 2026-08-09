@@ -6,6 +6,8 @@
 import {
   exportChannels,
   parseChannelImport,
+  importConflicts,
+  applyImport,
   EXPORT_KIND,
   EXPORT_VERSION,
   AGE_MIN,
@@ -15,6 +17,7 @@ import {
 const UC = 'UCoookXUzPciGrEZEXmh4Jjg'
 const UC2 = 'UCG2CL6EUjG8TVT1Tpl9nJdg'
 const UC3 = 'UC5PYHgAzJ1wLEidB58SK6Xw'
+const UC4 = 'UCoLrsjLqXPQeqchsWNMKWnA'
 
 const settings = {
   childName: 'Ann',
@@ -91,12 +94,12 @@ describe('re-validating what comes back in', () => {
             subscribers: 5,
             min_age: 3,
             max_age: 6,
-            disabled: true,
+            disabled: true, // the enable toggle is gone; every channel is on
           },
         ],
       }),
     )
-    expect(customChannels).toEqual([{ channel_id: UC, min_age: 3, max_age: 6, disabled: true }])
+    expect(customChannels).toEqual([{ channel_id: UC, min_age: 3, max_age: 6 }])
   })
 
   it('repairs ages: out of range becomes the full span, inverted pairs swap', () => {
@@ -143,5 +146,71 @@ describe('re-validating what comes back in', () => {
     )
     expect(groups.map(g => g.id)).toEqual(['g1']) // g2 dissolved: one member
     expect(groupOf).toEqual({ [UC]: 'g1', [UC2]: 'g1' })
+  })
+})
+
+describe('applying a file to a child that already has channels', () => {
+  const current = {
+    customChannels: [
+      { channel_id: UC, min_age: 3, max_age: 6 }, // also in the file
+      { channel_id: UC2, min_age: 1, max_age: 15 }, // only mine
+    ],
+    overrides: { [UC3]: { min_age: 2, max_age: 4 } },
+    groups: [{ id: 'g-mine', name: 'Cartoons' }],
+    groupOf: { [UC]: 'g-mine', [UC2]: 'g-mine' },
+  }
+  const incoming = {
+    customChannels: [
+      { channel_id: UC, min_age: 8, max_age: 12 }, // disagrees with mine
+      { channel_id: UC3, min_age: 5, max_age: 7 }, // new
+      { channel_id: UC4, min_age: 5, max_age: 7 }, // new
+    ],
+    overrides: { [UC3]: { min_age: 9, max_age: 11 } },
+    groups: [
+      { id: 'g-mine', name: 'Cartoons' }, // same name AND same id
+      { id: 'g-theirs', name: 'Science' },
+    ],
+    groupOf: { [UC]: 'g-theirs', [UC3]: 'g-theirs', [UC4]: 'g-theirs' },
+  }
+
+  it('reports exactly what the two lists disagree about', () => {
+    expect(importConflicts(current, incoming).sort()).toEqual([UC, UC3].sort())
+    expect(importConflicts(current, { customChannels: [], overrides: {} })).toEqual([])
+  })
+
+  it("'replace' is the file and only the file", () => {
+    expect(applyImport(current, incoming, 'replace')).toBe(incoming)
+  })
+
+  it("'theirs' merges with the file winning, and never drops a channel", () => {
+    const merged = applyImport(current, incoming, 'theirs')
+    expect(merged.customChannels).toContainEqual({ channel_id: UC, min_age: 8, max_age: 12 }) // theirs
+    expect(merged.customChannels).toContainEqual({ channel_id: UC2, min_age: 1, max_age: 15 }) // kept
+    expect(merged.customChannels).toContainEqual({ channel_id: UC3, min_age: 5, max_age: 7 }) // added
+    expect(merged.overrides[UC3]).toEqual({ min_age: 9, max_age: 11 })
+  })
+
+  it("'mine' merges with what is already there winning, still adding what is new", () => {
+    const merged = applyImport(current, incoming, 'mine')
+    expect(merged.customChannels).toContainEqual({ channel_id: UC, min_age: 3, max_age: 6 }) // mine held
+    expect(merged.customChannels).toContainEqual({ channel_id: UC3, min_age: 5, max_age: 7 }) // no conflict
+    expect(merged.overrides[UC3]).toEqual({ min_age: 2, max_age: 4 }) // mine held
+    expect(merged.customChannels).toHaveLength(4)
+  })
+
+  it('merges groups by NAME, so one shelf does not become two', () => {
+    const mine = applyImport(current, incoming, 'mine')
+    expect(mine.groups.map(g => g.name).sort()).toEqual(['Cartoons', 'Science'])
+    expect(mine.groupOf[UC]).toBe('g-mine') // already had a group: kept
+    expect(mine.groupOf[UC3]).toBe('g-theirs') // had none: takes the file's
+  })
+
+  it('the two-member rule still holds after a merge, even when that dissolves a group', () => {
+    // the file wins, so UC leaves Cartoons for Science — and Cartoons is down
+    // to UC2 alone, which is not a group. It dissolves and UC2 goes loose.
+    const merged = applyImport(current, incoming, 'theirs')
+    expect(merged.groupOf[UC]).toBe('g-theirs')
+    expect(merged.groups.map(g => g.name)).toEqual(['Science'])
+    expect(merged.groupOf[UC2]).toBeUndefined()
   })
 })

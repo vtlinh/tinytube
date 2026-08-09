@@ -167,10 +167,27 @@ html, body, #root {
 }
 
 /* the h:mm value needs a bigger thumb than the age slider's 32px to stay
-   readable; min-width makes the inline stats table wrap below on phones */
+   readable.
+   NO MIN-WIDTH. It carried one while the stats table sat inline beside it, to
+   make that table wrap rather than crush the track; the table lives on the
+   Stats tab now, and the leftover 260px was wider than a phone once the row's
+   label was beside it — which pushed the whole row past the viewport and hung
+   the thumb off the right edge of the screen. */
 .quota-slider {
-  min-width: 260px;
   height: 3rem;
+}
+
+/* Flex children default to min-width:auto, so a long placeholder or a slider
+   refuses to shrink and the settings page scrolls sideways. Nothing on these
+   screens should ever need a horizontal scroll. */
+.settings .dual-slider,
+.settings .form-control,
+.settings form {
+  min-width: 0;
+}
+
+.settings {
+  overflow-x: hidden;
 }
 
 .quota-slider input[type='range']::-webkit-slider-thumb {
@@ -379,4 +396,34 @@ tr.out-of-range img {
   inset: 0;
   touch-action: none;
   cursor: pointer;
+}
+
+/* ---------- the approved-channel list ----------
+   A list, not a table: with the ages behind a dialog and the group as the
+   section a row sits in, there are no columns left to line up — and a phone
+   never has to scroll sideways to reach a control. */
+.channel-row + .channel-row {
+  border-top: 1px solid #2a3b4d;
+}
+
+.channel-group {
+  background: #182534; /* surface: the group reads as one block */
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.channel-group-title {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #2a3b4d;
+  color: inherit;
+  padding: 0.6rem 0.75rem;
+}
+
+.channel-row.out-of-range {
+  opacity: 0.45; /* outside this child's age: still editable, visibly inactive */
+}
+
+.channel-row.out-of-range img {
+  filter: grayscale(1);
 }

@@ -198,7 +198,7 @@ export function mergeChannels(db, customVideosById, settings) {
   const { customChannels, overrides, minVideoMins = 0 } = settings
   const ageRange = effectiveAgeRange(settings)
   const curated = curatedChannels(db, overrides).filter(
-    ch => !ch.hidden && !ch.disabled && overlaps(ageRange, ch.min_age, ch.max_age),
+    ch => !ch.hidden && overlaps(ageRange, ch.min_age, ch.max_age),
   )
   const curatedIds = new Set((db?.channels ?? []).map(ch => ch.channel_id))
   /* The parent's row carries ids and ages; the NAME and AVATAR come from the
@@ -206,7 +206,7 @@ export function mergeChannels(db, customVideosById, settings) {
      record has never arrived is still listed and still removable, rather than
      disappearing from the screen that manages it. */
   const custom = customChannels
-    .filter(ch => !curatedIds.has(ch.channel_id) && !ch.disabled && overlaps(ageRange, ch.min_age, ch.max_age))
+    .filter(ch => !curatedIds.has(ch.channel_id) && overlaps(ageRange, ch.min_age, ch.max_age))
     .map(ch => hydrateChannel(ch, customVideosById[ch.channel_id]))
   // unknown durations count as too short: don't let un-probed videos slip past
   return [...curated, ...custom].map(ch => ({
@@ -422,12 +422,7 @@ export function parseChannelImport(text) {
     const hi = validAge(ch.max_age) ? ch.max_age : AGE_MAX
     // the decision only, exactly as it is stored: a file that carries a name
     // or an avatar carries a copy of something the Worker owns
-    customChannels.push({
-      channel_id: ch.channel_id,
-      min_age: Math.min(lo, hi),
-      max_age: Math.max(lo, hi),
-      ...(ch.disabled ? { disabled: true } : {}),
-    })
+    customChannels.push({ channel_id: ch.channel_id, min_age: Math.min(lo, hi), max_age: Math.max(lo, hi) })
   }
 
   const overrides = {}
@@ -440,7 +435,6 @@ export function parseChannelImport(text) {
       ;[kept.min_age, kept.max_age] = [kept.max_age, kept.min_age]
     }
     if (patch.hidden === true) kept.hidden = true
-    if (patch.disabled === true) kept.disabled = true
     if (Object.keys(kept).length) overrides[id] = kept
   }
 
@@ -460,6 +454,66 @@ export function parseChannelImport(text) {
 
   // the >=2 rule holds for imported groups exactly as it does for made ones
   return { customChannels, overrides, ...tidyGroups({ groups, groupOf }) }
+}
+
+/** The ids a file would land on top of: channels the child already has, and
+ * curated channels whose age the parent has already edited. Empty means the
+ * import cannot take anything away by merging. */
+export function importConflicts(settings, imported) {
+  const mine = new Set(settings.customChannels.map(c => c.channel_id))
+  const clashes = imported.customChannels.filter(c => mine.has(c.channel_id)).map(c => c.channel_id)
+  const overrideClashes = Object.keys(imported.overrides ?? {}).filter(id => settings.overrides[id])
+  return [...new Set([...clashes, ...overrideClashes])]
+}
+
+/**
+ * A file applied to a child, three ways:
+ *
+ *   'replace' — the file IS the list. Channels the file does not carry go.
+ *   'theirs'  — merge, and the file wins where the two disagree.
+ *   'mine'    — merge, and what is already there wins; the file only adds.
+ *
+ * Merging never removes a channel, which is the point of offering it: a
+ * parent importing a sibling's list usually means "and also these".
+ */
+export function applyImport(settings, imported, mode = 'replace') {
+  if (mode === 'replace') return imported
+  const theirsWins = mode === 'theirs'
+
+  const byId = new Map(settings.customChannels.map(c => [c.channel_id, c]))
+  for (const ch of imported.customChannels) {
+    if (theirsWins || !byId.has(ch.channel_id)) byId.set(ch.channel_id, ch)
+  }
+
+  const overrides = { ...settings.overrides }
+  for (const [id, patch] of Object.entries(imported.overrides ?? {})) {
+    if (theirsWins || !overrides[id]) overrides[id] = patch
+  }
+
+  /* Groups merge BY NAME: two lists that both call a group "Cartoons" mean the
+     same shelf, and ending up with two of them is the confusing answer. An id
+     that collides while the name does not is renamed rather than dropped. */
+  const groups = [...settings.groups]
+  const groupOf = { ...settings.groupOf }
+  const idMap = {}
+  for (const g of imported.groups ?? []) {
+    const key = g.name.trim().toLowerCase()
+    const existing = groups.find(x => x.name.trim().toLowerCase() === key)
+    if (existing) {
+      idMap[g.id] = existing.id
+      continue
+    }
+    const id = groups.some(x => x.id === g.id) ? `${g.id}-imported` : g.id
+    idMap[g.id] = id
+    groups.push({ id, name: g.name })
+  }
+  for (const [channelId, groupId] of Object.entries(imported.groupOf ?? {})) {
+    const mapped = idMap[groupId]
+    if (!mapped) continue
+    if (theirsWins || !groupOf[channelId]) groupOf[channelId] = mapped
+  }
+
+  return { customChannels: [...byId.values()], overrides, ...tidyGroups({ groups, groupOf }) }
 }
 
 // ---------------------------------------------------------------------------
@@ -510,7 +564,6 @@ export function decisionOnly(ch) {
     channel_id: ch.channel_id,
     min_age: ch.min_age ?? AGE_MIN,
     max_age: ch.max_age ?? AGE_MAX,
-    ...(ch.disabled ? { disabled: true } : {}),
   }
 }
 
@@ -519,6 +572,15 @@ export function normalizeSettings(parsed = {}) {
   // fold pre-refactor fields into the unified overrides map
   const overrides = { ...parsed.ageOverrides, ...parsed.overrides }
   for (const id of parsed.hiddenChannels ?? []) overrides[id] = { ...overrides[id], hidden: true }
+  /* The enable checkbox is gone and every approved channel is on. A stored
+     `disabled` would otherwise be a state with no control to leave it. */
+  for (const [id, patch] of Object.entries(overrides)) {
+    if (patch?.disabled !== undefined) {
+      const { disabled, ...rest } = patch
+      if (Object.keys(rest).length) overrides[id] = rest
+      else delete overrides[id]
+    }
+  }
 
   const children =
     Array.isArray(parsed.children) && parsed.children.length
