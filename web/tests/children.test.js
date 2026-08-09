@@ -172,3 +172,15 @@ describe('useWatchStore per child', () => {
     expect(Object.keys(result.current.watched)).toEqual(['bbbbbbbbbbb'])
   })
 })
+
+describe('the enable toggle is gone', () => {
+  it('clears a stored disabled flag on load, leaving no state without a control', () => {
+    const s = normalizeSettings({
+      overrides: {
+        UCa: { disabled: true }, // nothing else: the whole override goes
+        UCb: { min_age: 4, disabled: true }, // the age edit survives it
+      },
+    })
+    expect(s.children[0].overrides).toEqual({ UCb: { min_age: 4 } })
+  })
+})

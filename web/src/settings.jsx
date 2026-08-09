@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useReactTable, getCoreRowModel, flexRender } from '@tanstack/react-table'
 import {
   curatedChannels,
   overlaps,
@@ -14,6 +13,7 @@ import {
   parseBirthdayInput,
   effectiveAgeRange,
   hydrateChannel,
+  arrangeChannels,
   AGE_MIN,
   AGE_MAX,
   ageAtFraction,
@@ -26,6 +26,8 @@ import {
   groupNameError,
   exportChannels,
   parseChannelImport,
+  importConflicts,
+  applyImport,
 } from './lib.js'
 import {
   searchChannels,
@@ -86,7 +88,7 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
       {tab === 'channels' && (
         <>
           <SearchRow apiKey={settings.apiKey} store={store} db={db} />
-          <ChannelTable db={db} customById={customById} store={store} />
+          <ChannelList db={db} customById={customById} store={store} />
         </>
       )}
       {tab === 'stats' && <StatsTab watchStore={watchStore} quotaMins={settings.quotaMins} />}
@@ -355,15 +357,11 @@ function HeaderMenu({ store, sync = {} }) {
         onChange={onFile}
       />
       {pending && (
-        <ConfirmModal
-          title="Import channel list?"
-          confirmLabel="Import"
-          confirmIcon="fa-file-import"
-          body={`This replaces ${store.settings.childName}'s channels with ${pending.customChannels.length} channel${
-            pending.customChannels.length === 1 ? '' : 's'
-          } and ${pending.groups.length} group${pending.groups.length === 1 ? '' : 's'}. Nothing else changes.`}
-          onConfirm={() => {
-            store.importChannels(pending)
+        <ImportModal
+          pending={pending}
+          settings={store.settings}
+          onConfirm={mode => {
+            store.importChannels(applyImport(store.settings, pending, mode))
             setPending(null)
           }}
           onCancel={() => setPending(null)}
@@ -389,6 +387,73 @@ function HeaderMenu({ store, sync = {} }) {
         <div className="alert alert-warning position-absolute end-0 mt-2 py-1 px-2 small text-nowrap">{error}</div>
       )}
     </div>
+  )
+}
+
+/**
+ * What to do with a file when the child already has channels.
+ *
+ * Replacing is the whole file and only the file; merging never removes a
+ * channel. The third button only appears when the two lists actually disagree
+ * about something — with no conflicts, "who wins" is a question about nothing.
+ */
+function ImportModal({ pending, settings, onConfirm, onCancel }) {
+  const conflicts = importConflicts(settings, pending)
+  const count = `${pending.customChannels.length} channel${pending.customChannels.length === 1 ? '' : 's'}`
+  return (
+    <>
+      <div className="modal d-block" tabIndex="-1" role="dialog" onClick={onCancel}>
+        <div className="modal-dialog modal-dialog-centered" onClick={e => e.stopPropagation()}>
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title">Import {count}</h5>
+              <button type="button" className="btn-close" aria-label="Close" onClick={onCancel} />
+            </div>
+            <div className="modal-body d-grid gap-2">
+              {conflicts.length > 0 && (
+                <p className="text-secondary">
+                  {conflicts.length} of them {conflicts.length === 1 ? 'is' : 'are'} already set up for{' '}
+                  {settings.childName}.
+                </p>
+              )}
+              <button type="button" className="btn btn-outline-light text-start" onClick={() => onConfirm('replace')}>
+                <div className="fw-semibold">Replace everything</div>
+                <div className="small text-secondary">
+                  {settings.childName}’s list becomes exactly this file. Channels not in it are removed.
+                </div>
+              </button>
+              {conflicts.length > 0 ? (
+                <>
+                  <button type="button" className="btn btn-outline-light text-start" onClick={() => onConfirm('theirs')}>
+                    <div className="fw-semibold">Merge — the file wins</div>
+                    <div className="small text-secondary">
+                      Adds what is new and updates the {conflicts.length} that clash. Nothing is removed.
+                    </div>
+                  </button>
+                  <button type="button" className="btn btn-outline-light text-start" onClick={() => onConfirm('mine')}>
+                    <div className="fw-semibold">Merge — keep what is here</div>
+                    <div className="small text-secondary">
+                      Adds only what is new; the {conflicts.length} already set up are left alone.
+                    </div>
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="btn btn-outline-light text-start" onClick={() => onConfirm('theirs')}>
+                  <div className="fw-semibold">Merge</div>
+                  <div className="small text-secondary">Adds these alongside what {settings.childName} already has.</div>
+                </button>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={onCancel}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="modal-backdrop show" />
+    </>
   )
 }
 
@@ -933,50 +998,155 @@ const channelPatcher = (ch, store) =>
     ? patch => store.updateCustomChannel(ch.channel_id, patch)
     : patch => store.setOverride(ch.channel_id, patch)
 
-function ChannelAgeSlider({ ch, store }) {
-  const save = channelPatcher(ch, store)
+/** "1.2M subscribers · 340 videos · 89M views", or nothing at all. Under the
+ * name rather than in a column of its own, and unlabelled: a row of numbers
+ * with units does not need the word "stats" over it. */
+function StatsLine({ ch }) {
+  const parts = [
+    [ch.subscribers, 'subscribers'],
+    [ch.video_count, 'videos'],
+    [ch.view_count, 'views'],
+  ].filter(([n]) => n)
+  if (!parts.length) return null
   return (
-    <DualAgeSlider
-      value={[ch.min_age, ch.max_age]}
-      onChange={([min_age, max_age]) => save({ min_age, max_age })}
-    />
+    <div className="text-secondary small text-truncate">
+      {parts.map(([n, label]) => `${formatCount(n)} ${label}`).join(' · ')}
+    </div>
   )
 }
 
-/** Quick on/off without deleting; the age filter still applies independently. */
-function EnabledCheckbox({ ch, store }) {
-  const save = channelPatcher(ch, store)
+/** One channel: avatar, name, its stats beneath, the age range as a chip, and
+ * the two things a parent does to it. */
+function ChannelRow({ ch, store, selected, onToggle, onEdit, onDelete }) {
+  const avatar = ch.thumbnail ?? ch.videos?.[0]?.thumbnail
+  const out = !overlaps(effectiveAgeRange(store.settings), ch.min_age, ch.max_age)
   return (
-    <input
-      type="checkbox"
-      className="form-check-input"
-      checked={!ch.disabled}
-      aria-label={`Enable ${ch.channel_title}`}
-      onChange={e => save({ disabled: !e.target.checked })}
-    />
+    <div className={`channel-row d-flex align-items-center gap-2 py-2 ${out ? 'out-of-range' : ''}`}>
+      <input
+        type="checkbox"
+        className="form-check-input flex-shrink-0 m-0"
+        checked={selected}
+        aria-label={`Select ${ch.channel_title}`}
+        onChange={onToggle}
+      />
+      {avatar ? (
+        <img src={avatar} alt="" width="36" height="36" className="rounded-circle object-fit-cover flex-shrink-0" />
+      ) : (
+        <i className="fa-duotone fa-regular fa-tv-retro fs-5 text-secondary flex-shrink-0" />
+      )}
+      {/* min-width:0 is what lets the truncation happen instead of the row
+          growing wider than the phone */}
+      <div className="flex-grow-1" style={{ minWidth: 0 }}>
+        <a
+          href={channelUrl(ch)}
+          target="_blank"
+          rel="noreferrer"
+          className="fw-semibold text-truncate d-block text-decoration-none"
+        >
+          {ch.channel_title}
+        </a>
+        <StatsLine ch={ch} />
+        <TopicBadges ch={ch} />
+      </div>
+      <button
+        type="button"
+        className="btn btn-sm btn-outline-secondary flex-shrink-0 text-nowrap"
+        aria-label={`Ages for ${ch.channel_title}`}
+        onClick={onEdit}
+      >
+        {ch.min_age}–{ch.max_age}
+        <i className="fa-sharp-duotone fa-regular fa-pencil ms-2" />
+      </button>
+      <button
+        type="button"
+        className="btn btn-sm btn-outline-danger flex-shrink-0"
+        aria-label={`Delete ${ch.channel_title}`}
+        onClick={onDelete}
+      >
+        <i className="fa-sharp-duotone fa-regular fa-trash" />
+      </button>
+    </div>
   )
 }
 
-function ChannelTable({ db, customById = {}, store }) {
+/** The ages for one channel, in a dialog rather than in the row: a 1-15 dual
+ * slider needs more width than a phone has left over beside a name. */
+function AgeDialog({ ch, store, onClose }) {
+  const save = channelPatcher(ch, store)
+  return (
+    <>
+      <div className="modal d-block" tabIndex="-1" role="dialog" onClick={onClose}>
+        <div className="modal-dialog modal-dialog-centered" onClick={e => e.stopPropagation()}>
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title text-truncate">{ch.channel_title}</h5>
+              <button type="button" className="btn-close" aria-label="Close" onClick={onClose} />
+            </div>
+            <div className="modal-body">
+              <div className="text-secondary mb-2">Show this channel to ages</div>
+              <DualAgeSlider
+                value={[ch.min_age, ch.max_age]}
+                onChange={([min_age, max_age]) => save({ min_age, max_age })}
+              />
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-danger" onClick={onClose}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="modal-backdrop show" />
+    </>
+  )
+}
+
+/**
+ * The approved channels, as a LIST rather than a table.
+ *
+ * Every column this used to have has gone somewhere better: the enable
+ * checkbox is gone entirely (an approved channel is on), the stats sit under
+ * the name, the ages live behind the pencil, and the group is the SECTION a
+ * channel is drawn in rather than a cell repeating its name on every row.
+ * What is left fits a phone without scrolling sideways, which a six-column
+ * table with a dual slider in it never could.
+ */
+function ChannelList({ db, customById = {}, store }) {
   const { customChannels, overrides, groups, groupOf } = store.settings
-  const hiddenCount = Object.values(overrides).filter(o => o.hidden).length
-  // ticked rows, for grouping; a Set of channel ids
   const [selected, setSelected] = useState(new Set())
   const [naming, setNaming] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [deleting, setDeleting] = useState(null)
+  const hiddenCount = Object.values(overrides).filter(o => o.hidden).length
 
-  const data = useMemo(
-    () =>
-      [
-        // stored rows are the decision only; the name, avatar and stats come
-        // from the Worker's record for that id
-        ...customChannels.map(ch => ({ ...hydrateChannel(ch, customById[ch.channel_id]), custom: true })),
-        ...curatedChannels(db, overrides).filter(ch => !ch.hidden),
-      ].sort((a, b) => b.min_age - a.min_age || b.max_age - a.max_age),
+  const all = useMemo(
+    () => [
+      // stored rows are the decision only; the name, avatar and stats come
+      // from the Worker's record for that id
+      ...customChannels.map(ch => ({ ...hydrateChannel(ch, customById[ch.channel_id]), custom: true })),
+      ...curatedChannels(db, overrides).filter(ch => !ch.hidden),
+    ],
     [db, customChannels, overrides, customById],
   )
 
+  // the same arrangement the child's Channels tab uses, so the two cannot
+  // disagree about what a group contains or where it sits
+  const sections = useMemo(() => {
+    const out = []
+    for (const row of arrangeChannels(all, groups, groupOf)) {
+      if (row.type === 'header') out.push({ group: row.group, items: [] })
+      else if (row.grouped && out.length) out[out.length - 1].items.push(row.channel)
+      else {
+        if (!out.length || out[out.length - 1].group) out.push({ group: null, items: [] })
+        out[out.length - 1].items.push(row.channel)
+      }
+    }
+    return out
+  }, [all, groups, groupOf])
+
   const ageRange = effectiveAgeRange(store.settings)
-  const inRange = data.filter(ch => !ch.disabled && overlaps(ageRange, ch.min_age, ch.max_age)).length
+  const inRange = all.filter(ch => overlaps(ageRange, ch.min_age, ch.max_age)).length
 
   const toggle = id =>
     setSelected(prev => {
@@ -986,145 +1156,111 @@ function ChannelTable({ db, customById = {}, store }) {
       return next
     })
 
-  const groupNameOf = id => groups.find(g => g.id === groupOf[id])?.name
+  const remove = ch => {
+    if (ch.custom) {
+      store.removeCustomChannel(ch.channel_id)
+      evictChannelCache(ch.channel_id)
+    } else {
+      store.setOverride(ch.channel_id, { hidden: true })
+    }
+    setDeleting(null)
+  }
 
-  const columns = useMemo(
-    () => [
-      {
-        id: 'select',
-        header: '',
-        cell: ({ row }) => (
-          <input
-            type="checkbox"
-            className="form-check-input"
-            checked={selected.has(row.original.channel_id)}
-            aria-label={`Select ${row.original.channel_title}`}
-            onChange={() => toggle(row.original.channel_id)}
-          />
-        ),
-      },
-      {
-        id: 'enabled',
-        header: '',
-        cell: ({ row }) => <EnabledCheckbox ch={row.original} store={store} />,
-      },
-      {
-        header: `Channel (${inRange}/${data.length})`,
-        accessorKey: 'channel_title',
-        cell: ({ row }) => {
-          const ch = row.original
-          const avatar = ch.thumbnail ?? ch.videos?.[0]?.thumbnail
-          return (
-            <a
-              href={channelUrl(ch)}
-              target="_blank"
-              rel="noreferrer"
-              className="fw-semibold d-inline-flex align-items-center gap-2"
-            >
-              {avatar && <img src={avatar} alt="" width="36" height="36" className="rounded-circle object-fit-cover" />}
-              {ch.channel_title}
-            </a>
-          )
-        },
-      },
-      {
-        header: 'Stats',
-        id: 'stats',
-        cell: ({ row }) => <StatsCell ch={row.original} />,
-      },
-      {
-        header: 'Topics',
-        id: 'topics',
-        cell: ({ row }) => <TopicBadges ch={row.original} />,
-      },
-      {
-        header: 'Group',
-        id: 'group',
-        cell: ({ row }) => {
-          const name = groupNameOf(row.original.channel_id)
-          if (!name) return null
-          return (
-            // tapping the badge selects the whole group — a header's tap, table-shaped
-            <button
-              type="button"
-              className="badge text-bg-secondary border-0 fw-normal"
-              title={`Select every channel in ${name}`}
-              onClick={() =>
-                setSelected(prev => new Set([...prev, ...groupMembers(groupOf[row.original.channel_id], groupOf)]))
-              }
-            >
-              <i className="fa-sharp-duotone fa-regular fa-folders me-1" />
-              {name}
-            </button>
-          )
-        },
-      },
-      {
-        header: 'Age',
-        id: 'ages',
-        cell: ({ row }) => <ChannelAgeSlider ch={row.original} store={store} />,
-      },
-      {
-        id: 'delete',
-        header: '',
-        cell: ({ row }) => (
-          <button
-            type="button"
-            className="btn btn-outline-danger btn-sm"
-            aria-label={`Delete ${row.original.channel_title}`}
-            onClick={() => {
-              const ch = row.original
-              if (ch.custom) {
-                store.removeCustomChannel(ch.channel_id)
-                evictChannelCache(ch.channel_id)
-              } else {
-                store.setOverride(ch.channel_id, { hidden: true })
-              }
-            }}
-          >
-            <i className="fa-sharp-duotone fa-regular fa-trash" />
-          </button>
-        ),
-      },
-    ],
-    [store, data, inRange, selected, groups, groupOf],
+  const row = ch => (
+    <ChannelRow
+      key={ch.channel_id}
+      ch={ch}
+      store={store}
+      selected={selected.has(ch.channel_id)}
+      onToggle={() => toggle(ch.channel_id)}
+      onEdit={() => setEditing(ch)}
+      onDelete={() => setDeleting(ch)}
+    />
   )
-
-  const table = useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() })
 
   return (
     <>
-      {/* the grouping toolbar, live once two rows are ticked — the Android
-          approved-list's Group/Ungroup, table-shaped. Ungroup only when the
-          whole selection sits in ONE group (see canUngroup). */}
-      {selected.size > 0 && (
-        <div className="d-flex align-items-center gap-2 mb-2">
-          <span className="text-secondary small">{selected.size} selected</span>
-          <button
-            type="button"
-            className="btn btn-outline-light btn-sm"
-            disabled={!canGroup(selected)}
-            onClick={() => setNaming(true)}
-          >
-            <i className="fa-sharp-duotone fa-regular fa-folders me-1" />
-            Group
-          </button>
-          {canUngroup(selected, groupOf) && (
+      <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
+        <span className="text-secondary">
+          {inRange}/{all.length} shown to {store.settings.childName}
+        </span>
+        {selected.size > 0 && (
+          <>
+            <span className="text-secondary">· {selected.size} selected</span>
             <button
               type="button"
               className="btn btn-outline-light btn-sm"
-              onClick={() => {
-                store.ungroupChannels(selected)
-                setSelected(new Set())
-              }}
+              disabled={!canGroup(selected)}
+              onClick={() => setNaming(true)}
             >
-              Ungroup
+              <i className="fa-sharp-duotone fa-regular fa-folders me-1" />
+              Group
             </button>
-          )}
-          <button type="button" className="btn btn-link btn-sm text-secondary" onClick={() => setSelected(new Set())}>
-            Clear
-          </button>
-        </div>
+            {canUngroup(selected, groupOf) && (
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                onClick={() => {
+                  store.ungroupChannels(selected)
+                  setSelected(new Set())
+                }}
+              >
+                Ungroup
+              </button>
+            )}
+            <button type="button" className="btn btn-link btn-sm text-secondary" onClick={() => setSelected(new Set())}>
+              Clear
+            </button>
+          </>
+        )}
+      </div>
+
+      {sections.map((section, i) =>
+        section.group ? (
+          // a group is one block with its name on top — the channels in it are
+          // not repeating that name in a column of their own
+          <div key={section.group.id} className="channel-group mb-3">
+            <button
+              type="button"
+              className="channel-group-title d-flex align-items-center gap-2 w-100 text-start"
+              title={`Select every channel in ${section.group.name}`}
+              onClick={() => setSelected(prev => new Set([...prev, ...groupMembers(section.group.id, groupOf)]))}
+            >
+              <i className="fa-sharp-duotone fa-regular fa-folders text-danger" />
+              <span className="fw-semibold flex-grow-1">{section.group.name}</span>
+              <span className="text-secondary small">{section.items.length}</span>
+            </button>
+            <div className="px-2">{section.items.map(row)}</div>
+          </div>
+        ) : (
+          <div key={`loose-${i}`}>{section.items.map(row)}</div>
+        ),
+      )}
+
+      {hiddenCount > 0 && (
+        <button type="button" className="btn btn-link btn-sm text-secondary" onClick={() => store.restoreHidden()}>
+          restore {hiddenCount} deleted built-in channel{hiddenCount > 1 ? 's' : ''}
+        </button>
+      )}
+
+      {editing && (
+        <AgeDialog
+          ch={all.find(c => c.channel_id === editing.channel_id) ?? editing}
+          store={store}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {deleting && (
+        <ConfirmModal
+          title={`Remove ${deleting.channel_title}?`}
+          body={
+            deleting.custom
+              ? 'This channel goes from this child’s list. You can add it again from the search above.'
+              : 'This built-in channel is hidden from this child. You can restore it at the bottom of this page.'
+          }
+          onConfirm={() => remove(deleting)}
+          onCancel={() => setDeleting(null)}
+        />
       )}
       {naming && (
         <GroupNameModal
@@ -1138,53 +1274,6 @@ function ChannelTable({ db, customById = {}, store }) {
           }}
           onCancel={() => setNaming(false)}
         />
-      )}
-      {/* the ages column reserves real width so the 1-15 dual slider stays as
-          readable as the global one up top; narrow screens scroll horizontally
-          via table-responsive instead of crushing the track */}
-      <div className="table-responsive">
-        <table className="table table-dark align-middle">
-          <thead>
-            {table.getHeaderGroups().map(hg => (
-              <tr key={hg.id}>
-                {hg.headers.map(h => (
-                  <th
-                    key={h.id}
-                    className="text-secondary fw-normal"
-                    style={h.column.id === 'ages' ? { width: '55%', minWidth: 420 } : undefined}
-                  >
-                    {flexRender(h.column.columnDef.header, h.getContext())}
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.map(row => (
-              <tr
-                key={row.id}
-                className={
-                  !row.original.disabled && overlaps(ageRange, row.original.min_age, row.original.max_age)
-                    ? undefined
-                    : 'out-of-range' // hidden from the kid: age-filtered or toggled off
-                }
-              >
-                {row.getVisibleCells().map(cell => (
-                  <td key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {hiddenCount > 0 && (
-        <button
-          type="button"
-          className="btn btn-link btn-sm text-secondary"
-          onClick={() => store.restoreHidden()}
-        >
-          restore {hiddenCount} deleted built-in channel{hiddenCount > 1 ? 's' : ''}
-        </button>
       )}
     </>
   )

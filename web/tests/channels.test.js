@@ -37,9 +37,12 @@ describe('mergeChannels', () => {
     expect(mergeChannels(db, {}, s).map(c => c.channel_id)).toEqual(['UCa', 'UCc'])
   })
 
-  it('excludes toggled-off channels even when their age range matches', () => {
+  it('shows every approved channel: there is no enable toggle to be off', () => {
+    // the checkbox is gone and an approved channel is on. A `disabled` left in
+    // an old blob must not survive as a state with no control to leave it —
+    // normalizeSettings strips it on load, and nothing here honours one.
     const s = settings({ overrides: { UCb: { disabled: true } } })
-    expect(mergeChannels(db, {}, s).map(c => c.channel_id)).toEqual(['UCa', 'UCc'])
+    expect(mergeChannels(db, {}, s).map(c => c.channel_id)).toEqual(['UCa', 'UCb', 'UCc'])
   })
 
   it('still lists a channel whose record has not arrived, under its id', () => {
@@ -49,15 +52,10 @@ describe('mergeChannels', () => {
     expect(merged.find(c => c.channel_id === 'UCx')).toMatchObject({ channel_title: 'UCx', videos: [] })
   })
 
-  it('excludes toggled-off custom channels', () => {
+  it('the same for a custom channel carrying an old disabled flag', () => {
     const custom = [{ channel_id: 'UCx', min_age: 1, max_age: 15, disabled: true }]
     const merged = mergeChannels(db, {}, settings({ customChannels: custom }))
-    expect(merged.find(c => c.channel_id === 'UCx')).toBeUndefined()
-  })
-
-  it('re-enabling via disabled:false restores the channel', () => {
-    const s = settings({ overrides: { UCb: { disabled: false } } })
-    expect(mergeChannels(db, {}, s).map(c => c.channel_id)).toEqual(['UCa', 'UCb', 'UCc'])
+    expect(merged.find(c => c.channel_id === 'UCx')).toBeTruthy()
   })
 
   it('applies parent age edits to curated channels', () => {
