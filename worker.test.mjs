@@ -612,3 +612,26 @@ test("apiVideoList validates ids, attaches durations, drops 18+ and builds thumb
   assert.deepEqual(apiVideoList([], []), []);
   assert.deepEqual(apiVideoList(undefined, undefined), []);
 });
+
+/* One account, several children: history and usage are keyed by child, so the
+   id has to be validated like every other caller input — and the migrated
+   first child's id is FIXED, because the web app's own migration must land on
+   the same rows. */
+
+import { CHILD_ID, DEFAULT_CHILD } from "./worker.js";
+
+test("CHILD_ID accepts uuids and the migration id, and refuses anything that could reach SQL oddly", () => {
+  assert.ok(CHILD_ID.test(DEFAULT_CHILD));
+  assert.ok(CHILD_ID.test("1b671a64-40d5-491e-99b0-da01ff1f3341"));
+  assert.ok(!CHILD_ID.test(""));
+  assert.ok(!CHILD_ID.test("a'; DROP TABLE sync_watched_v2; --"));
+  assert.ok(!CHILD_ID.test("has space"));
+  assert.ok(!CHILD_ID.test("x".repeat(65)));
+});
+
+/* The web app migrates its pre-children settings to exactly this id, and the
+   Worker copies pre-children rows under it. If either side changes it alone,
+   an account that was already syncing silently starts from an empty history. */
+test("the migration child id is the literal both sides agree on", () => {
+  assert.equal(DEFAULT_CHILD, "default");
+});

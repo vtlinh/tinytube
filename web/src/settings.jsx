@@ -47,9 +47,13 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
           </button>
         </div>
-        <h1 className="fs-3 fw-bold m-0">{titles[tab]}</h1>
+        <div className="text-center">
+          <h1 className="fs-3 fw-bold m-0">{titles[tab]}</h1>
+          {/* whose settings these are — the menu switches children */}
+          <div className="text-secondary small">{settings.childName}</div>
+        </div>
         <div className="d-flex align-items-center justify-content-end gap-3" style={{ flex: 1 }}>
-          <SyncMenu sync={sync} />
+          <HeaderMenu store={store} sync={sync} />
         </div>
       </div>
 
@@ -146,20 +150,21 @@ function ConfirmModal({ title, body, onConfirm, onCancel }) {
 }
 
 /**
- * Cross-device sync, keyed by the parent's Google account, tucked behind the
- * header's three-dot menu and worded plainly: "Sign in" / "Sign out".
- * Immediate-effect like passkey enrollment, NOT part of the draft: signing in
- * starts a pull that may rewrite settings, which a draft would silently
- * clobber on Save. Renders nothing until an OAuth client id is configured.
+ * The header's three-dot menu: which child the parent is looking at, adding
+ * another, and the account sign-in.
  *
- * The sign-in itself is still Google underneath — the menu item triggers the
- * One Tap prompt, and when the browser suppresses that (FedCM cooldown,
- * blocked third-party cookies) it falls through to clicking an invisible
- * rendered Google button, whose popup flow always works.
+ * The wording is deliberately plain — "Sign in" / "Sign out", no vendor name —
+ * though underneath it is still Google: the item triggers the One Tap prompt
+ * and falls through to the popup flow of an invisible rendered button when the
+ * browser suppresses One Tap (FedCM cooldown, blocked third-party cookies).
+ *
+ * Immediate-effect, like everything else on this screen: switching child
+ * changes the grid and the quota under you at once.
  */
-function SyncMenu({ sync = {} }) {
+function HeaderMenu({ store, sync = {} }) {
   const { session, signIn, signOut } = sync
   const [open, setOpen] = useState(false)
+  const [adding, setAdding] = useState(false)
   const [error, setError] = useState(null)
   const hiddenBtn = useRef(null)
   const ready = useRef(false)
@@ -189,7 +194,7 @@ function SyncMenu({ sync = {} }) {
     }
   }
 
-  if (!GOOGLE_CLIENT_ID) return null
+  const children = store.children ?? []
   return (
     <div className="position-relative">
       <button
@@ -208,28 +213,86 @@ function SyncMenu({ sync = {} }) {
             style={{ zIndex: 1040 }}
             onClick={() => setOpen(false)}
           />
-          <div className="dropdown-menu dropdown-menu-end show position-absolute end-0 mt-1" style={{ zIndex: 1050 }}>
-            {session ? (
-              <>
-                <span className="dropdown-item-text text-secondary small">{session.email}</span>
-                <button
-                  type="button"
-                  className="dropdown-item"
-                  onClick={() => {
-                    signOut()
-                    setOpen(false)
-                  }}
-                >
-                  Sign out
-                </button>
-              </>
-            ) : (
-              <button type="button" className="dropdown-item" onClick={startSignIn}>
-                Sign in
+          <div
+            className="dropdown-menu dropdown-menu-end show position-absolute end-0 mt-1 text-start"
+            style={{ zIndex: 1050 }}
+          >
+            <h6 className="dropdown-header">Children</h6>
+            {children.map(child => (
+              <button
+                key={child.id}
+                type="button"
+                className={`dropdown-item ${child.id === store.settings.childId ? 'active' : ''}`}
+                onClick={() => {
+                  store.switchChild(child.id)
+                  setOpen(false)
+                }}
+              >
+                {child.id === store.settings.childId && (
+                  <i className="fa-sharp-duotone fa-regular fa-check me-2" />
+                )}
+                {child.name}
               </button>
+            ))}
+            <button
+              type="button"
+              className="dropdown-item"
+              onClick={() => {
+                setOpen(false)
+                setAdding(true)
+              }}
+            >
+              <i className="fa-sharp-duotone fa-regular fa-plus me-2" />
+              Add child
+            </button>
+            {children.length > 1 && (
+              <button
+                type="button"
+                className="dropdown-item text-danger"
+                onClick={() => {
+                  store.removeChild(store.settings.childId)
+                  setOpen(false)
+                }}
+              >
+                <i className="fa-sharp-duotone fa-regular fa-trash me-2" />
+                Remove {store.settings.childName}
+              </button>
+            )}
+            {GOOGLE_CLIENT_ID && (
+              <>
+                <hr className="dropdown-divider" />
+                {session ? (
+                  <>
+                    <span className="dropdown-item-text text-secondary small">{session.email}</span>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        signOut()
+                        setOpen(false)
+                      }}
+                    >
+                      Sign out
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="dropdown-item" onClick={startSignIn}>
+                    Sign in
+                  </button>
+                )}
+              </>
             )}
           </div>
         </>
+      )}
+      {adding && (
+        <ChildNameModal
+          onConfirm={name => {
+            store.addChild(name)
+            setAdding(false)
+          }}
+          onCancel={() => setAdding(false)}
+        />
       )}
       {/* the invisible real Google button the fallback clicks */}
       <div
@@ -245,8 +308,53 @@ function SyncMenu({ sync = {} }) {
   )
 }
 
-/* "Version N", the way the Android app's About words it — the deploy's run
-   number, not a commit hash a parent can't do anything with. */
+/** Name for a new child. A blank name is allowed — the store falls back to
+ * "Child N" — so the dialog never blocks on a field nobody wants to fill. */
+function ChildNameModal({ onConfirm, onCancel }) {
+  const [name, setName] = useState('')
+  return (
+    <>
+      <div className="modal d-block" tabIndex="-1" role="dialog" onClick={onCancel}>
+        <div className="modal-dialog modal-dialog-centered" onClick={e => e.stopPropagation()}>
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title">Add child</h5>
+              <button type="button" className="btn-close" aria-label="Close" onClick={onCancel} />
+            </div>
+            <div className="modal-body">
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Name"
+                aria-label="Child name"
+                autoFocus
+                value={name}
+                onChange={e => setName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') onConfirm(name)
+                }}
+              />
+              <div className="form-text">
+                Their own age, quota, channels and watch history — nothing is shared with the others.
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={onCancel}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" onClick={() => onConfirm(name)}>
+                <i className="fa-sharp-duotone fa-regular fa-plus me-2" />
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="modal-backdrop show" />
+    </>
+  )
+}
+
 function VersionLink() {
   const version = typeof __BUILD_VERSION__ !== 'undefined' ? __BUILD_VERSION__ : ''
   if (!version) return null

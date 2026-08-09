@@ -318,8 +318,13 @@ export function groupInto(settings, selectedIds, name) {
 
 const SETTINGS_KEY = 'tinytube:settings:v1'
 
-export const DEFAULTS = {
-  apiKey: '',
+/* ONE ACCOUNT, SEVERAL CHILDREN. What a child owns — their age, their quota,
+   their channels and groups — is per child; what the household owns — the API
+   key, the parent's passkey — is per account. The stored shape is
+   {apiKey, passkeyId, children: [{id, name, ...CHILD_DEFAULTS}], activeChildId},
+   and everything that READS settings is handed a FLATTENED view (account
+   fields plus the active child's) so no caller has to know any of this. */
+export const CHILD_DEFAULTS = {
   ageRange: [1, 15], // everything; superseded by birthday when set
   birthday: null, // 'YYYY-MM'; the child's age is computed from this (born the 1st)
   quotaMins: 180, // watch quota per rolling 12h window; 0 = no watching (there is no "off")
@@ -328,78 +333,129 @@ export const DEFAULTS = {
   overrides: {}, // per curated channel_id: {min_age?, max_age?, hidden?, disabled?} edited in the table
   groups: [], // channel groups [{id, name}] — see the channelGroups section
   groupOf: {}, // channel_id -> group id membership
+}
+
+export const ACCOUNT_DEFAULTS = {
+  apiKey: '',
   passkeyId: null, // WebAuthn credential id (base64url); when set, the parent gate is biometric-only
+}
+
+// the flattened view's defaults — what every reader of `settings` sees
+export const DEFAULTS = { ...ACCOUNT_DEFAULTS, ...CHILD_DEFAULTS }
+
+/* The id the pre-children settings become. FIXED rather than random on
+   purpose: the Worker migrates existing synced rows under this same id, so an
+   account that was already syncing keeps its history instead of finding an
+   empty first child. New children get UUIDs. */
+export const FIRST_CHILD_ID = 'default'
+
+/** Stored shape -> stored shape, with legacy blobs folded in. Idempotent. */
+export function normalizeSettings(parsed = {}) {
+  // fold pre-refactor fields into the unified overrides map
+  const overrides = { ...parsed.ageOverrides, ...parsed.overrides }
+  for (const id of parsed.hiddenChannels ?? []) overrides[id] = { ...overrides[id], hidden: true }
+
+  const children =
+    Array.isArray(parsed.children) && parsed.children.length
+      ? parsed.children.map((c, i) => ({ ...CHILD_DEFAULTS, ...c, id: c.id ?? `child-${i}`, name: c.name ?? `Child ${i + 1}` }))
+      : [
+          {
+            ...CHILD_DEFAULTS,
+            // a pre-children blob carried these at the top level
+            ...Object.fromEntries(
+              Object.keys(CHILD_DEFAULTS)
+                .filter(k => parsed[k] !== undefined)
+                .map(k => [k, parsed[k]]),
+            ),
+            overrides,
+            id: FIRST_CHILD_ID,
+            name: parsed.children?.[0]?.name ?? 'Child 1',
+          },
+        ]
+  const activeChildId = children.some(c => c.id === parsed.activeChildId) ? parsed.activeChildId : children[0].id
+  return {
+    ...ACCOUNT_DEFAULTS,
+    ...Object.fromEntries(Object.keys(ACCOUNT_DEFAULTS).filter(k => parsed[k] !== undefined).map(k => [k, parsed[k]])),
+    updatedAt: parsed.updatedAt,
+    children,
+    activeChildId,
+  }
+}
+
+/** The child in front of us — never undefined, whatever activeChildId says. */
+export function activeChild(settings) {
+  return settings.children.find(c => c.id === settings.activeChildId) ?? settings.children[0]
+}
+
+/** The flattened view every consumer reads: account fields, then the active
+ * child's, with the child's own id/name kept clear of the settings keys. */
+export function childView(settings) {
+  const { id, name, ...fields } = activeChild(settings)
+  return { ...settings, ...fields, childId: id, childName: name }
 }
 
 function loadSettings() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {}
-    // fold pre-refactor fields into the unified overrides map
-    const overrides = { ...parsed.ageOverrides, ...parsed.overrides }
-    for (const id of parsed.hiddenChannels ?? []) overrides[id] = { ...overrides[id], hidden: true }
-    delete parsed.hiddenChannels
-    delete parsed.ageOverrides
-    delete parsed.parentLockUntil // lockout mechanism removed
-    return { ...DEFAULTS, ...parsed, overrides }
+    return normalizeSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {})
   } catch {
-    return { ...DEFAULTS }
+    return normalizeSettings({})
   }
 }
 
-// mutator API over a settings object; `update` takes shallow patches. Shared
-// by the persistent store below and the Settings page's unsaved draft.
-export function storeApi(settings, update) {
+/* Mutator API over the FLATTENED view. `update` patches account-level fields
+ * (and the children list itself); `updateChild` patches the active child. Which
+ * one a setter uses is the whole per-child/per-account distinction, in one
+ * readable place. */
+export function storeApi(settings, update, updateChild = update) {
   return {
     settings,
     setApiKey: apiKey => update({ apiKey: apiKey.trim() }),
-    setAgeRange: ([lo, hi]) => update({ ageRange: [Math.min(lo, hi), Math.max(lo, hi)] }),
-    setQuotaMins: quotaMins => update({ quotaMins }),
-    setMinVideoMins: minVideoMins => update({ minVideoMins }),
+    setPasskey: id => update({ passkeyId: id }),
+    setAgeRange: ([lo, hi]) => updateChild({ ageRange: [Math.min(lo, hi), Math.max(lo, hi)] }),
+    setQuotaMins: quotaMins => updateChild({ quotaMins }),
+    setMinVideoMins: minVideoMins => updateChild({ minVideoMins }),
+    setBirthday: birthday => updateChild({ birthday }),
     addCustomChannel: ch =>
-      update({
+      updateChild({
         customChannels: [...settings.customChannels.filter(c => c.channel_id !== ch.channel_id), ch],
       }),
     updateCustomChannel: (id, patch) =>
-      update({
+      updateChild({
         customChannels: settings.customChannels.map(c => (c.channel_id === id ? { ...c, ...patch } : c)),
       }),
     removeCustomChannel: id =>
-      update({
+      updateChild({
         customChannels: settings.customChannels.filter(c => c.channel_id !== id),
         // its group membership goes with it, and the tidy may dissolve the group
         ...tidyGroups({ groups: settings.groups, groupOf: withoutIds(settings.groupOf, [id]) }),
       }),
     setOverride: (id, patch) =>
-      update({ overrides: { ...settings.overrides, [id]: { ...settings.overrides[id], ...patch } } }),
+      updateChild({ overrides: { ...settings.overrides, [id]: { ...settings.overrides[id], ...patch } } }),
     restoreHidden: () =>
-      update({
+      updateChild({
         overrides: Object.fromEntries(
           Object.entries(settings.overrides)
             .map(([id, { hidden, ...rest }]) => [id, rest])
             .filter(([, rest]) => Object.keys(rest).length > 0),
         ),
       }),
-    setPasskey: id => update({ passkeyId: id }),
-    setBirthday: birthday => update({ birthday }),
     /* Put the selected channels in a (possibly existing — `absorbing`) group,
        or dissolve their membership. Both run `tidy` after, like the Android
        stores do: every mutation can strand a group's last member. */
-    groupChannels: (ids, name) =>
-      update(groupInto(settings, ids, name)),
-    ungroupChannels: ids =>
-      update(tidyGroups({ ...settings, groupOf: withoutIds(settings.groupOf, ids) })),
+    groupChannels: (ids, name) => updateChild(groupInto(settings, ids, name)),
+    ungroupChannels: ids => updateChild(tidyGroups({ ...settings, groupOf: withoutIds(settings.groupOf, ids) })),
   }
 }
 
 export function useSettings() {
   const [settings, setSettings] = useState(loadSettings)
 
-  const update = useCallback(patch => {
+  // updatedAt is the sync LWW clock. Stamped on every edit — unless the caller
+  // carries its own, which is how a pulled remote blob keeps the stamp it was
+  // written under instead of instantly looking newer.
+  const write = useCallback(mutate => {
     setSettings(prev => {
-      // updatedAt is the sync LWW clock. Stamped on every edit — unless the
-      // patch carries its own, which is how a pulled remote blob keeps the
-      // stamp it was written under instead of instantly looking newer.
-      const next = { ...prev, updatedAt: Date.now(), ...patch }
+      const next = mutate(prev)
       try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(next))
       } catch (e) {
@@ -409,7 +465,64 @@ export function useSettings() {
     })
   }, [])
 
-  return { ...storeApi(settings, update), save: update }
+  const update = useCallback(
+    patch => write(prev => normalizeSettings({ ...prev, updatedAt: Date.now(), ...patch })),
+    [write],
+  )
+
+  const updateChild = useCallback(
+    patch =>
+      write(prev => ({
+        ...prev,
+        updatedAt: Date.now(),
+        children: prev.children.map(c => (c.id === prev.activeChildId ? { ...c, ...patch } : c)),
+      })),
+    [write],
+  )
+
+  const addChild = useCallback(
+    name =>
+      write(prev => {
+        const child = { ...CHILD_DEFAULTS, id: crypto.randomUUID(), name: name.trim() || `Child ${prev.children.length + 1}` }
+        // switching to the new child is the point of adding one
+        return { ...prev, updatedAt: Date.now(), children: [...prev.children, child], activeChildId: child.id }
+      }),
+    [write],
+  )
+
+  const switchChild = useCallback(id => update({ activeChildId: id }), [update])
+
+  const renameChild = useCallback(name => updateChild({ name: name.trim() || 'Child' }), [updateChild])
+
+  /* The last child cannot be removed — an account with no child has no grid to
+     show and no settings to edit. */
+  const removeChild = useCallback(
+    id =>
+      write(prev => {
+        if (prev.children.length < 2) return prev
+        const children = prev.children.filter(c => c.id !== id)
+        localStorage.removeItem(watchKey(id)) // their watch history goes with them
+        return {
+          ...prev,
+          updatedAt: Date.now(),
+          children,
+          activeChildId: prev.activeChildId === id ? children[0].id : prev.activeChildId,
+        }
+      }),
+    [write],
+  )
+
+  const view = childView(settings)
+  return {
+    ...storeApi(view, update, updateChild),
+    save: update,
+    stored: settings, // the un-flattened blob: what sync pushes
+    children: settings.children,
+    addChild,
+    switchChild,
+    renameChild,
+    removeChild,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -477,9 +590,20 @@ const LIKED_THRESHOLD = 0.2 // bailed before this -> probably didn't like it
 
 const EMPTY_REMOTE = { days: {}, hours: {} }
 
-function loadWatchStore() {
+/* One history per CHILD: progress and the watch quota both belong to the child
+   watching, not to the device. The pre-children blob lives at the bare key and
+   is adopted by the first child (FIRST_CHILD_ID), which is why that id is
+   fixed. */
+export function watchKey(childId) {
+  return `${WATCH_KEY}:${childId ?? FIRST_CHILD_ID}`
+}
+
+function loadWatchStore(childId) {
   try {
-    const parsed = JSON.parse(localStorage.getItem(WATCH_KEY)) ?? {}
+    const raw =
+      localStorage.getItem(watchKey(childId)) ??
+      (childId === FIRST_CHILD_ID || childId == null ? localStorage.getItem(WATCH_KEY) : null)
+    const parsed = JSON.parse(raw) ?? {}
     return {
       lastVideoId: null,
       watched: {},
@@ -492,13 +616,13 @@ function loadWatchStore() {
   }
 }
 
-function persist(store) {
+function persist(store, childId) {
   const ids = Object.keys(store.watched)
   if (ids.length > MAX_ENTRIES) {
     ids.sort((a, b) => store.watched[a].updatedAt - store.watched[b].updatedAt)
     for (const id of ids.slice(0, ids.length - MAX_ENTRIES)) delete store.watched[id]
   }
-  localStorage.setItem(WATCH_KEY, JSON.stringify(store))
+  localStorage.setItem(watchKey(childId), JSON.stringify(store))
 }
 
 export function fraction(entry) {
@@ -507,8 +631,13 @@ export function fraction(entry) {
   return entry.dur ? Math.min(entry.pos / entry.dur, 1) : 0
 }
 
-export function useWatchStore() {
-  const [store, setStore] = useState(loadWatchStore)
+export function useWatchStore(childId = FIRST_CHILD_ID) {
+  const [store, setStore] = useState(() => loadWatchStore(childId))
+
+  // switching child swaps the whole history under us
+  useEffect(() => {
+    setStore(loadWatchStore(childId))
+  }, [childId])
 
   const saveProgress = useCallback((id, pos, dur) => {
     setStore(prev => {
@@ -519,10 +648,10 @@ export function useWatchStore() {
         lastVideoId: id,
         watched: { ...prev.watched, [id]: { pos, dur, completed, updatedAt: Date.now() } },
       }
-      persist(next)
+      persist(next, childId)
       return next
     })
-  }, [])
+  }, [childId])
 
   const markCompleted = useCallback(id => {
     setStore(prev => {
@@ -532,18 +661,18 @@ export function useWatchStore() {
         lastVideoId: id,
         watched: { ...prev.watched, [id]: { ...entry, completed: true, updatedAt: Date.now() } },
       }
-      persist(next)
+      persist(next, childId)
       return next
     })
-  }, [])
+  }, [childId])
 
   const addWatchTime = useCallback(secs => {
     setStore(prev => {
       const next = { ...prev, usage: accrueUsage(prev.usage, secs) }
-      persist(next)
+      persist(next, childId)
       return next
     })
-  }, [])
+  }, [childId])
 
   /* A /sync/pull's answer folded in: watched merges row-wise LWW; the
      account-wide usage sums land in `remote`, NEVER in `usage` — usage is what
@@ -556,10 +685,10 @@ export function useWatchStore() {
         watched: mergeWatched(prev.watched, watched),
         remote: usage ? { ...EMPTY_REMOTE, ...usage } : prev.remote,
       }
-      persist(next)
+      persist(next, childId)
       return next
     })
-  }, [])
+  }, [childId])
 
   return {
     watched: store.watched,
@@ -799,13 +928,16 @@ export function loadGoogleSignIn() {
  */
 export function useSync(settingsStore, watchStore) {
   const [session, setSession] = useState(loadSyncSession)
-  const pulled = useRef(false)
+  // which children this session has already pulled — switching child pulls
+  // that child's history, and only once
+  const pulled = useRef(new Set())
   const timer = useRef(null)
+  const childId = settingsStore.settings.childId
 
   const signOut = useCallback(() => {
     saveSyncSession(null)
     setSession(null)
-    pulled.current = false
+    pulled.current = new Set()
   }, [])
 
   /* 401 means the session aged out server-side — surface as signed-out so the
@@ -829,28 +961,30 @@ export function useSync(settingsStore, watchStore) {
       lastPushAt: 0,
     }
     saveSyncSession(session)
-    pulled.current = false
+    pulled.current = new Set()
     setSession(session)
     return email
   }, [])
 
-  // pull on boot / sign-in
+  // pull on boot / sign-in / child switch
   const { save } = settingsStore
   const { applyRemote } = watchStore
-  const settings = settingsStore.settings
+  // the STORED blob (every child), not the flattened view — the view's child
+  // fields are a copy, and pushing them would round-trip duplicates
+  const stored = settingsStore.stored ?? settingsStore.settings
   useEffect(() => {
-    if (!session || pulled.current) return
-    pulled.current = true
-    syncFetch('/sync/pull', {}, session.token)
+    if (!session || pulled.current.has(childId)) return
+    pulled.current.add(childId)
+    syncFetch('/sync/pull', { child: childId }, session.token)
       .then(remote => {
         applyRemote({ watched: remote.watched, usage: remote.usage })
-        if (remote.settings && (remote.settings.updatedAt ?? 0) > (settings.updatedAt ?? 0)) {
+        if (remote.settings && (remote.settings.updatedAt ?? 0) > (stored.updatedAt ?? 0)) {
           // keep the remote stamp: adopting a blob is not an edit
           save({ ...remote.settings.data, updatedAt: remote.settings.updatedAt })
         }
       })
       .catch(dead)
-  }, [session]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [session, childId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // push deltas, debounced, whenever local state moves
   const { watched, usage } = watchStore
@@ -858,25 +992,28 @@ export function useSync(settingsStore, watchStore) {
     if (!session) return
     clearTimeout(timer.current)
     timer.current = setTimeout(() => {
-      const since = session.lastPushAt ?? 0
+      // per child: each has its own history, so its own high-water mark
+      const marks = typeof session.lastPushAt === 'object' ? session.lastPushAt : {}
+      const since = marks[childId] ?? 0
       const payload = {
+        child: childId,
         usage: { deviceId: session.deviceId, days: usage.days, hours: usage.hours },
       }
       const deltas = watchedDeltas(watched, since)
       if (deltas.length) payload.watched = deltas
-      if ((settings.updatedAt ?? 0) > since) {
-        payload.settings = { data: settings, updatedAt: settings.updatedAt }
+      if ((stored.updatedAt ?? 0) > since) {
+        payload.settings = { data: stored, updatedAt: stored.updatedAt }
       }
       syncFetch('/sync/push', payload, session.token)
         .then(() => {
-          const next = { ...session, lastPushAt: Date.now() }
+          const next = { ...session, lastPushAt: { ...marks, [childId]: Date.now() } }
           saveSyncSession(next)
           setSession(next)
         })
         .catch(dead)
     }, PUSH_DEBOUNCE_MS)
     return () => clearTimeout(timer.current)
-  }, [session, settings, watched, usage, dead])
+  }, [session, stored, watched, usage, childId, dead])
 
   return { session, signIn, signOut }
 }

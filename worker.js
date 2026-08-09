@@ -665,6 +665,11 @@ const GOOGLE_ISSUERS = new Set(["accounts.google.com", "https://accounts.google.
 export const JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 export const SESSION_TOKEN = /^[A-Za-z0-9_-]{43}$/; // base64url of 32 random bytes
 export const DEVICE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/* One account, several children: history and quota usage are per CHILD. The
+   web app sends a UUID, or the literal "default" for the child a pre-children
+   install was migrated into — hence a pattern rather than DEVICE_ID's UUID. */
+export const CHILD_ID = /^[A-Za-z0-9_-]{1,64}$/;
+export const DEFAULT_CHILD = "default";
 export const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
 export const HOUR_KEY = /^\d{1,10}$/; // epoch hours; 10 digits reaches year 116k
 const SESSION_TTL_MS = 90 * 86_400_000;
@@ -782,6 +787,30 @@ function ensureSchema(db) {
     db.prepare(
       "CREATE TABLE IF NOT EXISTS sync_usage (email TEXT NOT NULL, device_id TEXT NOT NULL, kind TEXT NOT NULL, bucket TEXT NOT NULL, secs INTEGER NOT NULL, PRIMARY KEY (email, device_id, kind, bucket))",
     ),
+    /* PER CHILD, and new tables rather than an ALTER: SQLite cannot widen a
+       PRIMARY KEY in place, and the child belongs in the key — two children
+       watching the same video are two rows, not one. The pre-children tables
+       above are kept and their rows copied below, once, into DEFAULT_CHILD;
+       the web app migrates its own first child to that same fixed id, so an
+       account that was already syncing keeps its history. */
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS sync_watched_v2 (email TEXT NOT NULL, child_id TEXT NOT NULL, video_id TEXT NOT NULL, pos REAL NOT NULL, dur REAL NOT NULL, completed INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (email, child_id, video_id))",
+    ),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS sync_usage_v2 (email TEXT NOT NULL, device_id TEXT NOT NULL, child_id TEXT NOT NULL, kind TEXT NOT NULL, bucket TEXT NOT NULL, secs INTEGER NOT NULL, PRIMARY KEY (email, device_id, child_id, kind, bucket))",
+    ),
+    /* Idempotent by the conflict clause, so running it per isolate is safe and
+       a fresh database copies nothing. */
+    db.prepare(
+      `INSERT INTO sync_watched_v2 (email, child_id, video_id, pos, dur, completed, updated_at) ` +
+        `SELECT email, '${DEFAULT_CHILD}', video_id, pos, dur, completed, updated_at FROM sync_watched WHERE true ` +
+        `ON CONFLICT DO NOTHING`,
+    ),
+    db.prepare(
+      `INSERT INTO sync_usage_v2 (email, device_id, child_id, kind, bucket, secs) ` +
+        `SELECT email, device_id, '${DEFAULT_CHILD}', kind, bucket, secs FROM sync_usage WHERE true ` +
+        `ON CONFLICT DO NOTHING`,
+    ),
     /* The SHARED half, keyed by channel and nothing else: which videos a
        channel has is a fact about the channel, not about a user, so one fetch
        a day serves every account. WHICH channels an account approved stays in
@@ -845,15 +874,20 @@ async function syncPull(request, db) {
   await ensureSchema(db);
   const email = await sessionEmail(request, db);
   if (!email) return json({ error: "sign in again" }, 401);
+  const body = await readBody(request);
+  /* Settings are ACCOUNT-wide (the blob carries every child); history and
+     usage are per child. An absent or malformed child means the migrated
+     first one, so an older client keeps working. */
+  const child = CHILD_ID.test(body?.child ?? "") ? body.child : DEFAULT_CHILD;
 
   const [settings, watched, usage] = await db.batch([
     db.prepare("SELECT data, updated_at FROM sync_settings WHERE email = ?1").bind(email),
     db.prepare(
-      "SELECT video_id, pos, dur, completed, updated_at FROM sync_watched WHERE email = ?1 ORDER BY updated_at DESC LIMIT ?2",
-    ).bind(email, MAX_WATCHED_ROWS),
+      "SELECT video_id, pos, dur, completed, updated_at FROM sync_watched_v2 WHERE email = ?1 AND child_id = ?2 ORDER BY updated_at DESC LIMIT ?3",
+    ).bind(email, child, MAX_WATCHED_ROWS),
     db.prepare(
-      "SELECT kind, bucket, SUM(secs) AS secs FROM sync_usage WHERE email = ?1 GROUP BY kind, bucket",
-    ).bind(email),
+      "SELECT kind, bucket, SUM(secs) AS secs FROM sync_usage_v2 WHERE email = ?1 AND child_id = ?2 GROUP BY kind, bucket",
+    ).bind(email, child),
   ]);
 
   const settingsRow = settings.results[0];
@@ -917,6 +951,8 @@ async function syncPush(request, db) {
   if (!email) return json({ error: "sign in again" }, 401);
   const body = await readBody(request);
   if (!body) return json({ error: "bad body" }, 400);
+  if (body.child != null && !CHILD_ID.test(body.child)) return json({ error: "bad child" }, 400);
+  const child = body.child ?? DEFAULT_CHILD;
 
   const statements = [];
 
@@ -944,13 +980,13 @@ async function syncPush(request, db) {
          SQL text, and the 100-bound-parameter limit never comes into play. */
       statements.push(
         db.prepare(
-          "INSERT INTO sync_watched (email, video_id, pos, dur, completed, updated_at) " +
-            "SELECT ?1, value ->> 'id', value ->> 'pos', value ->> 'dur', value ->> 'completed', value ->> 'updatedAt' " +
-            "FROM json_each(?2) WHERE true " +
-            "ON CONFLICT (email, video_id) DO UPDATE SET pos = excluded.pos, dur = excluded.dur, " +
+          "INSERT INTO sync_watched_v2 (email, child_id, video_id, pos, dur, completed, updated_at) " +
+            "SELECT ?1, ?2, value ->> 'id', value ->> 'pos', value ->> 'dur', value ->> 'completed', value ->> 'updatedAt' " +
+            "FROM json_each(?3) WHERE true " +
+            "ON CONFLICT (email, child_id, video_id) DO UPDATE SET pos = excluded.pos, dur = excluded.dur, " +
             "completed = excluded.completed, updated_at = excluded.updated_at " +
-            "WHERE excluded.updated_at > sync_watched.updated_at",
-        ).bind(email, JSON.stringify(rows)),
+            "WHERE excluded.updated_at > sync_watched_v2.updated_at",
+        ).bind(email, child, JSON.stringify(rows)),
       );
     }
   }
@@ -964,11 +1000,11 @@ async function syncPush(request, db) {
          re-pushing is idempotent and an old device can't shrink a newer count. */
       statements.push(
         db.prepare(
-          "INSERT INTO sync_usage (email, device_id, kind, bucket, secs) " +
-            `SELECT ?1, ?2, '${kind}', key, value FROM json_each(?3) WHERE true ` +
-            "ON CONFLICT (email, device_id, kind, bucket) DO UPDATE SET secs = excluded.secs " +
-            "WHERE excluded.secs > sync_usage.secs",
-        ).bind(email, usage.deviceId, JSON.stringify(buckets)),
+          "INSERT INTO sync_usage_v2 (email, device_id, child_id, kind, bucket, secs) " +
+            `SELECT ?1, ?2, ?3, '${kind}', key, value FROM json_each(?4) WHERE true ` +
+            "ON CONFLICT (email, device_id, child_id, kind, bucket) DO UPDATE SET secs = excluded.secs " +
+            "WHERE excluded.secs > sync_usage_v2.secs",
+        ).bind(email, usage.deviceId, child, JSON.stringify(buckets)),
       );
     }
   }
