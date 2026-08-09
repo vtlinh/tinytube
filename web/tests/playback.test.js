@@ -1,14 +1,20 @@
 /** What plays when a video finishes — the web half of the Android app's
- * `Playlist`, and this file is `PlaylistTest.kt` ported case for case so the
- * two cannot drift. The rules being pinned: in order STOPS at the end rather
- * than wrapping, random never repeats the video that just played and reaches
- * every other one exactly once, and an unreadable stored mode reads as in
- * order rather than as nothing. */
+ * `Playlist`. The first three blocks are `PlaylistTest.kt` ported case for
+ * case: in order STOPS at the end rather than wrapping, random never repeats
+ * the video that just played and reaches every other one exactly once, and an
+ * unreadable stored mode reads as in order rather than as nothing.
+ *
+ * After those comes the one place the web app DIVERGES — random preferring
+ * videos that have not been watched, which Playlist.kt cannot do because it
+ * knows only a count and an index. That block carries its own equivalence
+ * test: with nothing known about watching, every roll gives the Kotlin
+ * answer, so the divergence is an addition rather than a drift. */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import {
   nextIndex,
+  nextVideoIndex,
   playbackMode,
   useSettings,
   normalizeSettings,
@@ -93,6 +99,96 @@ describe('random', () => {
       expect(next).toBeGreaterThanOrEqual(0)
       expect(next).toBeLessThan(4)
     }
+  })
+})
+
+/* The one divergence from Playlist.kt, which knows only a count and an index.
+   Random over everything meant a child who had seen most of a channel kept
+   being handed repeats — the complaint random was supposed to answer. */
+describe('random prefers what has not been watched', () => {
+  // 0 and 1 seen, 2 and 3 not
+  const seen = i => i === 0 || i === 1
+
+  it('never lands on a watched video while an unwatched one is left', () => {
+    for (let current = 0; current < 4; current++) {
+      for (let roll = 0; roll < 4; roll++) {
+        const next = nextIndex(4, current, random, () => roll, seen)
+        expect([2, 3].filter(i => i !== current), `at ${current}, roll ${roll}`).toContain(next)
+      }
+    }
+  })
+
+  it('reaches every unwatched video exactly once, and no other', () => {
+    const reached = [0, 1].map(roll => nextIndex(4, 0, random, () => roll, seen))
+    expect(reached.sort()).toEqual([2, 3])
+  })
+
+  /* A preference, not a restriction: running out of new things must not stop
+     playback dead. */
+  it('falls back to the watched ones when nothing is left unseen', () => {
+    const allSeen = () => true
+    const reached = [0, 1, 2].map(roll => nextIndex(4, 1, random, () => roll, allSeen))
+    expect(reached.sort()).toEqual([0, 2, 3]) // every other video, current excluded
+  })
+
+  it('still never repeats the current video, watched or not', () => {
+    // current is the ONLY unwatched one: it must not pick itself
+    const onlyCurrentUnseen = i => i !== 2
+    for (let roll = 0; roll < 4; roll++) {
+      expect(nextIndex(4, 2, random, () => roll, onlyCurrentUnseen)).not.toBe(2)
+    }
+  })
+
+  it('clamps a bad roll against the narrowed pool, not the whole list', () => {
+    for (const roll of [-9, 99, NaN, Infinity]) {
+      const next = nextIndex(4, 0, random, () => roll, seen)
+      expect([2, 3], `roll ${roll}`).toContain(next)
+    }
+  })
+
+  it('is Playlist.kt exactly when nothing is known about watching', () => {
+    // same rolls, same answers as the ported cases above — the skip-past
+    // arithmetic and rolling over the other-indices list agree
+    for (let current = 0; current < 5; current++) {
+      for (let roll = 0; roll < 4; roll++) {
+        const kotlin = roll >= current ? roll + 1 : roll
+        expect(nextIndex(5, current, random, () => roll)).toBe(kotlin)
+      }
+    }
+  })
+})
+
+describe('nextVideoIndex — the app’s call', () => {
+  const list = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]
+  // b is finished, c is 95% done (past the threshold), d is half-watched
+  const watched = {
+    b: { pos: 10, dur: 10, completed: true },
+    c: { pos: 95, dur: 100 },
+    d: { pos: 50, dur: 100 },
+  }
+
+  it('treats "watched" as the badge does — past 90%, completed included', () => {
+    // from a: b and c are seen, so only d is left
+    for (let roll = 0; roll < 3; roll++) {
+      expect(nextVideoIndex(list, 0, PLAYBACK_RANDOM, watched, () => roll)).toBe(3)
+    }
+  })
+
+  it('counts a half-watched video as still worth playing', () => {
+    // from d: a is untouched, b and c are done — a is the only unseen one
+    for (let roll = 0; roll < 3; roll++) {
+      expect(nextVideoIndex(list, 3, PLAYBACK_RANDOM, watched, () => roll)).toBe(0)
+    }
+  })
+
+  it('leaves in-order alone — one by one means one by one', () => {
+    expect(nextVideoIndex(list, 0, PLAYBACK_IN_ORDER, watched, never)).toBe(1) // b, though seen
+    expect(nextVideoIndex(list, 3, PLAYBACK_IN_ORDER, watched, never)).toBe(null)
+  })
+
+  it('works with no history at all', () => {
+    expect(nextVideoIndex(list, 0, PLAYBACK_RANDOM, {}, () => 0)).toBe(1)
+    expect(nextVideoIndex(list, 0, PLAYBACK_RANDOM, undefined, () => 2)).toBe(3)
   })
 })
 

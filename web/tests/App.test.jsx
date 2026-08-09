@@ -304,6 +304,35 @@ describe('what plays next', () => {
     }
   })
 
+  /* Random over everything meant a child who had seen most of a channel kept
+     being handed repeats. It skips what the grid would badge as watched. */
+  it('picks an unwatched video in random mode, not one already seen', async () => {
+    withVideos({ playback: 'RANDOM' })
+    // v1 and v3 finished; only v2 is left unseen
+    localStorage.setItem(
+      'tinytube:v1',
+      JSON.stringify({
+        watched: {
+          v1: { pos: 10, dur: 10, completed: true, updatedAt: 1 },
+          v3: { pos: 10, dur: 10, completed: true, updatedAt: 1 },
+        },
+        usage: { window: { start: null, secs: 0 }, days: {}, hours: {} },
+      }),
+    )
+    render(<App />)
+    fireEvent.click(await screen.findByText('One'))
+    expect(yt.videoId).toBe('v1')
+
+    // v2 is the only one not already seen, so random has exactly one answer
+    end()
+    expect(yt.videoId).toBe('v2')
+
+    /* And now everything has been seen. A preference is not a restriction:
+       it falls back to the rest rather than ending playback. */
+    end()
+    expect(['v1', 'v3']).toContain(yt.videoId)
+  })
+
   it('stays inside the channel the child stepped into', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
