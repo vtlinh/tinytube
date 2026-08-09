@@ -594,7 +594,7 @@ export const CHILD_DEFAULTS = {
   /* minutes per period, or null for "no limit over this one". 0 means no
      watching at all, which is still deliberately reachable. */
   quota: { per6h: null, perDay: 180, perWeek: null, perMonth: null },
-  week: null, // {until, limits?, bonusMins?} — this week's override, see above
+  day: null, // {until, limits?, bonusMins?} — today's override, see above
   minVideoMins: 0, // the floor: hide videos shorter than this; 0 = no floor
   maxVideoMins: null, // the ceiling: hide videos longer than this; null = none
   /* parent-added channels, as the PARENT'S DECISION only:
@@ -654,7 +654,7 @@ export function normalizeSettings(parsed = {}) {
           ...c,
           // the one 12h number became four periods; a daily cap is the
           // closest thing to what it meant, so that is where it lands
-          quota: c.quota ?? { ...CHILD_DEFAULTS.quota, perDay: c.quotaMins ?? CHILD_DEFAULTS.quota.perDay },
+          quota: normalizeQuota(c.quota ?? { ...CHILD_DEFAULTS.quota, perDay: c.quotaMins ?? CHILD_DEFAULTS.quota.perDay }),
           // channel names and avatars used to be stored here; they are the
           // Worker's now, and a stored copy would only go stale
           customChannels: (c.customChannels ?? []).map(decisionOnly),
@@ -671,7 +671,7 @@ export function normalizeSettings(parsed = {}) {
                 .map(k => [k, parsed[k]]),
             ),
             overrides,
-            quota: parsed.quota ?? { ...CHILD_DEFAULTS.quota, perDay: parsed.quotaMins ?? CHILD_DEFAULTS.quota.perDay },
+            quota: normalizeQuota(parsed.quota ?? { ...CHILD_DEFAULTS.quota, perDay: parsed.quotaMins ?? CHILD_DEFAULTS.quota.perDay }),
             customChannels: (parsed.customChannels ?? []).map(decisionOnly),
             id: FIRST_CHILD_ID,
             name: parsed.children?.[0]?.name ?? 'Child 1',
@@ -721,7 +721,7 @@ export function storeApi(settings, update, updateChild = update) {
        expired one contributes nothing, so this resets rather than compounds. */
     addBonusMins: mins =>
       updateChild({
-        week: { ...(activeWeekOverride(settings) ?? {}), bonusMins: activeBonusMins(settings) + mins, until: endOfWeek() },
+        day: { ...(activeDayOverride(settings) ?? {}), bonusMins: activeBonusMins(settings) + mins, until: endOfDay() },
       }),
     setAgeRange: ([lo, hi]) => updateChild({ ageRange: [Math.min(lo, hi), Math.max(lo, hi)] }),
     /* The standing limits, and this week's override of them. Both are set
@@ -731,15 +731,18 @@ export function storeApi(settings, update, updateChild = update) {
     /* The week's dialog offers no monthly limit — a week cannot redraw a
        month — so the standing one is carried through rather than dropped:
        an override must never quietly REMOVE a cap. */
-    setWeekLimits: limits =>
+    /* Today's dialog offers no weekly or monthly limit — a day cannot redraw
+       either — so the standing ones are carried through rather than dropped:
+       an override must never quietly REMOVE a cap. */
+    setDayLimits: limits =>
       updateChild({
-        week: {
-          ...(activeWeekOverride(settings) ?? {}),
+        day: {
+          ...(activeDayOverride(settings) ?? {}),
           limits: { ...settings.quota, ...limits },
-          until: endOfWeek(),
+          until: endOfDay(),
         },
       }),
-    clearWeekOverride: () => updateChild({ week: null }),
+    clearDayOverride: () => updateChild({ day: null }),
     setVideoLength: ([minVideoMins, maxVideoMins]) => updateChild({ minVideoMins, maxVideoMins }),
     setBirthday: birthday => updateChild({ birthday }),
     /* Only the decision is kept, whatever the caller hands over: a search
@@ -879,11 +882,14 @@ const EMPTY_USAGE = { window: { start: null, secs: 0 }, days: {}, hours: {} }
    has the least left is the one that stops them. Each is minutes, or null for
    "no limit over this period" — which is not the same as 0, and 0 still means
    what it always did: no watching at all. */
-/* Each period's slider runs up to THE WHOLE PERIOD — six hours, a day, a week,
-   a month — because a limit that cannot reach the length of the window it
-   governs is a scale that lies about its own range. The step is whatever is
-   worth dragging at that size: quarter hours inside six, whole hours inside a
-   day, four hours inside a week, whole days inside a month. */
+/* Each period's scale reaches ALMOST the whole period, and stops one step
+   short: a cap of six hours inside a rolling six hours forbids nothing, and
+   neither does a day inside a day — the top of every scale was another way of
+   spelling "no limit", which is the stop past the end. So the last finite
+   value is maxMins - stepMins, and maxMins is only ever the period's length.
+   The step is whatever is worth dragging at that size: quarter hours inside
+   six, whole hours inside a day, four hours inside a week, whole days inside
+   a month. */
 export const QUOTA_PERIODS = [
   { key: 'per6h', label: 'Every 6 hours', hint: 'a rolling six hours', maxMins: 6 * 60, stepMins: 15 },
   { key: 'perDay', label: 'Each day', hint: 'resets at midnight', maxMins: 24 * 60, stepMins: 60 },
@@ -899,6 +905,24 @@ export function fmtMins(mins) {
   const h = Math.floor(mins / 60)
   const m = Math.round(mins % 60)
   return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`
+}
+
+/** The largest limit worth setting for a period: one step below its length,
+ * since the length itself forbids nothing. */
+export function lastFiniteLimit({ maxMins, stepMins }) {
+  return maxMins - stepMins
+}
+
+/** A stored limit that reaches (or passes) its period's length means the same
+ * as no limit, and is stored as one — otherwise the slider would show ∞ over
+ * a number that is still being compared against. */
+export function normalizeQuota(quota = {}) {
+  return Object.fromEntries(
+    QUOTA_PERIODS.map(p => {
+      const v = quota[p.key]
+      return [p.key, v == null || v >= p.maxMins ? null : v]
+    }),
+  )
 }
 
 /**
@@ -969,36 +993,35 @@ export function usageByPeriod(usage, now = Date.now()) {
 }
 
 // ---------------------------------------------------------------------------
-// this week's override — a grown-up changing the limits, or adding minutes to
-// them, for THIS WEEK only. It expires with the week and then stops existing:
-// a change that quietly became permanent would be a parental control that
-// erodes.
+// today's override — a grown-up changing the limits, or adding minutes to
+// them, for TODAY only. It dies at midnight: an exception that outlived the
+// evening it was made for would be a parental control that erodes, and a week
+// is far too long to owe a decision taken at one bedtime.
 
-/** The instant the current week ends. Weeks start Sunday, like the stats. */
-export function endOfWeek(now = Date.now()) {
+/** Midnight ending today, in local time. */
+export function endOfDay(now = Date.now()) {
   const d = new Date(now)
-  const sunday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay())
-  return sunday.getTime() + 7 * DAY_MS
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime()
 }
 
-/** The override if it is still this week's, else null. */
-export function activeWeekOverride(settings, now = Date.now()) {
-  const week = settings?.week
-  return week && week.until > now ? week : null
+/** The override if it is still today's, else null. */
+export function activeDayOverride(settings, now = Date.now()) {
+  const day = settings?.day
+  return day && day.until > now ? day : null
 }
 
-/** Minutes granted on top of every limit this week. */
+/** Minutes granted on top of every limit today. */
 export function activeBonusMins(settings, now = Date.now()) {
-  return activeWeekOverride(settings, now)?.bonusMins ?? 0
+  return activeDayOverride(settings, now)?.bonusMins ?? 0
 }
 
-/** The limits actually in force: this week's if it replaced them, plus any
- * granted minutes. A period with no limit stays without one — adding time to
- * "no limit" is not a thing that means anything. */
+/** The limits actually in force: today's if it replaced them, plus any granted
+ * minutes. A period with no limit stays without one — adding time to "no
+ * limit" is not a thing that means anything. */
 export function effectiveQuota(settings, now = Date.now()) {
-  const week = activeWeekOverride(settings, now)
-  const base = week?.limits ?? settings?.quota ?? {}
-  const bonus = week?.bonusMins ?? 0
+  const day = activeDayOverride(settings, now)
+  const base = day?.limits ?? settings?.quota ?? {}
+  const bonus = day?.bonusMins ?? 0
   return Object.fromEntries(
     QUOTA_PERIODS.map(({ key }) => [key, base[key] == null ? null : base[key] + bonus]),
   )

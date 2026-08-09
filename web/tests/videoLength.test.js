@@ -11,7 +11,9 @@ import {
   activeBonusMins,
   effectiveQuota,
   quotaState,
-  endOfWeek,
+  endOfDay,
+  lastFiniteLimit,
+  normalizeQuota,
   useSettings,
   DEFAULTS,
   QUOTA_PERIODS,
@@ -101,17 +103,17 @@ describe('bonus time', () => {
 
   const limits = { per6h: null, perDay: 60, perWeek: null, perMonth: null }
 
-  it('counts only while the week it was granted in lasts', () => {
-    const granted = { quota: limits, week: { bonusMins: 30, until: endOfWeek(now) } }
+  it('counts only while the DAY it was granted in lasts', () => {
+    const granted = { quota: limits, day: { bonusMins: 30, until: endOfDay(now) } }
     expect(activeBonusMins(granted, now)).toBe(30)
     expect(effectiveQuota(granted, now).perDay).toBe(90)
     // a period with no limit is not given one by a grant
     expect(effectiveQuota(granted, now).perWeek).toBe(null)
 
-    // ...and it stops existing once the week is out
-    const nextWeek = endOfWeek(now) + 1000
-    expect(activeBonusMins(granted, nextWeek)).toBe(0)
-    expect(effectiveQuota(granted, nextWeek).perDay).toBe(60)
+    // ...and it stops existing at midnight
+    const tomorrow = endOfDay(now) + 1000
+    expect(activeBonusMins(granted, tomorrow)).toBe(0)
+    expect(effectiveQuota(granted, tomorrow).perDay).toBe(60)
   })
 
   it('is nothing at all when none was granted', () => {
@@ -119,13 +121,13 @@ describe('bonus time', () => {
     expect(effectiveQuota({ quota: limits }, now).perDay).toBe(60)
   })
 
-  it("this week's limits replace the standing ones until the week is out", () => {
+  it("today's limits replace the standing ones until midnight", () => {
     const overridden = {
       quota: limits,
-      week: { limits: { ...limits, perDay: 15 }, until: endOfWeek(now) },
+      day: { limits: { ...limits, perDay: 15 }, until: endOfDay(now) },
     }
     expect(effectiveQuota(overridden, now).perDay).toBe(15)
-    expect(effectiveQuota(overridden, endOfWeek(now) + 1000).perDay).toBe(60) // back to standing
+    expect(effectiveQuota(overridden, endOfDay(now) + 1000).perDay).toBe(60) // back to standing
   })
 
   it('the tightest limit is the one that stops a child', () => {
@@ -137,11 +139,11 @@ describe('bonus time', () => {
     expect(state.blocked).toBe(false)
   })
 
-  it('ends the week it was granted in, not seven days later', () => {
-    const end = endOfWeek(now)
-    expect(new Date(end).getDay()).toBe(0) // a Sunday
+  it('ends at the next midnight, not 24 hours later', () => {
+    const end = endOfDay(now)
+    expect(new Date(end).getHours()).toBe(0)
     expect(end).toBeGreaterThan(now)
-    expect(end - now).toBeLessThan(7 * 86_400_000)
+    expect(end - now).toBeLessThan(86_400_000)
   })
 })
 
@@ -168,7 +170,7 @@ describe('granting through the store', () => {
   })
 })
 
-describe('overriding this week from the store', () => {
+describe('overriding today from the store', () => {
   function fakeStorage() {
     let store = {}
     return {
@@ -185,21 +187,21 @@ describe('overriding this week from the store', () => {
   it('replaces the limits for the week and leaves the standing ones alone', () => {
     const { result } = renderHook(() => useSettings())
     act(() => result.current.setQuota(limits))
-    act(() => result.current.setWeekLimits({ ...limits, perDay: 15 }))
+    act(() => result.current.setDayLimits({ ...limits, perDay: 15 }))
 
     expect(effectiveQuota(result.current.settings).perDay).toBe(15) // in force
     expect(result.current.settings.quota.perDay).toBe(60) // untouched underneath
 
-    act(() => result.current.clearWeekOverride())
+    act(() => result.current.clearDayOverride())
     expect(effectiveQuota(result.current.settings).perDay).toBe(60)
   })
 
-  it('keeps a grant when the week is overridden, and the override when time is granted', () => {
+  it('keeps a grant when today is overridden, and the override when time is granted', () => {
     const { result } = renderHook(() => useSettings())
     act(() => result.current.setQuota(limits))
 
     act(() => result.current.addBonusMins(30))
-    act(() => result.current.setWeekLimits({ ...limits, perDay: 15 }))
+    act(() => result.current.setDayLimits({ ...limits, perDay: 15 }))
     // the two are one object: setting limits must not drop the granted minutes
     expect(effectiveQuota(result.current.settings).perDay).toBe(45)
 
@@ -208,7 +210,7 @@ describe('overriding this week from the store', () => {
   })
 })
 
-describe('the week override and the monthly limit', () => {
+describe('the day override and the longer limits', () => {
   function fakeStorage() {
     let store = {}
     return { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v) }, removeItem: k => { delete store[k] } }
@@ -216,11 +218,11 @@ describe('the week override and the monthly limit', () => {
   beforeEach(() => vi.stubGlobal('localStorage', fakeStorage()))
   afterEach(() => vi.unstubAllGlobals())
 
-  it('carries the standing monthly cap through a week that does not mention it', () => {
+  it('carries the standing weekly and monthly caps through a day that does not mention them', () => {
     const { result } = renderHook(() => useSettings())
     act(() => result.current.setQuota({ per6h: null, perDay: 60, perWeek: null, perMonth: 600 }))
-    // the week's dialog offers no month, so it saves three periods
-    act(() => result.current.setWeekLimits({ per6h: null, perDay: 15, perWeek: null }))
+    // today's dialog offers neither week nor month, so it saves two periods
+    act(() => result.current.setDayLimits({ per6h: null, perDay: 15 }))
 
     const inForce = effectiveQuota(result.current.settings)
     expect(inForce.perDay).toBe(15) // overridden
@@ -259,5 +261,27 @@ describe('shortDuration', () => {
     expect(shortDuration(44640)).toBe('31d') // a month, not 44640
     expect(shortDuration(90)).toBe('90') // neither whole hours nor days
     expect(shortDuration(null)).toBe('∞')
+  })
+})
+
+describe('the top of every scale is “no limit”, not a number', () => {
+  it('the largest settable limit is one step below the period itself', () => {
+    // a cap of six hours inside a rolling six hours forbids nothing, so it was
+    // "no limit" wearing a number — the scale stops one step short of it
+    const by = Object.fromEntries(QUOTA_PERIODS.map(p => [p.key, p]))
+    expect(lastFiniteLimit(by.per6h)).toBe(345) // 5h45m, not 6h
+    expect(lastFiniteLimit(by.perDay)).toBe(23 * 60)
+    expect(lastFiniteLimit(by.perWeek)).toBe(7 * 24 * 60 - 240)
+    expect(lastFiniteLimit(by.perMonth)).toBe(30 * 24 * 60)
+  })
+
+  it('a stored limit that reaches its period is kept as no limit', () => {
+    const stored = { per6h: 360, perDay: 1440, perWeek: 5000, perMonth: null }
+    expect(normalizeQuota(stored)).toEqual({
+      per6h: null, // 6h in 6h forbids nothing
+      perDay: null, // ...and a day in a day
+      perWeek: 5000, // a real cap survives untouched
+      perMonth: null,
+    })
   })
 })
