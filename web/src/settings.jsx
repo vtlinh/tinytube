@@ -635,7 +635,7 @@ function NameRow({ value, onChange }) {
   useEffect(() => setText(value), [value])
   return (
     <div className="d-flex align-items-center gap-3 mb-4">
-      <span className="text-secondary text-nowrap">
+      <span className="settings-label text-nowrap">
         <i className="fa-sharp-duotone fa-regular fa-child me-2" />
         Name
       </span>
@@ -746,7 +746,7 @@ function BirthdayRow({ value, onChange }) {
   return (
     <div className="d-flex align-items-center gap-3 mb-4">
       <span
-        className="text-secondary text-nowrap"
+        className="settings-label text-nowrap"
         title="Your child’s birthday — only channels rated for their age are shown"
       >
         <i className="fa-duotone fa-solid fa-children me-2" />
@@ -890,7 +890,7 @@ function QuotaRow({ store }) {
   return (
     <div className="mb-4">
       <div className="d-flex align-items-center gap-3">
-        <span className="text-secondary text-nowrap">
+        <span className="settings-label text-nowrap">
           <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
           Quota
         </span>
@@ -1063,7 +1063,7 @@ function VideoLengthRow({ value: [minMins, maxMins], onChange }) {
           the room to be dragged is worth more than one with words in it */}
       <div className="d-flex align-items-center gap-3 mb-1">
         <span
-          className="text-secondary text-nowrap"
+          className="settings-label text-nowrap"
           title="Show only videos between these lengths — either end can be “any”"
         >
           <i className="fa-duotone fa-solid fa-video-arrow-up-right me-2" />
@@ -1115,7 +1115,7 @@ function ApiKeyRow({ apiKey, onChange }) {
     <div className="mb-4">
       <div className="d-flex align-items-center gap-3">
         <span
-          className="text-secondary text-nowrap"
+          className="settings-label text-nowrap"
           title="Required only for adding new channels"
         >
           <i className="fa-sharp-duotone fa-regular fa-key me-2" />
@@ -1244,7 +1244,7 @@ function SearchRow({ apiKey, store, db }) {
   return (
     <div className="mb-4">
       <div className="d-flex align-items-center gap-3">
-        <span className="text-secondary text-nowrap">
+        <span className="settings-label text-nowrap">
           <i className="fa-brands fa-youtube me-2" />
           Add Channel
         </span>
