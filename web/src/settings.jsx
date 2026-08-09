@@ -22,6 +22,7 @@ import {
   minuteLabel,
   limitLabel,
   clampLengthRange,
+  settingsLock,
   PLAYBACK_IN_ORDER,
   PLAYBACK_RANDOM,
   hydrateChannel,
@@ -63,6 +64,11 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
   // 'settings' | 'channels' | 'stats' — the bottom bar below switches
   const [tab, setTab] = useState('settings')
   const titles = { settings: 'Parents Mode', channels: 'Channels', stats: 'Stats' }
+  /* Locked when a child is the one signed in, or when nobody is. Everything
+     below is wrapped in a disabled fieldset; the header is NOT, because
+     signing in is the only way out of either state and the control that does
+     it lives up there. */
+  const lock = settingsLock(store.children, sync?.session)
 
   return (
     <div className="settings container-xl py-4">
@@ -82,13 +88,24 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
         </div>
         <div className="d-flex align-items-center justify-content-end gap-3" style={{ flex: 1 }}>
           <RefreshButton sync={sync} />
-          <HeaderMenu store={store} sync={sync} />
+          <HeaderMenu store={store} sync={sync} locked={lock} />
         </div>
       </div>
 
+      {lock && <LockNotice lock={lock} />}
+
+      {/* fieldset[disabled] turns off every form control inside it in one
+          stroke; the class adds pointer-events:none, because the two sliders
+          are driven by a plain div that a disabled fieldset cannot reach. */}
+      <fieldset disabled={!!lock} className={lock ? 'settings-locked' : undefined}>
       {tab === 'settings' && (
         <>
           <NameRow value={settings.childName} onChange={store.renameChild} />
+          <ChildEmailRow
+            value={settings.email}
+            signedInAs={sync?.session?.email}
+            onChange={store.setChildEmail}
+          />
           <BirthdayRow value={settings.birthday} onChange={store.setBirthday} />
           <QuotaRow store={store} />
           <VideoLengthRow
@@ -111,6 +128,7 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
         </>
       )}
       {tab === 'stats' && <StatsTab watchStore={watchStore} settings={settings} />}
+      </fieldset>
 
       <nav className="bottom-tabs fixed-bottom d-flex border-top">
         <TabButton label="Settings" icon="fa-gear" on={tab === 'settings'} onClick={() => setTab('settings')} />
@@ -216,6 +234,79 @@ function ConfirmModal({ title, body, onConfirm, onCancel, confirmLabel = 'Delete
  * Immediate-effect, like everything else on this screen: switching child
  * changes the grid and the quota under you at once.
  */
+/** Why the controls below are greyed out, and what to do about it. Always
+ * paired with a live sign-in control in the header — a locked screen that
+ * cannot explain itself or be unlocked is indistinguishable from a broken
+ * one. */
+function LockNotice({ lock }) {
+  const child = lock.kind === 'child'
+  return (
+    <div className="alert alert-warning d-flex align-items-center gap-3" role="alert">
+      <i className={`fa-sharp-duotone fa-regular ${child ? 'fa-lock' : 'fa-right-to-bracket'} fs-4`} />
+      <div>
+        {child ? (
+          <>
+            Signed in as <strong>{lock.name}</strong> ({lock.email}). A grown-up needs to sign in
+            with their own account to change anything here.
+          </>
+        ) : (
+          <>Sign in with a grown-up’s account to change these settings.</>
+        )}
+        <div className="small mt-1">Use the menu at the top right.</div>
+      </div>
+    </div>
+  )
+}
+
+/** The child's own Google account, so that a child signing in on a shared
+ * device is RECOGNISED as one and these controls lock. Optional and blank by
+ * default — most children have no account, and this does nothing until one
+ * signs in with it. */
+function ChildEmailRow({ value, signedInAs, onChange }) {
+  const [text, setText] = useState(value ?? '')
+  const [error, setError] = useState(null)
+  useEffect(() => setText(value ?? ''), [value])
+
+  const commit = next => {
+    setText(next)
+    const clean = next.trim().toLowerCase()
+    /* The one edit that cannot be undone from inside this screen: giving a
+       child the address the parent is signed in with locks the parent out,
+       and every route back — sign out, sign in again — lands on a lock too.
+       So it is refused rather than warned about. */
+    if (clean && clean === String(signedInAs ?? '').trim().toLowerCase()) {
+      setError('That is the account you are signed in with — it would lock you out of this screen.')
+      return
+    }
+    setError(null)
+    onChange(clean || null)
+  }
+
+  return (
+    <div className="mb-4">
+      <div className="d-flex align-items-center gap-3">
+        <span
+          className="settings-label text-nowrap"
+          title="If this child signs in with this account, these settings lock. Leave blank if they have no account."
+        >
+          <i className="fa-sharp-duotone fa-regular fa-envelope me-2" />
+          Email
+        </span>
+        <input
+          type="email"
+          className={`form-control ${error ? 'is-invalid' : ''}`}
+          aria-label="Child’s email"
+          placeholder="none"
+          autoComplete="off"
+          value={text}
+          onChange={e => commit(e.target.value)}
+        />
+      </div>
+      {error && <div className="text-danger small mt-1">{error}</div>}
+    </div>
+  )
+}
+
 /** Pull from the DB right now, past the throttle. Everything syncs on its own
  * — on boot, on a child switch, on every playback — so this exists for the
  * moment a parent has just changed something on the other device and wants to
@@ -251,7 +342,7 @@ function RefreshButton({ sync = {} }) {
   )
 }
 
-function HeaderMenu({ store, sync = {} }) {
+function HeaderMenu({ store, sync = {}, locked = null }) {
   const { session, signIn, signOut } = sync
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
@@ -343,6 +434,7 @@ function HeaderMenu({ store, sync = {} }) {
                 key={child.id}
                 type="button"
                 className={`dropdown-item ${child.id === store.settings.childId ? 'active' : ''}`}
+                disabled={!!locked}
                 onClick={() => {
                   store.switchChild(child.id)
                   setOpen(false)
@@ -356,7 +448,7 @@ function HeaderMenu({ store, sync = {} }) {
             ))}
             <button
               type="button"
-              className="dropdown-item"
+              className="dropdown-item" disabled={!!locked}
               onClick={() => {
                 setOpen(false)
                 setAdding(true)
@@ -369,6 +461,7 @@ function HeaderMenu({ store, sync = {} }) {
               <button
                 type="button"
                 className="dropdown-item text-danger"
+                disabled={!!locked}
                 onClick={() => {
                   store.removeChild(store.settings.childId)
                   setOpen(false)
@@ -380,13 +473,13 @@ function HeaderMenu({ store, sync = {} }) {
             )}
             <hr className="dropdown-divider" />
             <h6 className="dropdown-header">{store.settings.childName}’s channels</h6>
-            <button type="button" className="dropdown-item" onClick={doExport}>
+            <button type="button" className="dropdown-item" disabled={!!locked} onClick={doExport}>
               <i className="fa-sharp-duotone fa-regular fa-file-export me-2" />
               Export
             </button>
             <button
               type="button"
-              className="dropdown-item"
+              className="dropdown-item" disabled={!!locked}
               onClick={() => {
                 setOpen(false)
                 fileInput.current?.click()
