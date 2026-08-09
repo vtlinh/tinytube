@@ -14,6 +14,8 @@ import {
   endOfWeek,
   useSettings,
   DEFAULTS,
+  QUOTA_PERIODS,
+  shortDuration,
 } from '../src/lib.js'
 
 describe('the length scale', () => {
@@ -223,5 +225,39 @@ describe('the week override and the monthly limit', () => {
     const inForce = effectiveQuota(result.current.settings)
     expect(inForce.perDay).toBe(15) // overridden
     expect(inForce.perMonth).toBe(600) // NOT dropped: an override may not remove a cap
+  })
+})
+
+describe('each quota period has its own scale', () => {
+  it('runs to the whole window it governs, in a step worth dragging', () => {
+    const by = Object.fromEntries(QUOTA_PERIODS.map(p => [p.key, p]))
+    expect(by.per6h).toMatchObject({ maxMins: 360, stepMins: 15 })
+    expect(by.perDay).toMatchObject({ maxMins: 1440, stepMins: 60 })
+    expect(by.perWeek).toMatchObject({ maxMins: 10080, stepMins: 240 })
+    expect(by.perMonth).toMatchObject({ maxMins: 44640, stepMins: 1440 }) // 31 days
+  })
+
+  it('every scale divides into whole stops, so no limit is unreachable', () => {
+    for (const { key, maxMins, stepMins } of QUOTA_PERIODS) {
+      expect(maxMins % stepMins, `${key} does not divide evenly`).toBe(0)
+      // and the slider stays a draggable length rather than a thousand steps
+      expect(maxMins / stepMins).toBeLessThanOrEqual(48)
+    }
+  })
+
+  it('the default daily limit lands exactly on a stop', () => {
+    const day = QUOTA_PERIODS.find(p => p.key === 'perDay')
+    expect(DEFAULTS.quota.perDay % day.stepMins).toBe(0)
+  })
+})
+
+describe('shortDuration', () => {
+  it('says one thing, never two', () => {
+    expect(shortDuration(45)).toBe('45') // under an hour: bare minutes
+    expect(shortDuration(180)).toBe('3h')
+    expect(shortDuration(1440)).toBe('1d')
+    expect(shortDuration(44640)).toBe('31d') // a month, not 44640
+    expect(shortDuration(90)).toBe('90') // neither whole hours nor days
+    expect(shortDuration(null)).toBe('∞')
   })
 })

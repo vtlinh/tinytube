@@ -879,11 +879,16 @@ const EMPTY_USAGE = { window: { start: null, secs: 0 }, days: {}, hours: {} }
    has the least left is the one that stops them. Each is minutes, or null for
    "no limit over this period" — which is not the same as 0, and 0 still means
    what it always did: no watching at all. */
+/* Each period's slider runs up to THE WHOLE PERIOD — six hours, a day, a week,
+   a month — because a limit that cannot reach the length of the window it
+   governs is a scale that lies about its own range. The step is whatever is
+   worth dragging at that size: quarter hours inside six, whole hours inside a
+   day, four hours inside a week, whole days inside a month. */
 export const QUOTA_PERIODS = [
-  { key: 'per6h', label: 'Every 6 hours', hint: 'a rolling six hours' },
-  { key: 'perDay', label: 'Each day', hint: 'resets at midnight' },
-  { key: 'perWeek', label: 'Each week', hint: 'resets on Sunday' },
-  { key: 'perMonth', label: 'Each month', hint: 'resets on the 1st' },
+  { key: 'per6h', label: 'Every 6 hours', hint: 'a rolling six hours', maxMins: 6 * 60, stepMins: 15 },
+  { key: 'perDay', label: 'Each day', hint: 'resets at midnight', maxMins: 24 * 60, stepMins: 60 },
+  { key: 'perWeek', label: 'Each week', hint: 'resets on Sunday', maxMins: 7 * 24 * 60, stepMins: 4 * 60 },
+  { key: 'perMonth', label: 'Each month', hint: 'resets on the 1st', maxMins: 31 * 24 * 60, stepMins: 24 * 60 },
 ]
 
 const pad2 = n => String(n).padStart(2, '0')
@@ -894,6 +899,19 @@ export function fmtMins(mins) {
   const h = Math.floor(mins / 60)
   const m = Math.round(mins % 60)
   return h && m ? `${h}h ${m}m` : h ? `${h}h` : `${m}m`
+}
+
+/**
+ * ONE TOKEN, never compounded: minutes below an hour, whole hours, whole days.
+ * A thumb has room for three characters, and "2d" beats "2880" for a monthly
+ * cap as surely as "45" beats "45m" for a short one.
+ */
+export function shortDuration(mins) {
+  if (mins == null || !Number.isFinite(mins)) return '\u221e'
+  if (mins < 60) return String(mins)
+  if (mins % (24 * 60) === 0) return `${mins / (24 * 60)}d`
+  if (mins % 60 === 0) return `${mins / 60}h`
+  return String(mins)
 }
 
 /** Seconds used in the current 12h window; 0 if none, expired, or the clock ran backwards. */

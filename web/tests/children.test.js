@@ -13,6 +13,7 @@ import {
   watchKey,
   CHILD_DEFAULTS,
   FIRST_CHILD_ID,
+  exportChannels,
 } from '../src/lib.js'
 
 function fakeStorage() {
@@ -185,5 +186,43 @@ describe('the enable toggle is gone', () => {
       },
     })
     expect(s.children[0].overrides).toEqual({ UCb: { min_age: 4 } })
+  })
+})
+
+describe('import and export are one child’s business', () => {
+  it('exports the ACTIVE child’s channels, never another’s', () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => result.current.addCustomChannel({ channel_id: 'UCoookXUzPciGrEZEXmh4Jjg', min_age: 3, max_age: 6 }))
+
+    act(() => result.current.addChild('Bob'))
+    act(() => result.current.addCustomChannel({ channel_id: 'UCG2CL6EUjG8TVT1Tpl9nJdg', min_age: 8, max_age: 12 }))
+
+    const bobs = exportChannels(result.current.settings)
+    expect(bobs.child).toBe('Bob')
+    expect(bobs.customChannels.map(c => c.channel_id)).toEqual(['UCG2CL6EUjG8TVT1Tpl9nJdg'])
+
+    act(() => result.current.switchChild(FIRST_CHILD_ID))
+    const firsts = exportChannels(result.current.settings)
+    expect(firsts.customChannels.map(c => c.channel_id)).toEqual(['UCoookXUzPciGrEZEXmh4Jjg'])
+  })
+
+  it('imports into the ACTIVE child alone, leaving the others untouched', () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => result.current.addCustomChannel({ channel_id: 'UCoookXUzPciGrEZEXmh4Jjg', min_age: 3, max_age: 6 }))
+    act(() => result.current.addChild('Bob'))
+
+    act(() =>
+      result.current.importChannels({
+        customChannels: [{ channel_id: 'UC5PYHgAzJ1wLEidB58SK6Xw', min_age: 1, max_age: 15 }],
+        overrides: {},
+        groups: [],
+        groupOf: {},
+      }),
+    )
+    expect(result.current.settings.customChannels.map(c => c.channel_id)).toEqual(['UC5PYHgAzJ1wLEidB58SK6Xw'])
+
+    // the first child kept theirs, untouched by Bob's import
+    act(() => result.current.switchChild(FIRST_CHILD_ID))
+    expect(result.current.settings.customChannels.map(c => c.channel_id)).toEqual(['UCoookXUzPciGrEZEXmh4Jjg'])
   })
 })
