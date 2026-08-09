@@ -620,6 +620,368 @@ async function uploads(request) {
   return json({ channel, videos });
 }
 
+/* ------------------------------------------------------------------------- *
+ * SYNC. Per-account state for the WEB APP (web/), in D1: settings, watch
+ * history and quota usage, keyed by a Google account's email. The phone apps
+ * know nothing of these routes.
+ *
+ * These routes take caller input, so they make the same argument /uploads and
+ * /channel make — and it has to hold, or they don't belong in this Worker:
+ *
+ *   - None reads env.GH_TOKEN. `env` is not passed to any of them; the router
+ *     hands over env.DB (the D1 binding) and nothing else.
+ *   - The only fetch() in this section is JWKS_URL, a constant. The caller's
+ *     token is never fetched, never forwarded, never echoed — it is VERIFIED,
+ *     against Google's published keys, with WebCrypto.
+ *   - Every other input is matched against a fixed pattern before use: video
+ *     ids against VIDEO_ID, bucket keys against DAY_KEY/HOUR_KEY, the device
+ *     id against DEVICE_ID, the session token against SESSION_TOKEN. Row
+ *     counts and byte sizes are capped. Everything reaches SQL as a bound
+ *     parameter or through json_each over a string this code re-serialized
+ *     from validated values — caller bytes never meet SQL text.
+ *   - The identity key (email) comes out of the VERIFIED token, never from the
+ *     request body, so one account cannot name another account's rows.
+ *
+ * Sessions: /sync/login trades a valid Google ID token for a bearer token this
+ * Worker mints. Only the SHA-256 of that token is stored, so a leaked database
+ * cannot impersonate anyone. Google ID tokens expire hourly; the session lasts
+ * 90 days, which is what makes background pushes possible without re-prompting
+ * a signed-in parent.
+ *
+ * Merging is last-write-wins PER ROW (per video, per settings blob), decided
+ * by the client's updatedAt clock — fine for a family's devices. Usage buckets
+ * are per DEVICE and only ever grow, so the upsert takes the larger value;
+ * /sync/pull sums across devices, which is what lets the watch quota hold when
+ * a child switches devices.
+ * ------------------------------------------------------------------------- */
+
+/* The web app's OAuth client id (a PUBLIC identifier, compiled into the page
+   too). Empty disables /sync/* with a 503 — the deploy that fills it in is the
+   deploy that turns sync on. */
+export const GOOGLE_CLIENT_ID = "";
+
+const JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
+const GOOGLE_ISSUERS = new Set(["accounts.google.com", "https://accounts.google.com"]);
+export const JWT = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+export const SESSION_TOKEN = /^[A-Za-z0-9_-]{43}$/; // base64url of 32 random bytes
+export const DEVICE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+export const HOUR_KEY = /^\d{1,10}$/; // epoch hours; 10 digits reaches year 116k
+const SESSION_TTL_MS = 90 * 86_400_000;
+const MAX_BODY_BYTES = 256 * 1024;
+const MAX_SETTINGS_BYTES = 64 * 1024;
+const MAX_WATCHED_ROWS = 500; // the web app's own LRU cap
+const MAX_DAY_BUCKETS = 366; // the web app prunes past these horizons
+const MAX_HOUR_BUCKETS = 48;
+
+export function b64urlToBytes(s) {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
+export function bytesToB64url(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** header and payload of a JWT, WITHOUT verifying it — the caller must. Null on garbage. */
+export function decodeJwt(token) {
+  if (typeof token !== "string" || token.length > 4096 || !JWT.test(token)) return null;
+  try {
+    const [h, p] = token.split(".");
+    const parse = (part) => JSON.parse(new TextDecoder().decode(b64urlToBytes(part)));
+    return { header: parse(h), payload: parse(p) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The claim checks, apart from the signature so a plain node test can pin
+ * them: issuer is Google, audience is OUR client id, not expired, and the
+ * email is present and verified. Returns the email (lowercased) or null.
+ */
+export function claimsEmail(payload, clientId, nowMs) {
+  if (!payload || !clientId) return null;
+  if (!GOOGLE_ISSUERS.has(payload.iss)) return null;
+  if (payload.aud !== clientId) return null;
+  if (!(Number(payload.exp) * 1000 > nowMs)) return null;
+  if (payload.email_verified !== true && payload.email_verified !== "true") return null;
+  const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+  if (!email || email.length > 320 || !email.includes("@")) return null;
+  return email;
+}
+
+/* Google rotates these keys; an hour of cache is what their own CDN headers
+   suggest. Per-isolate, like everything else cached here. */
+let jwksCache = null; // { keysById: Map, fetchedAt }
+
+async function googleKey(kid) {
+  if (!jwksCache || Date.now() - jwksCache.fetchedAt > 3600_000 || !jwksCache.keysById.has(kid)) {
+    const resp = await fetch(JWKS_URL);
+    if (!resp.ok) throw new Error(`jwks: HTTP ${resp.status}`);
+    const { keys } = await resp.json();
+    const keysById = new Map();
+    for (const jwk of keys ?? []) {
+      if (jwk.kty === "RSA" && jwk.alg === "RS256" && jwk.kid) {
+        keysById.set(
+          jwk.kid,
+          await crypto.subtle.importKey(
+            "jwk",
+            jwk,
+            { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+            false,
+            ["verify"],
+          ),
+        );
+      }
+    }
+    jwksCache = { keysById, fetchedAt: Date.now() };
+  }
+  return jwksCache.keysById.get(kid) ?? null;
+}
+
+/** Signature + claims. The email, or null for anything short of fully valid. */
+async function verifyGoogleToken(token, clientId) {
+  const decoded = decodeJwt(token);
+  if (!decoded || decoded.header.alg !== "RS256") return null;
+  const key = await googleKey(decoded.header.kid);
+  if (!key) return null;
+  const [h, p, sig] = token.split(".");
+  const ok = await crypto.subtle.verify(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    b64urlToBytes(sig),
+    new TextEncoder().encode(`${h}.${p}`),
+  );
+  if (!ok) return null;
+  return claimsEmail(decoded.payload, clientId, Date.now());
+}
+
+export async function sha256hex(s) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/* CREATE IF NOT EXISTS on first touch per isolate — no migration tooling for
+   four small tables. usage rows are PER DEVICE so a device can re-push its own
+   monotonically growing buckets idempotently; pull SUMs across devices. */
+let schemaReady = null;
+
+function ensureSchema(db) {
+  schemaReady ??= db.batch([
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS sync_sessions (token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)",
+    ),
+    db.prepare("CREATE INDEX IF NOT EXISTS sync_sessions_email ON sync_sessions (email)"),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS sync_settings (email TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL)",
+    ),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS sync_watched (email TEXT NOT NULL, video_id TEXT NOT NULL, pos REAL NOT NULL, dur REAL NOT NULL, completed INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (email, video_id))",
+    ),
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS sync_usage (email TEXT NOT NULL, device_id TEXT NOT NULL, kind TEXT NOT NULL, bucket TEXT NOT NULL, secs INTEGER NOT NULL, PRIMARY KEY (email, device_id, kind, bucket))",
+    ),
+  ]);
+  return schemaReady;
+}
+
+async function readBody(request) {
+  const text = await request.text();
+  if (text.length > MAX_BODY_BYTES) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/** The session's email, or null. Reads `Authorization: Bearer <token>`. */
+async function sessionEmail(request, db) {
+  const auth = request.headers.get("authorization") ?? "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (!SESSION_TOKEN.test(token)) return null;
+  const row = await db
+    .prepare("SELECT email FROM sync_sessions WHERE token_hash = ?1 AND expires_at > ?2")
+    .bind(await sha256hex(token), Date.now())
+    .first();
+  return row?.email ?? null;
+}
+
+async function syncLogin(request, db, clientId) {
+  const body = await readBody(request);
+  const idToken = body?.id_token;
+  if (typeof idToken !== "string" || !JWT.test(idToken) || idToken.length > 4096) {
+    return json({ error: "id_token required" }, 400);
+  }
+  let email;
+  try {
+    email = await verifyGoogleToken(idToken, clientId);
+  } catch {
+    return json({ error: "could not reach key server, try again" }, 502);
+  }
+  if (!email) return json({ error: "invalid token" }, 403);
+
+  await ensureSchema(db);
+  const token = bytesToB64url(crypto.getRandomValues(new Uint8Array(32)));
+  const now = Date.now();
+  const expiresAt = now + SESSION_TTL_MS;
+  await db.batch([
+    db.prepare("DELETE FROM sync_sessions WHERE email = ?1 AND expires_at <= ?2").bind(email, now),
+    db.prepare("INSERT INTO sync_sessions (token_hash, email, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)")
+      .bind(await sha256hex(token), email, now, expiresAt),
+  ]);
+  return json({ token, email, expires_at: expiresAt });
+}
+
+async function syncPull(request, db) {
+  await ensureSchema(db);
+  const email = await sessionEmail(request, db);
+  if (!email) return json({ error: "sign in again" }, 401);
+
+  const [settings, watched, usage] = await db.batch([
+    db.prepare("SELECT data, updated_at FROM sync_settings WHERE email = ?1").bind(email),
+    db.prepare(
+      "SELECT video_id, pos, dur, completed, updated_at FROM sync_watched WHERE email = ?1 ORDER BY updated_at DESC LIMIT ?2",
+    ).bind(email, MAX_WATCHED_ROWS),
+    db.prepare(
+      "SELECT kind, bucket, SUM(secs) AS secs FROM sync_usage WHERE email = ?1 GROUP BY kind, bucket",
+    ).bind(email),
+  ]);
+
+  const settingsRow = settings.results[0];
+  const days = {};
+  const hours = {};
+  for (const row of usage.results) (row.kind === "day" ? days : hours)[row.bucket] = row.secs;
+  return json({
+    settings: settingsRow ? { data: JSON.parse(settingsRow.data), updatedAt: settingsRow.updated_at } : null,
+    watched: watched.results.map((r) => ({
+      id: r.video_id,
+      pos: r.pos,
+      dur: r.dur,
+      completed: !!r.completed,
+      updatedAt: r.updated_at,
+    })),
+    usage: { days, hours },
+  });
+}
+
+/** Normalized rows re-serialized from validated values, or null. Exported for the tests. */
+export function validWatchedRows(watched) {
+  if (!Array.isArray(watched) || watched.length > MAX_WATCHED_ROWS) return null;
+  const rows = [];
+  for (const w of watched) {
+    if (!w || !VIDEO_ID.test(w.id ?? "")) return null;
+    const pos = Number(w.pos);
+    const dur = Number(w.dur);
+    const updatedAt = Number(w.updatedAt);
+    if (!Number.isFinite(pos) || pos < 0 || !Number.isFinite(dur) || dur < 0) return null;
+    if (!Number.isInteger(updatedAt) || updatedAt <= 0) return null;
+    rows.push({ id: w.id, pos, dur, completed: w.completed ? 1 : 0, updatedAt });
+  }
+  return rows;
+}
+
+/** {days, hours} with every key and value validated and capped, or null. Exported for the tests. */
+export function validUsageBuckets(usage) {
+  const buckets = (obj, keyPattern, cap, maxSecs) => {
+    if (obj == null) return {};
+    if (typeof obj !== "object" || Array.isArray(obj)) return null;
+    const entries = Object.entries(obj);
+    if (entries.length > cap) return null;
+    const out = {};
+    for (const [k, v] of entries) {
+      const secs = Number(v);
+      if (!keyPattern.test(k) || !Number.isInteger(secs) || secs < 0 || secs > maxSecs) return null;
+      out[k] = secs;
+    }
+    return out;
+  };
+  if (!usage || !DEVICE_ID.test(usage.deviceId ?? "")) return null;
+  const days = buckets(usage.days, DAY_KEY, MAX_DAY_BUCKETS, 86_400);
+  const hours = buckets(usage.hours, HOUR_KEY, MAX_HOUR_BUCKETS, 3_600);
+  if (!days || !hours) return null;
+  return { deviceId: usage.deviceId, days, hours };
+}
+
+async function syncPush(request, db) {
+  await ensureSchema(db);
+  const email = await sessionEmail(request, db);
+  if (!email) return json({ error: "sign in again" }, 401);
+  const body = await readBody(request);
+  if (!body) return json({ error: "bad body" }, 400);
+
+  const statements = [];
+
+  if (body.settings != null) {
+    const { data, updatedAt } = body.settings;
+    if (typeof data !== "object" || data === null || Array.isArray(data)) return json({ error: "bad settings" }, 400);
+    const text = JSON.stringify(data);
+    if (text.length > MAX_SETTINGS_BYTES) return json({ error: "settings too large" }, 400);
+    if (!Number.isInteger(updatedAt) || updatedAt <= 0) return json({ error: "bad settings" }, 400);
+    statements.push(
+      db.prepare(
+        "INSERT INTO sync_settings (email, data, updated_at) VALUES (?1, ?2, ?3) " +
+          "ON CONFLICT (email) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at " +
+          "WHERE excluded.updated_at > sync_settings.updated_at",
+      ).bind(email, text, updatedAt),
+    );
+  }
+
+  if (body.watched != null) {
+    const rows = validWatchedRows(body.watched);
+    if (!rows) return json({ error: "bad watched" }, 400);
+    if (rows.length) {
+      /* One statement however many rows: json_each over a string THIS code
+         serialized from the validated rows above — caller bytes never meet
+         SQL text, and the 100-bound-parameter limit never comes into play. */
+      statements.push(
+        db.prepare(
+          "INSERT INTO sync_watched (email, video_id, pos, dur, completed, updated_at) " +
+            "SELECT ?1, value ->> 'id', value ->> 'pos', value ->> 'dur', value ->> 'completed', value ->> 'updatedAt' " +
+            "FROM json_each(?2) WHERE true " +
+            "ON CONFLICT (email, video_id) DO UPDATE SET pos = excluded.pos, dur = excluded.dur, " +
+            "completed = excluded.completed, updated_at = excluded.updated_at " +
+            "WHERE excluded.updated_at > sync_watched.updated_at",
+        ).bind(email, JSON.stringify(rows)),
+      );
+    }
+  }
+
+  if (body.usage != null) {
+    const usage = validUsageBuckets(body.usage);
+    if (!usage) return json({ error: "bad usage" }, 400);
+    for (const [kind, buckets] of [["day", usage.days], ["hour", usage.hours]]) {
+      if (!Object.keys(buckets).length) continue;
+      /* A device's own bucket only ever grows, so the larger value wins —
+         re-pushing is idempotent and an old device can't shrink a newer count. */
+      statements.push(
+        db.prepare(
+          "INSERT INTO sync_usage (email, device_id, kind, bucket, secs) " +
+            `SELECT ?1, ?2, '${kind}', key, value FROM json_each(?3) WHERE true ` +
+            "ON CONFLICT (email, device_id, kind, bucket) DO UPDATE SET secs = excluded.secs " +
+            "WHERE excluded.secs > sync_usage.secs",
+        ).bind(email, usage.deviceId, JSON.stringify(buckets)),
+      );
+    }
+  }
+
+  if (statements.length) await db.batch(statements);
+  return json({ ok: true });
+}
+
+function corsPreflight() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "POST, OPTIONS",
+      "access-control-allow-headers": "content-type, authorization",
+      "access-control-max-age": "86400",
+    },
+  });
+}
+
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -662,6 +1024,22 @@ export default {
     if (url.pathname === "/channel") {
       if (request.method !== "POST") return json({ error: "use POST" }, 405);
       return channel(request);
+    }
+
+    /* The web app's per-account state. Same terms again, one binding wider:
+       `env` itself is not passed on — the handlers get env.DB, the D1 binding,
+       and can reach nothing else; the GitHub credential stays in the release
+       path. Everything else these routes trust is either verified against
+       Google's published keys or matched against a fixed pattern — see the
+       SYNC section above. 503 until both the binding and the client id exist:
+       sync is off until the deploy that turns it on. */
+    if (url.pathname.startsWith("/sync/")) {
+      if (request.method === "OPTIONS") return corsPreflight();
+      if (request.method !== "POST") return json({ error: "use POST" }, 405);
+      if (!env.DB || !GOOGLE_CLIENT_ID) return json({ error: "sync not configured" }, 503);
+      if (url.pathname === "/sync/login") return syncLogin(request, env.DB, GOOGLE_CLIENT_ID);
+      if (url.pathname === "/sync/pull") return syncPull(request, env.DB);
+      if (url.pathname === "/sync/push") return syncPush(request, env.DB);
     }
 
     return new Response("not found\n", { status: 404 });

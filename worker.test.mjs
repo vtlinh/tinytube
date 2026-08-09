@@ -466,3 +466,117 @@ test("content types come off the asset name", () => {
   assert.equal(contentType("TinyTube-unsigned.ipa"), "application/octet-stream");
   assert.equal(contentType("app-release.apk"), "application/vnd.android.package-archive");
 });
+
+/* --------------------------------------------------------------------------
+ * SYNC: the verification and validation half that a plain node test can pin.
+ * The signature check itself needs Google's live keys and a real token, so
+ * what is tested here is everything AROUND it: claim checks, input patterns,
+ * and the validators that stand between a caller's body and the SQL.
+ * ------------------------------------------------------------------------ */
+
+import {
+  JWT,
+  SESSION_TOKEN,
+  DEVICE_ID,
+  DAY_KEY,
+  HOUR_KEY,
+  b64urlToBytes,
+  bytesToB64url,
+  decodeJwt,
+  claimsEmail,
+  sha256hex,
+  validWatchedRows,
+  validUsageBuckets,
+} from "./worker.js";
+
+const b64url = obj => bytesToB64url(new TextEncoder().encode(JSON.stringify(obj)));
+const fakeJwt = (header, payload) => `${b64url(header)}.${b64url(payload)}.${bytesToB64url(new Uint8Array(4))}`;
+
+test("base64url round-trips", () => {
+  const bytes = new Uint8Array([0, 1, 2, 250, 251, 252, 253, 254, 255]);
+  assert.deepEqual(b64urlToBytes(bytesToB64url(bytes)), bytes);
+  assert.ok(!bytesToB64url(bytes).match(/[+/=]/));
+});
+
+test("session tokens from 32 bytes match the pattern the routes demand", () => {
+  assert.ok(SESSION_TOKEN.test(bytesToB64url(new Uint8Array(32).fill(7))));
+  assert.ok(!SESSION_TOKEN.test("short"));
+  assert.ok(!SESSION_TOKEN.test("x".repeat(44)));
+});
+
+test("sha256hex is the reference SHA-256", async () => {
+  // openssl: echo -n abc | openssl dgst -sha256
+  assert.equal(await sha256hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+});
+
+test("decodeJwt reads header and payload and refuses garbage", () => {
+  const decoded = decodeJwt(fakeJwt({ alg: "RS256", kid: "k1" }, { iss: "accounts.google.com" }));
+  assert.equal(decoded.header.kid, "k1");
+  assert.equal(decoded.payload.iss, "accounts.google.com");
+  assert.equal(decodeJwt("not-a-jwt"), null);
+  assert.equal(decodeJwt(`${b64url({})}.${"%%%"}.x`), null);
+  assert.equal(decodeJwt("a.b"), null);
+  assert.ok(JWT.test(fakeJwt({}, {})));
+});
+
+test("claimsEmail accepts exactly a live, verified Google token for OUR client", () => {
+  const now = 1_700_000_000_000;
+  const good = {
+    iss: "https://accounts.google.com",
+    aud: "client-1",
+    exp: now / 1000 + 60,
+    email: "Parent@Example.com",
+    email_verified: true,
+  };
+  assert.equal(claimsEmail(good, "client-1", now), "parent@example.com");
+  assert.equal(claimsEmail({ ...good, iss: "accounts.google.com" }, "client-1", now), "parent@example.com");
+  // every single deviation refuses
+  assert.equal(claimsEmail({ ...good, iss: "evil.example" }, "client-1", now), null);
+  assert.equal(claimsEmail({ ...good, aud: "client-2" }, "client-1", now), null, "someone else's token");
+  assert.equal(claimsEmail({ ...good, exp: now / 1000 - 1 }, "client-1", now), null, "expired");
+  assert.equal(claimsEmail({ ...good, email_verified: false }, "client-1", now), null);
+  assert.equal(claimsEmail({ ...good, email: undefined }, "client-1", now), null);
+  assert.equal(claimsEmail(good, "", now), null, "no client id configured means nothing validates");
+  assert.equal(claimsEmail(null, "client-1", now), null);
+});
+
+test("validWatchedRows normalizes good rows and refuses each bad shape whole", () => {
+  const rows = validWatchedRows([
+    { id: "dQw4w9WgXcQ", pos: 10.5, dur: 212, completed: true, updatedAt: 123 },
+    { id: "aqz-KE-bpKQ", pos: 0, dur: 0, completed: false, updatedAt: 456 },
+  ]);
+  assert.deepEqual(rows, [
+    { id: "dQw4w9WgXcQ", pos: 10.5, dur: 212, completed: 1, updatedAt: 123 },
+    { id: "aqz-KE-bpKQ", pos: 0, dur: 0, completed: 0, updatedAt: 456 },
+  ]);
+  assert.deepEqual(validWatchedRows([]), []);
+  const good = { id: "dQw4w9WgXcQ", pos: 1, dur: 2, completed: false, updatedAt: 3 };
+  assert.equal(validWatchedRows([{ ...good, id: "short" }]), null);
+  assert.equal(validWatchedRows([{ ...good, id: "x".repeat(11) + "!" }]), null);
+  assert.equal(validWatchedRows([{ ...good, pos: -1 }]), null);
+  assert.equal(validWatchedRows([{ ...good, pos: Infinity }]), null);
+  assert.equal(validWatchedRows([{ ...good, updatedAt: 1.5 }]), null);
+  assert.equal(validWatchedRows([{ ...good, updatedAt: 0 }]), null);
+  assert.equal(validWatchedRows("nope"), null);
+  assert.equal(validWatchedRows(Array.from({ length: 501 }, () => good)), null, "over the row cap");
+});
+
+test("validUsageBuckets demands a device id and fixed-pattern bucket keys", () => {
+  const deviceId = "1b671a64-40d5-491e-99b0-da01ff1f3341";
+  const usage = validUsageBuckets({
+    deviceId,
+    days: { "2026-08-09": 3600 },
+    hours: { "496728": 1800 },
+  });
+  assert.deepEqual(usage, { deviceId, days: { "2026-08-09": 3600 }, hours: { 496728: 1800 } });
+  assert.deepEqual(validUsageBuckets({ deviceId }), { deviceId, days: {}, hours: {} }, "absent halves are empty");
+  assert.equal(validUsageBuckets({ deviceId: "not-a-uuid", days: {} }), null);
+  assert.equal(validUsageBuckets({ deviceId, days: { "08/09/2026": 1 } }), null, "day key pattern");
+  assert.equal(validUsageBuckets({ deviceId, hours: { abc: 1 } }), null, "hour key pattern");
+  assert.equal(validUsageBuckets({ deviceId, days: { "2026-08-09": -1 } }), null);
+  assert.equal(validUsageBuckets({ deviceId, days: { "2026-08-09": 90_000 } }), null, "more than a day of seconds");
+  assert.equal(validUsageBuckets({ deviceId, hours: { "496728": 3_700 } }), null, "more than an hour of seconds");
+  assert.equal(validUsageBuckets({ deviceId, days: [] }), null);
+  assert.equal(validUsageBuckets(null), null);
+  assert.ok(DEVICE_ID.test(deviceId) && DAY_KEY.test("2026-08-09") && HOUR_KEY.test("496728"));
+});

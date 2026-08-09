@@ -1,8 +1,8 @@
 /** Shared non-UI logic: webauthn parent gate, math-gate challenge, channel
- * filtering, and the three localStorage-backed hooks (settings, watch
- * history, gallery data). */
+ * filtering, the three localStorage-backed hooks (settings, watch history,
+ * gallery data), and cross-device sync against the Worker's /sync routes. */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getChannelVideosCached } from './youtubeApi.js'
 
 // ---------------------------------------------------------------------------
@@ -205,7 +205,10 @@ export function useSettings() {
 
   const update = useCallback(patch => {
     setSettings(prev => {
-      const next = { ...prev, ...patch }
+      // updatedAt is the sync LWW clock. Stamped on every edit — unless the
+      // patch carries its own, which is how a pulled remote blob keeps the
+      // stamp it was written under instead of instantly looking newer.
+      const next = { ...prev, updatedAt: Date.now(), ...patch }
       try {
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(next))
       } catch (e) {
@@ -281,12 +284,20 @@ const MAX_ENTRIES = 500
 export const WATCHED_THRESHOLD = 0.95 // beyond this it's just credits/outros
 const LIKED_THRESHOLD = 0.2 // bailed before this -> probably didn't like it
 
+const EMPTY_REMOTE = { days: {}, hours: {} }
+
 function loadWatchStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem(WATCH_KEY)) ?? {}
-    return { lastVideoId: null, watched: {}, ...parsed, usage: { ...EMPTY_USAGE, ...parsed.usage } }
+    return {
+      lastVideoId: null,
+      watched: {},
+      ...parsed,
+      usage: { ...EMPTY_USAGE, ...parsed.usage },
+      remote: { ...EMPTY_REMOTE, ...parsed.remote },
+    }
   } catch {
-    return { lastVideoId: null, watched: {}, usage: EMPTY_USAGE }
+    return { lastVideoId: null, watched: {}, usage: EMPTY_USAGE, remote: EMPTY_REMOTE }
   }
 }
 
@@ -343,7 +354,31 @@ export function useWatchStore() {
     })
   }, [])
 
-  return { watched: store.watched, usage: store.usage, saveProgress, markCompleted, addWatchTime }
+  /* A /sync/pull's answer folded in: watched merges row-wise LWW; the
+     account-wide usage sums land in `remote`, NEVER in `usage` — usage is what
+     this device pushes back up, so folding remote into it would compound
+     everyone's totals on every round trip. */
+  const applyRemote = useCallback(({ watched, usage }) => {
+    setStore(prev => {
+      const next = {
+        ...prev,
+        watched: mergeWatched(prev.watched, watched),
+        remote: usage ? { ...EMPTY_REMOTE, ...usage } : prev.remote,
+      }
+      persist(next)
+      return next
+    })
+  }, [])
+
+  return {
+    watched: store.watched,
+    usage: store.usage,
+    remote: store.remote,
+    saveProgress,
+    markCompleted,
+    addWatchTime,
+    applyRemote,
+  }
 }
 
 /** Interleave lists round-robin: first item of each list, then second of each, ... */
@@ -439,4 +474,218 @@ export function useVideos(settings) {
   )
 
   return { db, channels, error }
+}
+
+// ---------------------------------------------------------------------------
+// sync — cross-device state against the Worker's /sync routes, keyed by a
+// Google account. The parent signs in (behind the parent gate) with Google
+// Identity Services; the Worker trades the ID token for a 90-day session
+// token, and from then on this device pulls on boot and pushes deltas as
+// state changes. Merging is per-row last-write-wins; quota usage is summed
+// across devices by the Worker, which is what makes the watch quota hold when
+// a child switches devices.
+
+/* The Worker (see worker.js's SYNC section) and the web app's OAuth client id
+   (a public identifier). Empty client id = the Sync row does not render and
+   nothing here runs. */
+export const SYNC_URL = 'https://tinytube.vtlinh87.workers.dev'
+export const GOOGLE_CLIENT_ID = ''
+
+const SYNC_KEY = 'tinytube:sync:v1' // {token, email, expiresAt, deviceId, lastPushAt}
+const PUSH_DEBOUNCE_MS = 5_000
+const RECENT_HOURS = 12 // mirror of the quota window, in whole clock hours
+
+export function loadSyncSession() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SYNC_KEY))
+    return s?.token && s.expiresAt > Date.now() ? s : null
+  } catch {
+    return null
+  }
+}
+
+function saveSyncSession(session) {
+  if (session) localStorage.setItem(SYNC_KEY, JSON.stringify(session))
+  else localStorage.removeItem(SYNC_KEY)
+}
+
+/** Watched maps merged row-wise, newest updatedAt wins. Remote rows are the
+ * Worker's shape: [{id, pos, dur, completed, updatedAt}]. */
+export function mergeWatched(local, remoteRows) {
+  const merged = { ...local }
+  for (const r of remoteRows ?? []) {
+    const mine = merged[r.id]
+    if (!mine || (r.updatedAt ?? 0) > (mine.updatedAt ?? 0)) {
+      merged[r.id] = { pos: r.pos, dur: r.dur, completed: !!r.completed, updatedAt: r.updatedAt }
+    }
+  }
+  return merged
+}
+
+/** Seconds in the account-wide hour buckets over the trailing 12 clock hours. */
+export function remoteRecentSecs(hours, now = Date.now()) {
+  const nowHour = Math.floor(now / 3600_000)
+  return Object.entries(hours ?? {}).reduce(
+    (total, [k, secs]) => (+k > nowHour - RECENT_HOURS ? total + secs : total),
+    0,
+  )
+}
+
+/** What the quota checks compare against: the larger of this device's live
+ * 12h window and the account-wide trailing-12h sum. MAX and not a sum,
+ * because the remote figure already contains this device's pushed buckets;
+ * the cost is undercounting simultaneous two-device watching by the smaller
+ * device's share, which errs on the side of the child getting to finish. */
+export function usedSecs(watchStore, now = Date.now()) {
+  return Math.max(windowUsed(watchStore.usage, now), remoteRecentSecs(watchStore.remote?.hours, now))
+}
+
+/** Per-bucket max of this device's stats buckets and the account-wide sums —
+ * for DISPLAY (the parent's stats table); never pushed. */
+export function statsUsage(watchStore) {
+  const merge = (mine = {}, theirs = {}) => {
+    const out = { ...mine }
+    for (const [k, secs] of Object.entries(theirs)) out[k] = Math.max(out[k] ?? 0, secs)
+    return out
+  }
+  return {
+    window: watchStore.usage.window,
+    days: merge(watchStore.usage.days, watchStore.remote?.days),
+    hours: merge(watchStore.usage.hours, watchStore.remote?.hours),
+  }
+}
+
+/** Rows this device changed after `since`, in the Worker's push shape. */
+export function watchedDeltas(watched, since) {
+  return Object.entries(watched)
+    .filter(([, e]) => (e.updatedAt ?? 0) > since)
+    .map(([id, e]) => ({ id, pos: e.pos ?? 0, dur: e.dur ?? 0, completed: !!e.completed, updatedAt: e.updatedAt }))
+}
+
+async function syncFetch(path, body, token) {
+  const resp = await fetch(SYNC_URL + path, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    const err = new Error(data?.error ?? `sync: HTTP ${resp.status}`)
+    err.status = resp.status
+    throw err
+  }
+  return data
+}
+
+/* One <script> load per page; Google's GIS client is the sanctioned way to
+   get an ID token in a browser and cannot be bundled. */
+let gisLoading = null
+
+export function loadGoogleSignIn() {
+  gisLoading ??= new Promise((resolve, reject) => {
+    if (window.google?.accounts?.id) return resolve(window.google)
+    const s = document.createElement('script')
+    s.src = 'https://accounts.google.com/gsi/client'
+    s.async = true
+    s.onload = () => resolve(window.google)
+    s.onerror = () => {
+      gisLoading = null
+      reject(new Error('Google sign-in failed to load'))
+    }
+    document.head.appendChild(s)
+  })
+  return gisLoading
+}
+
+/**
+ * The sync loop. Inert without a session (and entirely so when
+ * GOOGLE_CLIENT_ID is empty): tests and signed-out devices never touch the
+ * network. With one: pull once per boot and fold the answer in, then push
+ * this device's deltas, debounced, as state changes.
+ */
+export function useSync(settingsStore, watchStore) {
+  const [session, setSession] = useState(loadSyncSession)
+  const pulled = useRef(false)
+  const timer = useRef(null)
+
+  const signOut = useCallback(() => {
+    saveSyncSession(null)
+    setSession(null)
+    pulled.current = false
+  }, [])
+
+  /* 401 means the session aged out server-side — surface as signed-out so the
+     Settings row offers the button again; anything else is a blip to retry
+     next time something changes. */
+  const dead = useCallback(
+    err => {
+      if (err?.status === 401) signOut()
+      else console.warn('sync failed', err)
+    },
+    [signOut],
+  )
+
+  const signIn = useCallback(async idToken => {
+    const { token, email, expires_at } = await syncFetch('/sync/login', { id_token: idToken })
+    const session = {
+      token,
+      email,
+      expiresAt: expires_at,
+      deviceId: loadSyncSession()?.deviceId ?? crypto.randomUUID(),
+      lastPushAt: 0,
+    }
+    saveSyncSession(session)
+    pulled.current = false
+    setSession(session)
+    return email
+  }, [])
+
+  // pull on boot / sign-in
+  const { save } = settingsStore
+  const { applyRemote } = watchStore
+  const settings = settingsStore.settings
+  useEffect(() => {
+    if (!session || pulled.current) return
+    pulled.current = true
+    syncFetch('/sync/pull', {}, session.token)
+      .then(remote => {
+        applyRemote({ watched: remote.watched, usage: remote.usage })
+        if (remote.settings && (remote.settings.updatedAt ?? 0) > (settings.updatedAt ?? 0)) {
+          // keep the remote stamp: adopting a blob is not an edit
+          save({ ...remote.settings.data, updatedAt: remote.settings.updatedAt })
+        }
+      })
+      .catch(dead)
+  }, [session]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // push deltas, debounced, whenever local state moves
+  const { watched, usage } = watchStore
+  useEffect(() => {
+    if (!session) return
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      const since = session.lastPushAt ?? 0
+      const payload = {
+        usage: { deviceId: session.deviceId, days: usage.days, hours: usage.hours },
+      }
+      const deltas = watchedDeltas(watched, since)
+      if (deltas.length) payload.watched = deltas
+      if ((settings.updatedAt ?? 0) > since) {
+        payload.settings = { data: settings, updatedAt: settings.updatedAt }
+      }
+      syncFetch('/sync/push', payload, session.token)
+        .then(() => {
+          const next = { ...session, lastPushAt: Date.now() }
+          saveSyncSession(next)
+          setSession(next)
+        })
+        .catch(dead)
+    }, PUSH_DEBOUNCE_MS)
+    return () => clearTimeout(timer.current)
+  }, [session, settings, watched, usage, dead])
+
+  return { session, signIn, signOut }
 }
