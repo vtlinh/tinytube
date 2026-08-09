@@ -1,13 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useReactTable, getCoreRowModel, flexRender } from '@tanstack/react-table'
-import { curatedChannels, overlaps, storeApi, fmtMins, usageStats, windowUsed, QUOTA_WINDOW_MS } from './lib.js'
+import {
+  curatedChannels,
+  overlaps,
+  storeApi,
+  fmtMins,
+  usageStats,
+  usedSecs,
+  statsUsage,
+  loadGoogleSignIn,
+  GOOGLE_CLIENT_ID,
+  QUOTA_WINDOW_MS,
+} from './lib.js'
 import { searchChannels, resolveChannel, evictChannelCache, formatCount, validateApiKey } from './youtubeApi.js'
 
 const API_CONSOLE_URL = 'https://console.cloud.google.com/apis/library/youtube.googleapis.com'
 const looksLikeLink = s => /^@|^UC[0-9A-Za-z_-]{22}$|youtube\.com/.test(s.trim())
 const channelUrl = ch => ch.source_url ?? `https://www.youtube.com/channel/${ch.channel_id}`
 
-export default function Settings({ db, store, watchStore, onDone }) {
+export default function Settings({ db, store, watchStore, sync, onDone }) {
   // edits accumulate in an in-memory draft; localStorage is only touched by
   // Save, which appears once the draft diverges (back/edge-swipe discards)
   const [settings, setSettings] = useState(store.settings)
@@ -63,6 +74,7 @@ export default function Settings({ db, store, watchStore, onDone }) {
       <AgeRow value={settings.ageRange} onChange={draft.setAgeRange} />
       <QuotaRow value={settings.quotaMins} onChange={draft.setQuotaMins} watchStore={watchStore} />
       <MinLengthRow value={settings.minVideoMins} onChange={draft.setMinVideoMins} />
+      <SyncRow sync={sync} />
       <ApiKeyRow apiKey={settings.apiKey} onChange={draft.setApiKey} />
       <SearchRow apiKey={settings.apiKey} store={draft} db={db} />
       <ChannelTable db={db} store={draft} />
@@ -95,6 +107,66 @@ function ConfirmModal({ title, body, onConfirm, onCancel }) {
       </div>
       <div className="modal-backdrop show" />
     </>
+  )
+}
+
+/**
+ * Cross-device sync, keyed by the parent's Google account. Immediate-effect
+ * like passkey enrollment, NOT part of the draft: signing in starts a pull
+ * that may rewrite settings, which a draft would silently clobber on Save.
+ * Renders nothing until a Google OAuth client id is configured (lib.js).
+ */
+function SyncRow({ sync = {} }) {
+  const buttonRef = useRef(null)
+  const [error, setError] = useState(null)
+  const { session, signIn, signOut } = sync
+
+  useEffect(() => {
+    if (session || !GOOGLE_CLIENT_ID) return
+    let cancelled = false
+    loadGoogleSignIn()
+      .then(google => {
+        if (cancelled || !buttonRef.current) return
+        google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: resp => {
+            setError(null)
+            signIn(resp.credential).catch(e => setError(e.message))
+          },
+        })
+        google.accounts.id.renderButton(buttonRef.current, { theme: 'filled_black', size: 'large' })
+      })
+      .catch(e => {
+        if (!cancelled) setError(e.message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [session, signIn])
+
+  if (!GOOGLE_CLIENT_ID) return null
+  return (
+    <div className="mb-4 d-flex align-items-center gap-3 flex-wrap">
+      <span className="text-secondary text-nowrap" title="Sync settings, channels and watch history across devices">
+        <i className="fa-sharp-duotone fa-regular fa-cloud-arrow-up me-2" />
+        Sync
+      </span>
+      {session ? (
+        <>
+          <span>
+            <i className="fa-sharp-duotone fa-regular fa-circle-check text-success me-2" />
+            {session.email}
+          </span>
+          <button type="button" className="btn btn-outline-secondary btn-sm" onClick={signOut}>
+            <i className="fa-sharp-duotone fa-regular fa-right-from-bracket me-2" />
+            Sign out
+          </button>
+        </>
+      ) : (
+        <div ref={buttonRef} />
+      )}
+      {error && <span className="text-danger small">{error}</span>}
+    </div>
   )
 }
 
@@ -183,7 +255,8 @@ function QuotaSlider({ value, usedMins, onChange }) {
 // no reset button: dragging the quota above what's used grants time, and the
 // 12h window expiry clears usage on its own
 function QuotaRow({ value, onChange, watchStore }) {
-  const stats = usageStats(watchStore.usage)
+  // statsUsage folds in what the other synced devices watched
+  const stats = usageStats(statsUsage(watchStore))
   const cols = [
     ['Session', stats.session, `Watched in the current ${QUOTA_WINDOW_MS / 3600_000}h quota window`],
     ['24Hr', stats.last24h, 'Watched in the last 24 hours'],
@@ -202,7 +275,7 @@ function QuotaRow({ value, onChange, watchStore }) {
         <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
         Quota
       </span>
-      <QuotaSlider value={value} usedMins={windowUsed(watchStore.usage) / 60} onChange={onChange} />
+      <QuotaSlider value={value} usedMins={usedSecs(watchStore) / 60} onChange={onChange} />
       <table className="table table-dark table-borderless table-sm w-auto small text-nowrap m-0">
         <tbody>
           <tr className="text-secondary">

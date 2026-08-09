@@ -3,11 +3,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import YouTube from 'react-youtube'
-import { fmtMins, windowUsed } from './lib.js'
+import { fmtMins, usedSecs } from './lib.js'
 
 export default function PlayerView({ video, watchStore, quotaMins, onExit, onQuotaExhausted }) {
   const quotaSecs = quotaMins * 60
-  const secsLeft = Math.max(0, quotaSecs - windowUsed(watchStore.usage))
+  // usedSecs, not windowUsed: watching on ANOTHER device counts here too
+  const secsLeft = Math.max(0, quotaSecs - usedSecs(watchStore))
   const pctLeft = quotaSecs ? (secsLeft / quotaSecs) * 100 : 0
 
   // best-effort landscape: fullscreen + orientation lock works on Android;
@@ -135,7 +136,7 @@ export function VideoPlayer({ video, watchStore, quotaMins, onExit, onQuotaExhau
       pending.current += watched
       // hard stop the moment the quota runs out — otherwise a video started
       // with 1 min left plays to the end for free
-      if (windowUsed(watchStore.usage) + pending.current >= quotaMins * 60) {
+      if (usedSecs(watchStore) + pending.current >= quotaMins * 60) {
         save()
         onQuotaExhausted()
       } else if (pending.current >= 5) {

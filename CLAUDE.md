@@ -89,7 +89,8 @@ Two answers already bought with a spike, so don't re-derive them:
 
 ```
 worker.js / wrangler.toml        Cloudflare Worker: release assets, /uploads
-                                 and /channel — ALL the YouTube parsing
+                                 and /channel — ALL the YouTube parsing — and
+                                 /sync/*, the web app's per-account state in D1
 worker.test.mjs                  its parsers, under `node --test worker.test.mjs`
                                  (CI runs it; named because bare `node --test`
                                  would sweep up web/tests too)
@@ -790,6 +791,24 @@ stops, green publishes.
   caller supplied**. Don't let a caller-supplied host, port, scheme or path
   through, and don't put the token within reach. A route that takes input has
   to make that argument or it doesn't belong.
+
+  **The `/sync/*` routes make that argument a third time, one binding wider.**
+  They are the web app's cross-device state (settings, watch history, quota
+  usage) in D1, keyed by a Google account. The router hands them `env.DB` and
+  nothing else — never `env`; the only URL ever fetched is Google's JWKS
+  endpoint, a constant; the identity key (email) comes out of a
+  SIGNATURE-VERIFIED Google ID token, never the request body, so one account
+  cannot name another's rows; and every other input is fixed-pattern matched
+  (video ids, bucket keys, device id, session token) and reaches SQL only as a
+  bound parameter or through `json_each` over a string the Worker itself
+  re-serialized from validated values. Sessions are 90-day bearer tokens
+  stored as SHA-256 hashes, so a leaked database impersonates nobody. The
+  routes answer 503 until `wrangler.toml`'s D1 binding and worker.js's
+  `GOOGLE_CLIENT_ID` are both filled in. Merge semantics live in
+  `web/src/lib.js` (row-wise last-write-wins; usage buckets are per-device and
+  summed server-side — that summing is what makes the watch quota hold across
+  devices, and why a device must never fold pulled totals back into the
+  buckets it pushes).
 - **The Worker's parsing is tested by `worker.test.mjs`, run in CI.** It reads a
   rendering of YouTube's own web app, so it breaks without anyone touching it —
   it is pinned against three entries lifted verbatim from a live page, plus the

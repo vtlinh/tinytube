@@ -58,7 +58,9 @@ function VideoCard({ video, entry, onPlay }) {
   const isWatched = f > WATCHED_THRESHOLD
 
   return (
-    <button type="button" className="video-card card w-100 border-0 p-0" onClick={onPlay}>
+    // h-100: columns in a bootstrap row already stretch to the tallest, so
+    // filling them equalizes the row — a short title no longer shortens its card
+    <button type="button" className="video-card card w-100 h-100 border-0 p-0" onClick={onPlay}>
       <div className="position-relative">
         <img src={video.thumbnail} alt="" className="card-img-top" loading="lazy" />
         {video.duration && (

@@ -5,7 +5,7 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import './styles.css'
-import { useSettings, useVideos, useWatchStore, verify, isBiometricAvailable, windowUsed } from './lib.js'
+import { useSettings, useVideos, useWatchStore, useSync, verify, isBiometricAvailable, usedSecs } from './lib.js'
 import Gallery from './gallery.jsx'
 import PlayerView from './player.jsx'
 import Settings from './settings.jsx'
@@ -15,6 +15,7 @@ export default function App() {
   const store = useSettings()
   const { db, channels, error } = useVideos(store.settings)
   const watchStore = useWatchStore()
+  const sync = useSync(store, watchStore) // inert until a parent signs in (Settings -> Sync)
   const [current, setCurrent] = useState(null) // video being played, or null
   const [view, setView] = useState('gallery') // 'gallery' | 'gate' | 'settings' | 'quota'
   const [biometric, setBiometric] = useState(null) // null = still checking
@@ -91,7 +92,7 @@ export default function App() {
   }
 
   if (view === 'settings') {
-    return <Settings db={db} store={store} watchStore={watchStore} onDone={close} />
+    return <Settings db={db} store={store} watchStore={watchStore} sync={sync} onDone={close} />
   }
 
   // enrolled device -> OS biometric prompt (called inside the tap handler to
@@ -125,8 +126,10 @@ export default function App() {
       watchStore={watchStore}
       onPlay={video => {
         // checked at tap time, not render time: a 12h window that expires while
-        // the gallery sits idle must unblock immediately (expiry is lazy)
-        const over = windowUsed(watchStore.usage) >= store.settings.quotaMins * 60
+        // the gallery sits idle must unblock immediately (expiry is lazy).
+        // usedSecs folds in the synced account-wide usage, so switching
+        // devices doesn't reset the meter
+        const over = usedSecs(watchStore) >= store.settings.quotaMins * 60
         if (over) open(() => setView('quota'))()
         else open(setCurrent)(video)
       }}
