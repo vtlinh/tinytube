@@ -4,11 +4,13 @@ import {
   resolveChannel,
   parseDuration,
   fetchChannelVideos,
-  getChannelVideosCached,
+  getChannelsCached,
+  seedChannelMeta,
   validateApiKey,
 } from '../src/youtubeApi.js'
 
 const UC = 'UCoookXUzPciGrEZEXmh4Jjg'
+const UC2 = 'UCG2CL6EUjG8TVT1Tpl9nJdg'
 
 function mockFetch(bodyByPath) {
   return vi.fn(async url => {
@@ -205,84 +207,94 @@ describe('fetchChannelVideos', () => {
   })
 })
 
-describe('getChannelVideosCached', () => {
-  const playlistBody = { items: [{ contentDetails: { videoId: 'vid1' }, snippet: { title: 'T1' } }] }
-
-  it('fetches, caches, then serves from cache without network', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(1_000_000)
-    const fetch = mockFetch({ playlistItems: playlistBody, videos: { items: [] } })
-    vi.stubGlobal('fetch', fetch)
-
-    const first = await getChannelVideosCached('KEY', UC)
-    expect(first).toHaveLength(1)
-    const callsAfterFirst = fetch.mock.calls.length
-
-    const second = await getChannelVideosCached('KEY', UC)
-    expect(second).toEqual(first)
-    expect(fetch.mock.calls.length).toBe(callsAfterFirst) // cache hit
-
-    vi.setSystemTime(1_000_000 + 25 * 60 * 60 * 1000) // >24h -> stale
-    await getChannelVideosCached('KEY', UC)
-    expect(fetch.mock.calls.length).toBeGreaterThan(callsAfterFirst)
+describe('getChannelsCached', () => {
+  const record = (id, extra = {}) => ({
+    channel_id: id,
+    title: 'Chan',
+    thumbnail: 'https://yt3.ggpht.com/a.jpg',
+    made_for_kids: true,
+    topics: ['Music'],
+    subscribers: 1234,
+    video_count: 10,
+    view_count: 99,
+    videos: [{ id: 'dQw4w9WgXcQ', title: 'Vid', duration: 212 }],
+    ...extra,
   })
 
-  it('returns stale cache on fetch failure and [] without key or cache', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(1_000_000)
-    vi.stubGlobal('fetch', mockFetch({ playlistItems: playlistBody, videos: { items: [] } }))
-    await getChannelVideosCached('KEY', UC) // seed cache
-
-    vi.setSystemTime(1_000_000 + 25 * 60 * 60 * 1000)
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect(await getChannelVideosCached('KEY', UC)).toHaveLength(1) // stale fallback
-
-    expect(await getChannelVideosCached('', 'UCnothing000000000000000')).toEqual([]) // keyless, no cache
-  })
-})
-
-describe('getChannelVideosCached via the shared Worker cache', () => {
   // route by host: the Worker's /videos vs the Data API
   const routedFetch = (workerBody, apiBodies = {}) =>
-    vi.fn(async url => {
+    vi.fn(async (url, init) => {
       const u = new URL(url)
       if (u.hostname.endsWith('workers.dev')) {
         if (!workerBody) return { ok: false, status: 503, json: async () => ({}) }
-        return { ok: true, json: async () => workerBody }
+        return { ok: true, json: async () => workerBody(JSON.parse(init.body)) }
       }
       const body = apiBodies[u.pathname.split('/').pop()]
       if (!body) return { ok: false, status: 404, json: async () => ({ error: { message: 'not found' } }) }
       return { ok: true, json: async () => body }
     })
 
-  it('uses the shared cache first and never spends the key on a hit — and works keyless', async () => {
+  it('asks the Worker ONCE for every channel and returns titles, avatars and videos', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(2_000_000)
-    const fetch = routedFetch({ channel_id: UC, videos: [{ id: 'dQw4w9WgXcQ', title: 'Shared', duration: 212 }] })
+    vi.setSystemTime(1_000_000)
+    const fetch = routedFetch(body => ({
+      channels: Object.fromEntries(body.channels.map(id => [id, record(id)])),
+    }))
     vi.stubGlobal('fetch', fetch)
 
-    const videos = await getChannelVideosCached('', UC) // NO key
-    expect(videos).toEqual([
-      { id: 'dQw4w9WgXcQ', title: 'Shared', duration: 212, thumbnail: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg' },
-    ])
-    expect(fetch.mock.calls.length).toBe(1) // only the worker; no Data API call
+    // NO api key: the shared cache is what makes custom channels work keyless
+    const byId = await getChannelsCached('', [UC, UC2])
+    expect(fetch.mock.calls).toHaveLength(1) // one request, two channels
+    expect(JSON.parse(fetch.mock.calls[0][1].body).channels).toEqual([UC, UC2])
+    // the whole record, pinned: title, avatar, the table's stats, and videos
+    expect(byId[UC]).toEqual({
+      title: 'Chan',
+      thumbnail: 'https://yt3.ggpht.com/a.jpg',
+      made_for_kids: true,
+      topics: ['Music'],
+      subscribers: 1234,
+      video_count: 10,
+      view_count: 99,
+      fetchedAt: 1_000_000,
+      videos: [
+        { id: 'dQw4w9WgXcQ', title: 'Vid', duration: 212, thumbnail: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg' },
+      ],
+    })
+
+    // a second call inside the TTL costs nothing
+    await getChannelsCached('', [UC, UC2])
+    expect(fetch.mock.calls).toHaveLength(1)
+
+    // ...and past it, asks again
+    vi.setSystemTime(1_000_000 + 25 * 60 * 60 * 1000)
+    await getChannelsCached('', [UC])
+    expect(fetch.mock.calls).toHaveLength(2)
   })
 
-  it('re-validates what the Worker sends: bad ids are dropped, thumbnails rebuilt', async () => {
+  it('re-validates what the Worker sends, even though it is our own server', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(3_000_000)
+    vi.setSystemTime(2_000_000)
     vi.stubGlobal(
       'fetch',
-      routedFetch({ videos: [{ id: 'not-a-video-id!', title: 'Evil', thumbnail: 'https://evil.example/x.jpg' }] }),
+      routedFetch(() => ({
+        channels: {
+          [UC]: {
+            channel_id: UC,
+            title: 'Chan',
+            thumbnail: 'https://evil.example/track.gif', // not a YouTube host
+            videos: [{ id: 'not-an-id!' }, { id: 'dQw4w9WgXcQ', title: 'Ok' }],
+          },
+        },
+      })),
     )
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect(await getChannelVideosCached('', 'UCnovideos00000000000000')).toEqual([])
+    const byId = await getChannelsCached('', [UC])
+    expect(byId[UC].thumbnail).toBe(null) // dropped, but the channel is kept
+    expect(byId[UC].videos.map(v => v.id)).toEqual(['dQw4w9WgXcQ'])
   })
 
-  it('falls back to the parent key when the shared cache is empty or down', async () => {
+  it("falls back to the parent's key when the Worker has nothing, and keeps stale entries otherwise", async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(4_000_000)
+    vi.setSystemTime(3_000_000)
     const fetch = routedFetch(null, {
       playlistItems: { items: [{ contentDetails: { videoId: 'aqz-KE-bpKQ' }, snippet: { title: 'Own' } }] },
       videos: { items: [] },
@@ -290,8 +302,22 @@ describe('getChannelVideosCached via the shared Worker cache', () => {
     vi.stubGlobal('fetch', fetch)
     vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    const videos = await getChannelVideosCached('KEY', UC)
-    expect(videos).toHaveLength(1)
-    expect(videos[0].id).toBe('aqz-KE-bpKQ')
+    const byId = await getChannelsCached('KEY', [UC])
+    expect(byId[UC].videos.map(v => v.id)).toEqual(['aqz-KE-bpKQ'])
+
+    // the Worker is still down and there is no key: what was cached survives
+    vi.setSystemTime(3_000_000 + 25 * 60 * 60 * 1000)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const later = await getChannelsCached('', [UC])
+    expect(later[UC].videos.map(v => v.id)).toEqual(['aqz-KE-bpKQ'])
+  })
+
+  it('seedChannelMeta puts the name on screen before the Worker is ever asked', async () => {
+    seedChannelMeta({ channel_id: UC, channel_title: 'Just added', thumbnail: 'https://yt3.ggpht.com/x.jpg' })
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const byId = await getChannelsCached('', [UC])
+    expect(byId[UC].title).toBe('Just added')
+    expect(byId[UC].thumbnail).toBe('https://yt3.ggpht.com/x.jpg')
   })
 })

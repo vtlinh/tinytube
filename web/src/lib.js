@@ -3,7 +3,7 @@
  * gallery data), and cross-device sync against the Worker's /sync routes. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getChannelVideosCached } from './youtubeApi.js'
+import { getChannelsCached } from './youtubeApi.js'
 
 // ---------------------------------------------------------------------------
 // webauthn — serverless WebAuthn parent gate: we never verify signatures (the
@@ -165,6 +165,20 @@ export function grabEnd(v, lo, hi) {
   return v - lo <= hi - v ? 'lo' : 'hi'
 }
 
+/** A stored decision + the Worker's record = a channel row shaped like a
+ * curated one. Falling back to the id keeps a channel whose record has not
+ * arrived on the screen that manages it, rather than vanishing from it. */
+export function hydrateChannel(ch, record = {}) {
+  const { videos, title, ...meta } = record ?? {}
+  return {
+    ...meta,
+    ...ch,
+    channel_title: title ?? ch.channel_id,
+    thumbnail: record?.thumbnail,
+    videos: videos ?? [],
+  }
+}
+
 /**
  * Curated channels from videos.json with the parent's per-channel edits
  * applied — overrides[channel_id] may adjust min_age/max_age or set hidden.
@@ -187,9 +201,13 @@ export function mergeChannels(db, customVideosById, settings) {
     ch => !ch.hidden && !ch.disabled && overlaps(ageRange, ch.min_age, ch.max_age),
   )
   const curatedIds = new Set((db?.channels ?? []).map(ch => ch.channel_id))
+  /* The parent's row carries ids and ages; the NAME and AVATAR come from the
+     Worker's shared record. Falling back to the id means a channel whose
+     record has never arrived is still listed and still removable, rather than
+     disappearing from the screen that manages it. */
   const custom = customChannels
     .filter(ch => !curatedIds.has(ch.channel_id) && !ch.disabled && overlaps(ageRange, ch.min_age, ch.max_age))
-    .map(ch => ({ ...ch, videos: customVideosById[ch.channel_id] ?? [] }))
+    .map(ch => hydrateChannel(ch, customVideosById[ch.channel_id]))
   // unknown durations count as too short: don't let un-probed videos slip past
   return [...curated, ...custom].map(ch => ({
     ...ch,
@@ -354,19 +372,9 @@ export const EXPORT_VERSION = 1
 
 const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/
 // the hosts YouTube serves avatars and posters from; anything else is dropped
-const IMAGE_HOSTS = new Set(['yt3.ggpht.com', 'yt3.googleusercontent.com', 'i.ytimg.com'])
 const MAX_IMPORT_CHANNELS = 500
 
 const validAge = n => Number.isInteger(n) && n >= AGE_MIN && n <= AGE_MAX
-
-function safeImageUrl(url) {
-  try {
-    const u = new URL(url)
-    return u.protocol === 'https:' && IMAGE_HOSTS.has(u.hostname) ? u.href : null
-  } catch {
-    return null
-  }
-}
 
 /** The active child's channel setup, as the object written to the file. */
 export function exportChannels(settings) {
@@ -412,10 +420,10 @@ export function parseChannelImport(text) {
     // an inverted pair is a typo in someone's file, not a reason to refuse it
     const lo = validAge(ch.min_age) ? ch.min_age : AGE_MIN
     const hi = validAge(ch.max_age) ? ch.max_age : AGE_MAX
+    // the decision only, exactly as it is stored: a file that carries a name
+    // or an avatar carries a copy of something the Worker owns
     customChannels.push({
       channel_id: ch.channel_id,
-      channel_title: typeof ch.channel_title === 'string' ? ch.channel_title.slice(0, 200) : ch.channel_id,
-      thumbnail: safeImageUrl(ch.thumbnail) ?? undefined,
       min_age: Math.min(lo, hi),
       max_age: Math.max(lo, hi),
       ...(ch.disabled ? { disabled: true } : {}),
@@ -470,7 +478,11 @@ export const CHILD_DEFAULTS = {
   birthday: null, // 'YYYY-MM'; the child's age is computed from this (born the 1st)
   quotaMins: 180, // watch quota per rolling 12h window; 0 = no watching (there is no "off")
   minVideoMins: 0, // hide videos shorter than this; 0 = show everything
-  customChannels: [], // parent-added, same flat shape as channels.json entries: [{channel_id, channel_title, thumbnail, min_age, max_age}]
+  /* parent-added channels, as the PARENT'S DECISION only:
+     [{channel_id, min_age, max_age, disabled?}]. The name, avatar and videos
+     are facts about the channel, so they live in the Worker's shared cache
+     and are asked for — never stored here and never uploaded. */
+  customChannels: [],
   overrides: {}, // per curated channel_id: {min_age?, max_age?, hidden?, disabled?} edited in the table
   groups: [], // channel groups [{id, name}] — see the channelGroups section
   groupOf: {}, // channel_id -> group id membership
@@ -490,6 +502,18 @@ export const DEFAULTS = { ...ACCOUNT_DEFAULTS, ...CHILD_DEFAULTS }
    empty first child. New children get UUIDs. */
 export const FIRST_CHILD_ID = 'default'
 
+/** A parent-added channel, reduced to the decision: which channel, for what
+ * ages, on or off. Everything else about a channel is the channel's own and
+ * comes from the Worker's shared cache. */
+export function decisionOnly(ch) {
+  return {
+    channel_id: ch.channel_id,
+    min_age: ch.min_age ?? AGE_MIN,
+    max_age: ch.max_age ?? AGE_MAX,
+    ...(ch.disabled ? { disabled: true } : {}),
+  }
+}
+
 /** Stored shape -> stored shape, with legacy blobs folded in. Idempotent. */
 export function normalizeSettings(parsed = {}) {
   // fold pre-refactor fields into the unified overrides map
@@ -498,7 +522,15 @@ export function normalizeSettings(parsed = {}) {
 
   const children =
     Array.isArray(parsed.children) && parsed.children.length
-      ? parsed.children.map((c, i) => ({ ...CHILD_DEFAULTS, ...c, id: c.id ?? `child-${i}`, name: c.name ?? `Child ${i + 1}` }))
+      ? parsed.children.map((c, i) => ({
+          ...CHILD_DEFAULTS,
+          ...c,
+          // channel names and avatars used to be stored here; they are the
+          // Worker's now, and a stored copy would only go stale
+          customChannels: (c.customChannels ?? []).map(decisionOnly),
+          id: c.id ?? `child-${i}`,
+          name: c.name ?? `Child ${i + 1}`,
+        }))
       : [
           {
             ...CHILD_DEFAULTS,
@@ -509,6 +541,7 @@ export function normalizeSettings(parsed = {}) {
                 .map(k => [k, parsed[k]]),
             ),
             overrides,
+            customChannels: (parsed.customChannels ?? []).map(decisionOnly),
             id: FIRST_CHILD_ID,
             name: parsed.children?.[0]?.name ?? 'Child 1',
           },
@@ -556,13 +589,21 @@ export function storeApi(settings, update, updateChild = update) {
     setQuotaMins: quotaMins => updateChild({ quotaMins }),
     setMinVideoMins: minVideoMins => updateChild({ minVideoMins }),
     setBirthday: birthday => updateChild({ birthday }),
+    /* Only the decision is kept, whatever the caller hands over: a search
+       result arrives with a title, avatar, subscriber counts and topics, and
+       none of that is ours to store — it is the channel's, and it changes. */
     addCustomChannel: ch =>
       updateChild({
-        customChannels: [...settings.customChannels.filter(c => c.channel_id !== ch.channel_id), ch],
+        customChannels: [
+          ...settings.customChannels.filter(c => c.channel_id !== ch.channel_id),
+          decisionOnly(ch),
+        ],
       }),
     updateCustomChannel: (id, patch) =>
       updateChild({
-        customChannels: settings.customChannels.map(c => (c.channel_id === id ? { ...c, ...patch } : c)),
+        customChannels: settings.customChannels.map(c =>
+          c.channel_id === id ? decisionOnly({ ...c, ...patch }) : c,
+        ),
       }),
     removeCustomChannel: id =>
       updateChild({
@@ -918,27 +959,34 @@ export function useVideos(settings) {
       .catch(setError)
   }, [])
 
-  const { apiKey, customChannels } = settings
+  /* ONE request for every approved channel, and what comes back is the title
+     and avatar as well as the videos: this app stores the parent's decision
+     (which ids, what ages) and the Worker owns the facts about the channels
+     themselves. Keyed on the ids alone, so an age edit does not refetch. */
+  const { apiKey } = settings
+  const customIds = settings.customChannels.map(ch => ch.channel_id).join(',')
   useEffect(() => {
     let cancelled = false
-    Promise.all(
-      customChannels.map(ch =>
-        getChannelVideosCached(apiKey, ch.channel_id).then(videos => [ch.channel_id, videos]),
-      ),
-    ).then(entries => {
-      if (!cancelled) setCustomVideosById(Object.fromEntries(entries))
+    const ids = customIds ? customIds.split(',') : []
+    if (!ids.length) {
+      setCustomVideosById({})
+      return
+    }
+    getChannelsCached(apiKey, ids).then(byId => {
+      if (!cancelled) setCustomVideosById(byId)
     })
     return () => {
       cancelled = true
     }
-  }, [apiKey, customChannels])
+  }, [apiKey, customIds])
 
   const channels = useMemo(
     () => (db ? mergeChannels(db, customVideosById, settings) : null),
     [db, customVideosById, settings],
   )
 
-  return { db, channels, error }
+  // customById is what the parent's channel table hydrates its rows from
+  return { db, channels, error, customById: customVideosById }
 }
 
 // ---------------------------------------------------------------------------

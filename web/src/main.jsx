@@ -13,7 +13,7 @@ import { EnrollGate, MathGate, QuotaGate } from './landing.jsx'
 
 export default function App() {
   const store = useSettings()
-  const { db, channels, error } = useVideos(store.settings)
+  const { db, channels, error, customById } = useVideos(store.settings)
   // one history per child: switching child swaps the grid's progress and the quota
   const watchStore = useWatchStore(store.settings.childId)
   const sync = useSync(store, watchStore) // inert until a parent signs in (Settings -> Sync)
@@ -93,7 +93,7 @@ export default function App() {
   }
 
   if (view === 'settings') {
-    return <Settings db={db} store={store} watchStore={watchStore} sync={sync} onDone={close} />
+    return <Settings db={db} customById={customById} store={store} watchStore={watchStore} sync={sync} onDone={close} />
   }
 
   // enrolled device -> OS biometric prompt (called inside the tap handler to

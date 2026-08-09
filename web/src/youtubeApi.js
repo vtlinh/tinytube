@@ -163,74 +163,135 @@ function writeCache(cache) {
     console.warn('video cache persist failed', e)
   }
 }
+const WORKER_URL = 'https://tinytube.vtlinh87.workers.dev'
+
+/**
+ * The Worker's SHARED per-channel cache — TITLE, AVATAR AND VIDEOS, for
+ * several channels in one request.
+ *
+ * What a channel is called and what it has posted are facts about the channel,
+ * not about a user: the Worker fetches them, keeps them in its own database
+ * and refreshes them on its own schedule. This app stores only the parent's
+ * DECISION — which ids are approved and for what ages — and asks for the rest.
+ * Nothing a browser sends can write that cache, which is what keeps one
+ * account from planting "videos" under a channel another child then sees.
+ */
+async function fetchSharedChannels(ids) {
+  const resp = await fetch(`${WORKER_URL}/videos`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ channels: ids }),
+  })
+  if (!resp.ok) throw new Error(`videos: HTTP ${resp.status}`)
+  const body = await resp.json()
+  const out = {}
+  for (const [id, rec] of Object.entries(body.channels ?? {})) {
+    if (!UC_ID.test(id)) continue
+    out[id] = normalizeRecord(rec)
+  }
+  return out
+}
+
+/* Re-validated even though our own server said so: an id reaches a URL and a
+   thumbnail URL is fetched and drawn. */
+function normalizeRecord(rec) {
+  const count = n => (Number.isFinite(n) && n >= 0 ? n : null)
+  return {
+    title: typeof rec?.title === 'string' && rec.title ? rec.title : null,
+    thumbnail: safeAvatar(rec?.thumbnail),
+    // the stats the parent's channel table shows; absent on the scrape path
+    made_for_kids: typeof rec?.made_for_kids === 'boolean' ? rec.made_for_kids : null,
+    topics: Array.isArray(rec?.topics) ? rec.topics.filter(t => typeof t === 'string').slice(0, 10) : [],
+    subscribers: count(rec?.subscribers),
+    video_count: count(rec?.video_count),
+    view_count: count(rec?.view_count),
+    videos: (rec?.videos ?? [])
+      .filter(v => /^[A-Za-z0-9_-]{11}$/.test(v?.id ?? ''))
+      .map(v => ({
+        id: v.id,
+        title: typeof v.title === 'string' ? v.title : v.id,
+        duration: Number.isFinite(v.duration) ? v.duration : null,
+        thumbnail: `https://i.ytimg.com/vi/${v.id}/mqdefault.jpg`,
+      })),
+  }
+}
+
+const AVATAR_HOSTS = new Set(['yt3.ggpht.com', 'yt3.googleusercontent.com', 'i.ytimg.com'])
+
+function safeAvatar(url) {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' && AVATAR_HOSTS.has(u.hostname) ? u.href : null
+  } catch {
+    return null
+  }
+}
+
+/** What the parent already saw when they added a channel, so its name and
+ * avatar are on screen before the Worker has ever been asked about it. */
+export function seedChannelMeta(ch) {
+  const cache = readCache()
+  const entry = cache[ch.channel_id]
+  cache[ch.channel_id] = {
+    fetchedAt: 0, // meta only: still due a real fetch for the videos
+    ...entry,
+    title: ch.channel_title ?? entry?.title ?? null,
+    thumbnail: safeAvatar(ch.thumbnail) ?? entry?.thumbnail ?? null,
+  }
+  writeCache(cache)
+}
+
+/**
+ * Title, avatar and videos for every id, cache-first: fresh (<24h) local
+ * entries cost nothing, the rest are asked for in ONE request to the Worker,
+ * and the parent's own key is the per-channel fallback for videos when the
+ * Worker could not answer. A stale entry is kept and returned rather than
+ * dropped — a name that is a day old beats a raw channel id.
+ */
+export async function getChannelsCached(apiKey, ids) {
+  const cache = readCache()
+  const now = Date.now()
+  const wanted = [...new Set(ids)].filter(id => UC_ID.test(id))
+  const stale = wanted.filter(id => !(cache[id] && now - cache[id].fetchedAt < CACHE_TTL_MS))
+
+  if (stale.length) {
+    let fetched = {}
+    try {
+      fetched = await fetchSharedChannels(stale)
+    } catch (e) {
+      console.warn('shared channel cache unreachable', e)
+    }
+    for (const id of stale) {
+      const rec = fetched[id]
+      if (rec?.videos.length) {
+        cache[id] = { fetchedAt: now, ...rec }
+        continue
+      }
+      // the Worker had nothing: the parent's own key, if there is one
+      if (apiKey) {
+        try {
+          const videos = await fetchChannelVideos(apiKey, id)
+          if (videos.length) {
+            cache[id] = { ...cache[id], fetchedAt: now, title: rec?.title ?? cache[id]?.title ?? null, videos }
+            continue
+          }
+        } catch (e) {
+          console.error(`fetch failed for ${id}, keeping what we have`, e)
+        }
+      }
+      // keep whatever was already known, including a name with no videos yet
+      if (rec && !cache[id]) cache[id] = { fetchedAt: 0, ...rec }
+    }
+    writeCache(cache)
+  }
+
+  return Object.fromEntries(wanted.map(id => [id, { ...cache[id], videos: cache[id]?.videos ?? [] }]))
+}
 
 export function evictChannelCache(channelId) {
   const cache = readCache()
   delete cache[channelId]
   writeCache(cache)
-}
-
-const inflight = {} // StrictMode double-effect / concurrent-render guard
-
-const WORKER_URL = 'https://tinytube.vtlinh87.workers.dev'
-
-/**
- * The Worker's SHARED per-channel cache: which videos a channel has is a fact
- * about the channel, not about a user, so one YouTube fetch a day serves
- * every account (the channel LIST stays per account). The Worker populates
- * the cache itself — nothing a browser sends can write it, which is what
- * keeps one account's data out of another child's grid — and every id is
- * re-validated here anyway, with the thumbnail rebuilt from it.
- */
-async function fetchSharedVideos(channelId) {
-  const resp = await fetch(`${WORKER_URL}/videos`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ channel: channelId }),
-  })
-  if (!resp.ok) throw new Error(`videos: HTTP ${resp.status}`)
-  const body = await resp.json()
-  return (body.videos ?? [])
-    .filter(v => /^[A-Za-z0-9_-]{11}$/.test(v?.id ?? ''))
-    .map(v => ({
-      id: v.id,
-      title: typeof v.title === 'string' ? v.title : v.id,
-      duration: Number.isFinite(v.duration) ? v.duration : null,
-      thumbnail: `https://i.ytimg.com/vi/${v.id}/mqdefault.jpg`,
-    }))
-}
-
-/**
- * Cache-first channel videos: fresh (<24h) local cache -> no network; then
- * the Worker's shared cache (works with NO api key); then the parent's own
- * key as the fallback; failure everywhere -> stale local cache or [].
- */
-export function getChannelVideosCached(apiKey, channelId) {
-  const cached = readCache()[channelId]
-  const fresh = cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS
-  if (fresh) return Promise.resolve(cached.videos)
-
-  inflight[channelId] ??= (async () => {
-    let videos = []
-    try {
-      videos = await fetchSharedVideos(channelId)
-    } catch (e) {
-      console.warn(`shared cache unreachable for ${channelId}`, e)
-    }
-    if (!videos.length && apiKey) {
-      try {
-        videos = await fetchChannelVideos(apiKey, channelId)
-      } catch (e) {
-        console.error(`fetch failed for ${channelId}, using stale cache`, e)
-      }
-    }
-    if (videos.length) {
-      writeCache({ ...readCache(), [channelId]: { fetchedAt: Date.now(), videos } })
-      return videos
-    }
-    return cached?.videos ?? []
-  })().finally(() => delete inflight[channelId])
-  return inflight[channelId]
 }
 
 /*
