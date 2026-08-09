@@ -21,6 +21,7 @@ import {
   groupNameError,
 } from './lib.js'
 import { searchChannels, resolveChannel, evictChannelCache, formatCount, validateApiKey } from './youtubeApi.js'
+import { TabButton } from './gallery.jsx'
 
 const API_CONSOLE_URL = 'https://console.cloud.google.com/apis/library/youtube.googleapis.com'
 const looksLikeLink = s => /^@|^UC[0-9A-Za-z_-]{22}$|youtube\.com/.test(s.trim())
@@ -31,58 +32,87 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
   // button; half-typed values are held locally by their rows (see BirthdayRow)
   // and only committed once they parse
   const settings = store.settings
-  // 'main' | 'channels' — channel management is its own page
-  const [page, setPage] = useState('main')
+  // 'settings' | 'channels' | 'stats' — the bottom bar below switches
+  const [tab, setTab] = useState('settings')
+  const titles = { settings: 'Parents Mode', channels: 'Channels', stats: 'Stats' }
 
   return (
-    <div className="settings container-xl py-4">
+    <div className="settings container-xl py-4 pb-5 mb-4">
       {/* explicit back button: iOS standalone PWAs have no browser chrome or
           hardware back, so without it a no-change visit would strand you here.
           flex: 1 sides keep the title truly centered */}
       <div className="d-flex align-items-center gap-3 mb-4">
         <div style={{ flex: 1 }}>
-          <button
-            type="button"
-            className="btn btn-outline-secondary"
-            aria-label={page === 'channels' ? 'Back to settings' : 'Back to gallery'}
-            onClick={page === 'channels' ? () => setPage('main') : onDone}
-          >
+          <button type="button" className="btn btn-outline-secondary" aria-label="Back to gallery" onClick={onDone}>
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
           </button>
         </div>
-        <h1 className="fs-3 fw-bold m-0">{page === 'channels' ? 'Channels' : 'Parents Mode'}</h1>
+        <h1 className="fs-3 fw-bold m-0">{titles[tab]}</h1>
         <div className="d-flex align-items-center justify-content-end gap-3" style={{ flex: 1 }}>
           <SyncMenu sync={sync} />
         </div>
       </div>
 
-      {page === 'main' ? (
+      {tab === 'settings' && (
         <>
           <BirthdayRow value={settings.birthday} onChange={store.setBirthday} />
           <QuotaRow value={settings.quotaMins} onChange={store.setQuotaMins} watchStore={watchStore} />
           <MinLengthRow value={settings.minVideoMins} onChange={store.setMinVideoMins} />
           <ApiKeyRow apiKey={settings.apiKey} onChange={store.setApiKey} />
-          <div className="mb-4 d-flex align-items-center gap-3">
-            <span className="text-secondary text-nowrap">
-              <i className="fa-brands fa-youtube me-2" />
-              Channels
-            </span>
-            <button type="button" className="btn btn-outline-light" onClick={() => setPage('channels')}>
-              Manage channels
-              <i className="fa-sharp-duotone fa-regular fa-chevron-right ms-2" />
-            </button>
-          </div>
           {/* the About position, like the Android app: the bottom of settings */}
           <div className="text-center mt-5">
             <VersionLink />
           </div>
         </>
-      ) : (
+      )}
+      {tab === 'channels' && (
         <>
           <SearchRow apiKey={settings.apiKey} store={store} db={db} />
           <ChannelTable db={db} store={store} />
         </>
       )}
+      {tab === 'stats' && <StatsTab watchStore={watchStore} quotaMins={settings.quotaMins} />}
+
+      <nav className="bottom-tabs fixed-bottom d-flex border-top">
+        <TabButton label="Settings" icon="fa-gear" on={tab === 'settings'} onClick={() => setTab('settings')} />
+        <TabButton label="Channels" icon="fa-list" on={tab === 'channels'} onClick={() => setTab('channels')} />
+        <TabButton label="Stats" icon="fa-chart-simple" on={tab === 'stats'} onClick={() => setTab('stats')} />
+      </nav>
+    </div>
+  )
+}
+
+/** Watch-time stats on their own tab, account-wide: statsUsage folds in what
+ * every synced device watched. */
+function StatsTab({ watchStore, quotaMins }) {
+  const stats = usageStats(statsUsage(watchStore))
+  const rows = [
+    ['Session', stats.session, `The current ${QUOTA_WINDOW_MS / 3600_000}h quota window`],
+    ['Last 24 hours', stats.last24h, 'A true rolling 24 hours, across synced devices'],
+    ['This week', stats.wtd, 'Week to date, since Sunday'],
+    ['This month', stats.mtd, 'Month to date'],
+    ['This year', stats.ytd, 'Year to date'],
+  ]
+  const usedMins = usedSecs(watchStore) / 60
+  return (
+    <div className="col-md-6 mx-auto">
+      <div className="text-secondary mb-3">
+        <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
+        {fmtMins(Math.round(usedMins))} of {fmtMins(quotaMins)} used in the current window
+      </div>
+      <table className="table align-middle">
+        <tbody>
+          {rows.map(([label, secs, hint]) => (
+            <tr key={label}>
+              <td>
+                <div className="fw-semibold">{label}</div>
+                <div className="text-secondary small">{hint}</div>
+              </td>
+              <td className="text-end fs-5">{fmtMins(Math.round(secs / 60))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -322,20 +352,10 @@ function QuotaSlider({ value, usedMins, onChange }) {
 }
 
 // no reset button: dragging the quota above what's used grants time, and the
-// 12h window expiry clears usage on its own
+// 12h window expiry clears usage on its own. The stats table lives on the
+// Stats tab now; the used-time fill on the track is what remains here.
 function QuotaRow({ value, onChange, watchStore }) {
-  // statsUsage folds in what the other synced devices watched
-  const stats = usageStats(statsUsage(watchStore))
-  const cols = [
-    ['Session', stats.session, `Watched in the current ${QUOTA_WINDOW_MS / 3600_000}h quota window`],
-    ['24Hr', stats.last24h, 'Watched in the last 24 hours'],
-    ['WTD', stats.wtd, 'Week to date (since Sunday)'],
-    ['MTD', stats.mtd, 'Month to date'],
-    ['YTD', stats.ytd, 'Year to date'],
-  ]
   return (
-    // flex-wrap + the slider's min-width: stats sit inline on wide screens
-    // and wrap below the slider on phones instead of crushing it
     <div className="d-flex align-items-center gap-3 flex-wrap mb-4">
       <span
         className="text-secondary text-nowrap"
@@ -345,20 +365,6 @@ function QuotaRow({ value, onChange, watchStore }) {
         Quota
       </span>
       <QuotaSlider value={value} usedMins={usedSecs(watchStore) / 60} onChange={onChange} />
-      <table className="table table-dark table-borderless table-sm w-auto small text-nowrap m-0">
-        <tbody>
-          <tr className="text-secondary">
-            {cols.map(([label, , hover]) => (
-              <td key={label} className="py-0 px-2 text-center" title={hover}>{label}</td>
-            ))}
-          </tr>
-          <tr>
-            {cols.map(([label, secs, hover]) => (
-              <td key={label} className="py-0 px-2 text-center" title={hover}>{fmtMins(Math.round(secs / 60))}</td>
-            ))}
-          </tr>
-        </tbody>
-      </table>
     </div>
   )
 }

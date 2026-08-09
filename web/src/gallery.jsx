@@ -103,8 +103,9 @@ export default function Gallery({ channels, groups = [], groupOf = {}, watchStor
 
 /* Colour only — no indicator bar, no size change: on two tabs the accent is
    unambiguous, and something that moves under a thumb is one more thing for a
-   child to play with rather than watch a video. */
-function TabButton({ label, icon, on, onClick }) {
+   child to play with rather than watch a video. Exported: Parents Mode's
+   bottom bar uses the same buttons. */
+export function TabButton({ label, icon, on, onClick }) {
   return (
     <button
       type="button"
