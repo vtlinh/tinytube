@@ -49,3 +49,10 @@ enabled = true
 binding = "DB"
 database_name = "tinytube"
 database_id = "1374ae0d-c93a-4bd4-afb1-b04a3a483a26"
+
+# The Worker refreshes its own channel cache. Daily, a little after the hour
+# the web app's own weekly rebuild runs, so the two do not collide; each run
+# tops up the stalest rows and stops. Browsers still refresh anything the cron
+# has not reached, on demand — this only means they rarely wait for it.
+[triggers]
+crons = ["30 5 * * *"]

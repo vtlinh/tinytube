@@ -18,9 +18,8 @@ const UC3 = 'UC5PYHgAzJ1wLEidB58SK6Xw'
 
 const settings = {
   childName: 'Ann',
-  customChannels: [
-    { channel_id: UC, channel_title: 'Chan', thumbnail: 'https://yt3.ggpht.com/a.jpg', min_age: 3, max_age: 6 },
-  ],
+  // the stored shape: the parent's decision, no channel metadata
+  customChannels: [{ channel_id: UC, min_age: 3, max_age: 6 }],
   overrides: { [UC2]: { min_age: 4, hidden: true } },
   groups: [{ id: 'g1', name: 'Cartoons' }],
   groupOf: { [UC]: 'g1', [UC2]: 'g1' },
@@ -67,32 +66,37 @@ describe('re-validating what comes back in', () => {
     const { customChannels } = parseChannelImport(
       file({
         customChannels: [
-          { channel_id: UC, channel_title: 'Good' },
-          { channel_id: 'UC../../evil', channel_title: 'Traversal' },
-          { channel_id: 'not-a-channel', channel_title: 'Bad' },
-          { channel_title: 'No id' },
-          { channel_id: UC, channel_title: 'Duplicate' },
+          { channel_id: UC },
+          { channel_id: 'UC../../evil' },
+          { channel_id: 'not-a-channel' },
+          { min_age: 3 },
+          { channel_id: UC },
         ],
       }),
     )
-    expect(customChannels.map(c => c.channel_id)).toEqual([UC])
-    expect(customChannels[0].channel_title).toBe('Good') // the duplicate lost, not the original
+    expect(customChannels.map(c => c.channel_id)).toEqual([UC]) // the duplicate too
   })
 
-  it('drops a thumbnail that is not YouTube over https, keeping the channel', () => {
+  it('keeps the decision and nothing else, whatever the file carries', () => {
+    // an older export (or a hand-edited file) may carry a name, an avatar or
+    // anything at all; none of it is ours to store — the Worker owns what a
+    // channel is called and what it has posted
     const { customChannels } = parseChannelImport(
       file({
         customChannels: [
-          { channel_id: UC, thumbnail: 'https://evil.example/track.gif' },
-          { channel_id: UC2, thumbnail: 'javascript:alert(1)' },
-          { channel_id: UC3, thumbnail: 'https://i.ytimg.com/vi/x/mq.jpg' },
+          {
+            channel_id: UC,
+            channel_title: 'From an older export',
+            thumbnail: 'https://evil.example/track.gif',
+            subscribers: 5,
+            min_age: 3,
+            max_age: 6,
+            disabled: true,
+          },
         ],
       }),
     )
-    expect(customChannels).toHaveLength(3) // no channel lost over a bad picture
-    expect(customChannels[0].thumbnail).toBeUndefined()
-    expect(customChannels[1].thumbnail).toBeUndefined()
-    expect(customChannels[2].thumbnail).toBe('https://i.ytimg.com/vi/x/mq.jpg')
+    expect(customChannels).toEqual([{ channel_id: UC, min_age: 3, max_age: 6, disabled: true }])
   })
 
   it('repairs ages: out of range becomes the full span, inverted pairs swap', () => {

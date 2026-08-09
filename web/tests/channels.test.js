@@ -42,8 +42,15 @@ describe('mergeChannels', () => {
     expect(mergeChannels(db, {}, s).map(c => c.channel_id)).toEqual(['UCa', 'UCc'])
   })
 
+  it('still lists a channel whose record has not arrived, under its id', () => {
+    // it has to stay on the screen that manages it, or it cannot be removed
+    const custom = [{ channel_id: 'UCx', min_age: 1, max_age: 15 }]
+    const merged = mergeChannels(db, {}, settings({ customChannels: custom }))
+    expect(merged.find(c => c.channel_id === 'UCx')).toMatchObject({ channel_title: 'UCx', videos: [] })
+  })
+
   it('excludes toggled-off custom channels', () => {
-    const custom = [{ channel_id: 'UCx', channel_title: 'Off', min_age: 1, max_age: 15, disabled: true }]
+    const custom = [{ channel_id: 'UCx', min_age: 1, max_age: 15, disabled: true }]
     const merged = mergeChannels(db, {}, settings({ customChannels: custom }))
     expect(merged.find(c => c.channel_id === 'UCx')).toBeUndefined()
   })
@@ -63,13 +70,17 @@ describe('mergeChannels', () => {
   })
 
   it('shapes custom channels like curated ones and filters by their own range', () => {
+    // the parent's rows are the DECISION only; the name, avatar and videos
+    // come from the Worker's shared record, keyed by id
     const custom = [
-      { channel_id: 'UCx', channel_title: 'Custom', min_age: 1, max_age: 15 },
-      { channel_id: 'UCy', channel_title: 'Teen', min_age: 13, max_age: 15 },
+      { channel_id: 'UCx', min_age: 1, max_age: 15 },
+      { channel_id: 'UCy', min_age: 13, max_age: 15 },
     ]
-    const merged = mergeChannels(db, { UCx: [{ id: 'cv1' }] }, settings({ customChannels: custom, ageRange: [3, 8] }))
+    const records = { UCx: { title: 'Custom', thumbnail: 'https://yt3.ggpht.com/a.jpg', videos: [{ id: 'cv1' }] } }
+    const merged = mergeChannels(db, records, settings({ customChannels: custom, ageRange: [3, 8] }))
     expect(merged.find(c => c.channel_id === 'UCx')).toMatchObject({
       channel_title: 'Custom',
+      thumbnail: 'https://yt3.ggpht.com/a.jpg',
       videos: [{ id: 'cv1' }],
     })
     expect(merged.find(c => c.channel_id === 'UCy')).toBeUndefined()

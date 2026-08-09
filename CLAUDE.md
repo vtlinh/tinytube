@@ -833,7 +833,17 @@ stops, green publishes.
   `YOUTUBE_API_KEY` wrangler secret is set — durations, 18+ dropped — else the
   same page+feed scrape /uploads uses): a browser-writable shared cache would
   let one account put its own "videos" under a channel every other child then
-  sees. The caller contributes a channel id against `CHANNEL_ID` and nothing
+  sees.
+
+  **It caches the whole CHANNEL, not just its videos** — title, avatar and the
+  stats the web app's channel table shows, which cost nothing extra because
+  `channels.list` bills one unit whatever parts it is asked for. So the web app
+  stores only the parent's DECISION (`{channel_id, min_age, max_age}`) and asks
+  for the rest, in ONE batched request for every approved id; a name or an
+  avatar kept in a browser is a copy of something that changes without anyone
+  touching it. A `[triggers]` cron in `wrangler.toml` has the Worker refresh
+  the stalest rows daily into its own database, so a browser rarely waits for a
+  fetch — the on-demand path still covers whatever the cron has not reached. The caller contributes a channel id against `CHANNEL_ID` and nothing
   else; an answer that parses to nothing is never cached (stale beats empty);
   and the web client re-validates every id and rebuilds thumbnails anyway.
 - **The Worker's parsing is tested by `worker.test.mjs`, run in CI.** It reads a

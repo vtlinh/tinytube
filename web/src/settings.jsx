@@ -13,6 +13,7 @@ import {
   ageFromBirthday,
   parseBirthdayInput,
   effectiveAgeRange,
+  hydrateChannel,
   AGE_MIN,
   AGE_MAX,
   ageAtFraction,
@@ -26,14 +27,21 @@ import {
   exportChannels,
   parseChannelImport,
 } from './lib.js'
-import { searchChannels, resolveChannel, evictChannelCache, formatCount, validateApiKey } from './youtubeApi.js'
+import {
+  searchChannels,
+  resolveChannel,
+  evictChannelCache,
+  seedChannelMeta,
+  formatCount,
+  validateApiKey,
+} from './youtubeApi.js'
 import { TabButton } from './gallery.jsx'
 
 const API_CONSOLE_URL = 'https://console.cloud.google.com/apis/library/youtube.googleapis.com'
 const looksLikeLink = s => /^@|^UC[0-9A-Za-z_-]{22}$|youtube\.com/.test(s.trim())
 const channelUrl = ch => ch.source_url ?? `https://www.youtube.com/channel/${ch.channel_id}`
 
-export default function Settings({ db, store, watchStore, sync, onDone }) {
+export default function Settings({ db, customById = {}, store, watchStore, sync, onDone }) {
   // every valid change persists the moment it is made — no draft, no Save
   // button; half-typed values are held locally by their rows (see BirthdayRow)
   // and only committed once they parse
@@ -78,7 +86,7 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
       {tab === 'channels' && (
         <>
           <SearchRow apiKey={settings.apiKey} store={store} db={db} />
-          <ChannelTable db={db} store={store} />
+          <ChannelTable db={db} customById={customById} store={store} />
         </>
       )}
       {tab === 'stats' && <StatsTab watchStore={watchStore} quotaMins={settings.quotaMins} />}
@@ -860,7 +868,13 @@ function SearchRow({ apiKey, store, db }) {
                 className="btn btn-danger btn-sm"
                 onClick={() => {
                   if (isCurated) store.setOverride(ch.channel_id, { hidden: false })
-                  else store.addCustomChannel({ ...ch, min_age: 1, max_age: 15 })
+                  else {
+                    // the search already showed the parent this channel's name
+                    // and avatar; seeding them means the row it becomes is not
+                    // a bare id until the Worker has been asked
+                    seedChannelMeta(ch)
+                    store.addCustomChannel({ ...ch, min_age: 1, max_age: 15 })
+                  }
                   setQuery('')
                 }}
               >
@@ -943,7 +957,7 @@ function EnabledCheckbox({ ch, store }) {
   )
 }
 
-function ChannelTable({ db, store }) {
+function ChannelTable({ db, customById = {}, store }) {
   const { customChannels, overrides, groups, groupOf } = store.settings
   const hiddenCount = Object.values(overrides).filter(o => o.hidden).length
   // ticked rows, for grouping; a Set of channel ids
@@ -953,10 +967,12 @@ function ChannelTable({ db, store }) {
   const data = useMemo(
     () =>
       [
-        ...customChannels.map(ch => ({ ...ch, custom: true })),
+        // stored rows are the decision only; the name, avatar and stats come
+        // from the Worker's record for that id
+        ...customChannels.map(ch => ({ ...hydrateChannel(ch, customById[ch.channel_id]), custom: true })),
         ...curatedChannels(db, overrides).filter(ch => !ch.hidden),
       ].sort((a, b) => b.min_age - a.min_age || b.max_age - a.max_age),
-    [db, customChannels, overrides],
+    [db, customChannels, overrides, customById],
   )
 
   const ageRange = effectiveAgeRange(store.settings)

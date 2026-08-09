@@ -1084,26 +1084,67 @@ async function apiVideos(ytKey, channelId) {
   return apiVideoList(items, details);
 }
 
-async function channelVideos(request, db, ytKey) {
-  await ensureSchema(db);
-  const body = await readBody(request);
-  const channelId = body?.channel;
-  if (typeof channelId !== "string" || !CHANNEL_ID.test(channelId)) return json({ error: "bad channel" }, 400);
+/* topicCategories are Wikipedia URLs: .../wiki/Children%27s_music -> "Children's music" */
+function topicNames(topicDetails) {
+  const names = (topicDetails?.topicCategories ?? []).map(url =>
+    decodeURIComponent(url.split("/").pop()).replace(/_/g, " "),
+  );
+  return [...new Set(names)];
+}
 
-  const row = await db
-    .prepare("SELECT data, fetched_at FROM channel_cache WHERE channel_id = ?1")
-    .bind(channelId)
-    .first();
-  if (row && Date.now() - row.fetched_at < CHANNEL_CACHE_TTL_MS) {
-    return json({ ...JSON.parse(row.data), cached: true });
+/** Channel title, avatar and the stats the parent's channel table shows.
+ * Every extra `part` here is free — channels.list costs one unit whatever it
+ * is asked for — so the alternative was a second fetch for the same price. */
+async function apiChannelMeta(ytKey, channelId) {
+  const resp = await fetch(
+    `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,status,topicDetails&id=${channelId}&key=${ytKey}`,
+  );
+  if (!resp.ok) throw new Error(`channels: HTTP ${resp.status}`);
+  const item = ((await resp.json()).items ?? [])[0];
+  if (!item) return null;
+  const thumb = item.snippet?.thumbnails?.medium?.url ?? item.snippet?.thumbnails?.default?.url;
+  let avatar = null;
+  try {
+    if (typeof thumb === "string" && AVATAR_HOSTS.has(new URL(thumb).hostname)) avatar = thumb;
+  } catch {
+    avatar = null;
   }
+  return {
+    title: typeof item.snippet?.title === "string" ? item.snippet.title : null,
+    thumbnail: avatar,
+    made_for_kids: item.status?.madeForKids ?? null, // COPPA designation; null = unknown
+    topics: topicNames(item.topicDetails),
+    subscribers: Number(item.statistics?.subscriberCount) || null,
+    video_count: Number(item.statistics?.videoCount) || null,
+    view_count: Number(item.statistics?.viewCount) || null,
+  };
+}
 
+/** The same, off the channel page, for when there is no key. Same parsers
+ * /channel uses, so there is one reader of YouTube's markup, not two. */
+async function scrapedChannelMeta(channelId) {
+  const html = await fetchText(`https://www.youtube.com/channel/${channelId}?hl=en`, {
+    "User-Agent": DESKTOP_UA,
+    "Accept-Language": "en-US,en;q=0.9",
+  });
+  if (!html) return null;
+  return { title: parseChannelTitle(html), thumbnail: parseChannelAvatar(html) };
+}
+
+/**
+ * Everything the cache knows about one channel — title, avatar and videos —
+ * fetched from YouTube and written to D1. Returns null when the fetch produced
+ * no videos, which is the one case that must never be cached.
+ */
+async function fetchChannelRecord(channelId, ytKey) {
   let videos = [];
+  let meta = null;
   if (ytKey) {
     try {
       videos = await apiVideos(ytKey, channelId);
+      meta = await apiChannelMeta(ytKey, channelId);
     } catch {
-      videos = [];
+      videos = videos.length ? videos : [];
     }
   }
   if (!videos.length) {
@@ -1112,22 +1153,85 @@ async function channelVideos(request, db, ytKey) {
       .filter((v) => typeof v === "object" && VIDEO_ID.test(v?.id ?? ""))
       .map((v) => ({ id: v.id, title: v.title, duration: null, thumbnail: thumbnailUrl(v.id) }));
   }
+  if (!videos.length) return null; // stale beats empty; never cached
+  if (!meta) meta = await scrapedChannelMeta(channelId).catch(() => null);
+  return { channel_id: channelId, ...(meta ?? {}), title: meta?.title ?? null, thumbnail: meta?.thumbnail ?? null, videos };
+}
 
-  if (!videos.length) {
-    // never cached; the stale row keeps answering until a fetch succeeds
-    if (row) return json({ ...JSON.parse(row.data), cached: true, stale: true });
-    return json({ channel_id: channelId, videos: [] });
-  }
-
-  const data = JSON.stringify({ channel_id: channelId, videos });
+async function writeChannelRecord(db, record) {
   await db
     .prepare(
       "INSERT INTO channel_cache (channel_id, data, fetched_at) VALUES (?1, ?2, ?3) " +
         "ON CONFLICT (channel_id) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at",
     )
-    .bind(channelId, data, Date.now())
+    .bind(record.channel_id, JSON.stringify(record), Date.now())
     .run();
-  return json({ channel_id: channelId, videos });
+}
+
+/** The cached record for one channel, refreshing it first when it is stale. */
+async function channelRecord(db, channelId, ytKey) {
+  const row = await db
+    .prepare("SELECT data, fetched_at FROM channel_cache WHERE channel_id = ?1")
+    .bind(channelId)
+    .first();
+  const cached = row ? JSON.parse(row.data) : null;
+  if (cached && Date.now() - row.fetched_at < CHANNEL_CACHE_TTL_MS) return { ...cached, cached: true };
+
+  const fresh = await fetchChannelRecord(channelId, ytKey).catch(() => null);
+  if (!fresh) {
+    // a stale answer beats an empty one, and a failure is never written
+    return cached ? { ...cached, cached: true, stale: true } : { channel_id: channelId, title: null, thumbnail: null, videos: [] };
+  }
+  await writeChannelRecord(db, fresh);
+  return fresh;
+}
+
+/* Several ids in one request, because a parent with a dozen approved channels
+   should cost one round trip rather than a dozen. */
+const MAX_CHANNELS_PER_REQUEST = 50;
+
+async function channelVideos(request, db, ytKey) {
+  await ensureSchema(db);
+  const body = await readBody(request);
+
+  /* One id or many. The single form is what the first version of this route
+     took and is kept so an older page keeps working. */
+  const asked = Array.isArray(body?.channels) ? body.channels : body?.channel != null ? [body.channel] : [];
+  if (!asked.length || asked.length > MAX_CHANNELS_PER_REQUEST) return json({ error: "bad channels" }, 400);
+  if (!asked.every((id) => typeof id === "string" && CHANNEL_ID.test(id))) return json({ error: "bad channel" }, 400);
+
+  const unique = [...new Set(asked)];
+  const records = [];
+  for (const id of unique) records.push(await channelRecord(db, id, ytKey));
+
+  // the single form answers the way it always did
+  if (!Array.isArray(body?.channels)) return json(records[0]);
+  return json({ channels: Object.fromEntries(records.map((r) => [r.channel_id, r])) });
+}
+
+/**
+ * The cron's work: refresh the channels whose cached answer is oldest, on the
+ * Worker's own schedule, so the DB stays current without any browser asking.
+ * Bounded per run — this is a background top-up, not a full sweep, and the
+ * on-demand path above still covers anything it has not reached.
+ */
+const CRON_REFRESH_LIMIT = 25;
+
+export async function refreshStaleChannels(db, ytKey, now = Date.now()) {
+  await ensureSchema(db);
+  const { results } = await db
+    .prepare("SELECT channel_id FROM channel_cache WHERE fetched_at < ?1 ORDER BY fetched_at ASC LIMIT ?2")
+    .bind(now - CHANNEL_CACHE_TTL_MS, CRON_REFRESH_LIMIT)
+    .all();
+  let refreshed = 0;
+  for (const { channel_id: id } of results ?? []) {
+    const fresh = await fetchChannelRecord(id, ytKey).catch(() => null);
+    if (fresh) {
+      await writeChannelRecord(db, fresh);
+      refreshed++;
+    }
+  }
+  return { looked: (results ?? []).length, refreshed };
 }
 
 function corsPreflight() {
@@ -1156,6 +1260,20 @@ function json(payload, status = 200) {
 }
 
 export default {
+  /* The Worker keeps its own cache current: a daily cron refreshes the stalest
+     channels straight into D1, with no client involved. Browsers still get a
+     fresh answer on demand when they ask for something the cron has not
+     reached — this only means they rarely have to wait for one. */
+  async scheduled(event, env, ctx) {
+    if (!env.DB) return;
+    ctx.waitUntil(
+      refreshStaleChannels(env.DB, env.YOUTUBE_API_KEY ?? "").then(
+        r => console.log(`cron: refreshed ${r.refreshed}/${r.looked} stale channels`),
+        e => console.log(`cron: refresh failed: ${e}`),
+      ),
+    );
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
 
