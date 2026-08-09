@@ -578,6 +578,51 @@ export function applyImport(settings, imported, mode = 'replace') {
 }
 
 // ---------------------------------------------------------------------------
+// what plays next
+
+/* The Android app's `Playlist`, ported line for line — same names, same
+   semantics, same `roll` injection so the random half is testable rather than
+   sampled. It lives up here rather than beside the gallery sort it serves
+   because CHILD_DEFAULTS names the default mode, and a const cannot be read
+   before it is declared.
+
+   Two rules that look like details and are not:
+
+   IN_ORDER STOPS AT THE END rather than wrapping. A grid that loops is a grid
+   a child never reaches the bottom of.
+
+   RANDOM NEVER REPEATS THE CURRENT VIDEO, and gives up when there is nothing
+   else — `roll` picks out of the OTHER count-1 videos and the answer steps
+   over the current index, so the same video cannot come round again
+   immediately.
+
+   And the list is whatever the child was looking at when they tapped: a video
+   started from inside one channel cannot lead out of it, and there is no rule
+   here saying so. The screen that was on is the authority. */
+export const PLAYBACK_IN_ORDER = 'IN_ORDER'
+export const PLAYBACK_RANDOM = 'RANDOM'
+export const PLAYBACK_MODES = [PLAYBACK_IN_ORDER, PLAYBACK_RANDOM]
+
+/** Anything unrecognised — an old blob, a hand-edited file — plays in order. */
+export function playbackMode(name) {
+  return PLAYBACK_MODES.includes(name) ? name : PLAYBACK_IN_ORDER
+}
+
+/** The index to play after `current`, or null for "nothing follows this".
+ * `roll(bound)` returns an integer in [0, bound), like Kotlin's nextInt. */
+export function nextIndex(count, current, mode, roll = n => Math.floor(Math.random() * n)) {
+  if (count <= 0 || current < 0 || current >= count) return null
+  if (playbackMode(mode) === PLAYBACK_IN_ORDER) return current + 1 < count ? current + 1 : null
+  if (count < 2) return null
+  /* The roll is the one input from outside this file, so it is floored and
+     clamped rather than trusted — and NaN is clamped too, which Math.min/max
+     would pass straight through into an index. */
+  const raw = Math.floor(roll(count - 1))
+  const n = Number.isFinite(raw) ? Math.min(count - 2, Math.max(0, raw)) : 0
+  return n >= current ? n + 1 : n
+}
+
+// ---------------------------------------------------------------------------
 // useSettings
 
 const SETTINGS_KEY = 'tinytube:settings:v1'
@@ -597,6 +642,11 @@ export const CHILD_DEFAULTS = {
   day: null, // {until, limits?, bonusMins?} — today's override, see above
   minVideoMins: 0, // the floor: hide videos shorter than this; 0 = no floor
   maxVideoMins: null, // the ceiling: hide videos longer than this; null = none
+  /* Watched videos always sink to the bottom of the grid; this takes them off
+     it entirely. Off by default — sinking is enough for most, and a child
+     re-watching a favourite is not a problem to solve. */
+  hideWatched: false,
+  playback: PLAYBACK_IN_ORDER, // what plays next: 'IN_ORDER' | 'RANDOM'
   /* parent-added channels, as the PARENT'S DECISION only:
      [{channel_id, min_age, max_age, disabled?}]. The name, avatar and videos
      are facts about the channel, so they live in the Worker's shared cache
@@ -658,6 +708,7 @@ export function normalizeSettings(parsed = {}) {
           // channel names and avatars used to be stored here; they are the
           // Worker's now, and a stored copy would only go stale
           customChannels: (c.customChannels ?? []).map(decisionOnly),
+          playback: playbackMode(c.playback),
           id: c.id ?? `child-${i}`,
           name: c.name ?? `Child ${i + 1}`,
         }))
@@ -673,6 +724,7 @@ export function normalizeSettings(parsed = {}) {
             overrides,
             quota: normalizeQuota(parsed.quota ?? { ...CHILD_DEFAULTS.quota, perDay: parsed.quotaMins ?? CHILD_DEFAULTS.quota.perDay }),
             customChannels: (parsed.customChannels ?? []).map(decisionOnly),
+            playback: playbackMode(parsed.playback),
             id: FIRST_CHILD_ID,
             name: parsed.children?.[0]?.name ?? 'Child 1',
           },
@@ -744,6 +796,8 @@ export function storeApi(settings, update, updateChild = update) {
       }),
     clearDayOverride: () => updateChild({ day: null }),
     setVideoLength: ([minVideoMins, maxVideoMins]) => updateChild({ minVideoMins, maxVideoMins }),
+    setHideWatched: hideWatched => updateChild({ hideWatched: !!hideWatched }),
+    setPlayback: mode => updateChild({ playback: playbackMode(mode) }),
     setBirthday: birthday => updateChild({ birthday }),
     /* Only the decision is kept, whatever the caller hands over: a search
        result arrives with a title, avatar, subscriber counts and topics, and
@@ -1073,7 +1127,12 @@ export function quotaState(settings, watchStore, now = Date.now()) {
 
 const WATCH_KEY = 'tinytube:v1'
 const MAX_ENTRIES = 500
-export const WATCHED_THRESHOLD = 0.95 // beyond this it's just credits/outros
+/* Watched, in one number, used everywhere: the badge on a card, the bucket
+   that sinks to the bottom of the grid, what the hide-watched setting hides,
+   and what saveProgress latches as `completed`. Past this it's just
+   credits/outros — 90% is the parent-facing definition and there is no second
+   one hiding in another file. */
+export const WATCHED_THRESHOLD = 0.9
 const LIKED_THRESHOLD = 0.2 // bailed before this -> probably didn't like it
 
 const EMPTY_REMOTE = { days: {}, hours: {} }
@@ -1201,13 +1260,16 @@ function roundRobin(lists) {
 
 /**
  * Gallery order:
- * 1. continue watching (20-95% done), closest to finished first
+ * 1. continue watching (20-90% done), closest to finished first
  * 2. fresh videos, round-robin across channels (newest first within a channel)
  *    so a high-volume channel can't flood out a quiet one
  * 3. abandoned (<20%, started but bailed), same round-robin
- * 4. watched (>95%) last
+ * 4. watched (>90%) last — or not at all, when the parent has asked for them
+ *    to be hidden. Sinking them is the default because a child who wants to
+ *    watch something again should still be able to find it; hiding is the
+ *    stronger version of the same idea and belongs to the parent.
  */
-export function gallerySort(channels, watched) {
+export function gallerySort(channels, watched, { hideWatched = false } = {}) {
   const inProgress = []
   const freshPerChannel = []
   const abandonedPerChannel = []
@@ -1234,7 +1296,7 @@ export function gallerySort(channels, watched) {
     ...inProgress.map(x => x.v),
     ...roundRobin(freshPerChannel),
     ...roundRobin(abandonedPerChannel),
-    ...done,
+    ...(hideWatched ? [] : done),
   ]
 }
 

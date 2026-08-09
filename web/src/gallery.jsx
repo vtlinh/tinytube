@@ -16,6 +16,7 @@ export default function Gallery({
   childName,
   canSwitchChild = false,
   onSwitchChild,
+  hideWatched = false,
   watchStore,
   onPlay,
   onParents,
@@ -30,7 +31,10 @@ export default function Gallery({
     return channels.filter(ch => groupOf[ch.channel_id] === filter.id)
   }, [channels, filter, groupOf])
 
-  const videos = useMemo(() => gallerySort(visible, watchStore.watched), [visible, watchStore.watched])
+  const videos = useMemo(
+    () => gallerySort(visible, watchStore.watched, { hideWatched }),
+    [visible, watchStore.watched, hideWatched],
+  )
 
   const pick = f => {
     setFilter(f)
@@ -88,9 +92,13 @@ export default function Gallery({
       {tab === 'videos' ? (
         <div className="container-fluid py-3">
           <div className="row g-3">
-            {videos.map(video => (
+            {/* the WHOLE visible list goes with the tap, not just the video:
+                what plays next comes from the list the child was looking at,
+                so a video started from a channel-filtered grid cannot lead
+                out of that channel — and the player needs no rule saying so */}
+            {videos.map((video, i) => (
               <div key={video.id} className="col-6 col-md-4 col-lg-3">
-                <VideoCard video={video} entry={watchStore.watched[video.id]} onPlay={() => onPlay(video)} />
+                <VideoCard video={video} entry={watchStore.watched[video.id]} onPlay={() => onPlay(videos, i)} />
               </div>
             ))}
           </div>

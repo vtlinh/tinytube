@@ -22,6 +22,8 @@ import {
   minuteLabel,
   limitLabel,
   clampLengthRange,
+  PLAYBACK_IN_ORDER,
+  PLAYBACK_RANDOM,
   hydrateChannel,
   arrangeChannels,
   AGE_MIN,
@@ -92,6 +94,8 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
             value={[settings.minVideoMins, settings.maxVideoMins]}
             onChange={store.setVideoLength}
           />
+          <HideWatchedRow value={settings.hideWatched} onChange={store.setHideWatched} />
+          <PlaybackRow value={settings.playback} onChange={store.setPlayback} />
           <ApiKeyRow apiKey={settings.apiKey} onChange={store.setApiKey} />
           {/* the About position, like the Android app: the bottom of settings */}
           <div className="text-center mt-5">
@@ -1071,6 +1075,70 @@ function VideoLengthRow({ value: [minMins, maxMins], onChange }) {
         </span>
       </div>
       <VideoLengthSlider value={[minMins, maxMins]} onChange={onChange} />
+    </div>
+  )
+}
+
+/** Watched videos already sink to the bottom of the grid; this takes them off
+ * it. A switch rather than a threshold: what counts as watched is one number
+ * (90%) shared by the badge, the sort and this, and a parent who could tune it
+ * would only be tuning the badge into disagreeing with the grid. */
+function HideWatchedRow({ value, onChange }) {
+  return (
+    <div className="d-flex align-items-center gap-3 mb-4">
+      <span
+        className="settings-label text-nowrap"
+        title="Watched means more than 90% played. They always sort last; this hides them."
+      >
+        <i className="fa-sharp-duotone fa-regular fa-circle-check me-2" />
+        Hide Watched
+      </span>
+      <div className="form-check form-switch fs-4 m-0">
+        <input
+          className="form-check-input"
+          type="checkbox"
+          role="switch"
+          id="hide-watched"
+          aria-label="Hide watched videos"
+          checked={!!value}
+          onChange={e => onChange(e.target.checked)}
+        />
+      </div>
+    </div>
+  )
+}
+
+/** What plays when a video finishes — the Android app's two modes, same names
+ * and same behaviour. Two buttons rather than a dropdown: it is a choice
+ * between two things, both of which fit on the screen. */
+function PlaybackRow({ value, onChange }) {
+  const modes = [
+    [PLAYBACK_IN_ORDER, 'One by one', 'fa-list-ol'],
+    [PLAYBACK_RANDOM, 'Random', 'fa-shuffle'],
+  ]
+  return (
+    <div className="d-flex align-items-center gap-3 mb-4">
+      <span
+        className="settings-label text-nowrap"
+        title="What plays when a video ends — the next one down the grid, or another one at random. Either way it stays inside whatever the grid was showing."
+      >
+        <i className="fa-sharp-duotone fa-regular fa-forward-step me-2" />
+        Play Next
+      </span>
+      <div className="btn-group" role="group" aria-label="What plays next">
+        {modes.map(([mode, label, icon]) => (
+          <button
+            key={mode}
+            type="button"
+            className={`btn ${value === mode ? 'btn-danger' : 'btn-outline-secondary'}`}
+            aria-pressed={value === mode}
+            onClick={() => onChange(mode)}
+          >
+            <i className={`fa-sharp-duotone fa-regular ${icon} me-2`} />
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

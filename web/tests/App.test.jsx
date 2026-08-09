@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import App from '../src/main.jsx'
 import { verify } from '../src/lib.js'
@@ -12,8 +12,16 @@ vi.mock('../src/lib.js', async importOriginal => ({
 }))
 import { isBiometricAvailable } from '../src/lib.js'
 
-// the quota tests walk into the player view; stub the iframe like VideoPlayer.test does
-vi.mock('react-youtube', () => ({ default: () => <div data-testid="yt-stub" /> }))
+// the quota tests walk into the player view; stub the iframe like VideoPlayer.test
+// does, keeping the props so the auto-advance tests can see which video is loaded
+// and fire the ENDED the real player would
+let yt
+vi.mock('react-youtube', () => ({
+  default: props => {
+    yt = props
+    return <div data-testid="yt-stub" />
+  },
+}))
 
 const db = {
   schema_version: 2,
@@ -163,5 +171,91 @@ describe('watch quota gate', () => {
     fireEvent.popState(window)
     expect(await screen.findByLabelText('Parents')).toBeTruthy()
     expect(screen.queryByText(/Watch Quota Exceeded/)).toBeNull()
+  })
+})
+
+/* One video ending starts the next one, out of the list the child tapped on —
+ * the whole point of carrying that list into the player. What "the next one"
+ * means is the parent's Play Next setting. */
+describe('what plays next', () => {
+  const three = {
+    schema_version: 2,
+    generated_at: 'x',
+    channels: [
+      {
+        channel_id: 'UCa',
+        channel_title: 'Chan',
+        min_age: 1,
+        max_age: 15,
+        videos: [
+          { id: 'v1', title: 'One', duration: 10, thumbnail: 't.jpg' },
+          { id: 'v2', title: 'Two', duration: 10, thumbnail: 't.jpg' },
+          { id: 'v3', title: 'Three', duration: 10, thumbnail: 't.jpg' },
+        ],
+      },
+    ],
+  }
+  const withVideos = (settings = {}) => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => three })))
+    localStorage.setItem('tinytube:settings:v1', JSON.stringify(settings))
+  }
+  const end = () => act(() => yt.onStateChange({ data: 0 })) // ENDED
+
+  it('plays the next one down the grid, in order', async () => {
+    withVideos()
+    render(<App />)
+    fireEvent.click(await screen.findByText('One'))
+    expect(yt.videoId).toBe('v1')
+    end()
+    expect(yt.videoId).toBe('v2')
+    end()
+    expect(yt.videoId).toBe('v3')
+  })
+
+  it('stops at the end of the list rather than wrapping', async () => {
+    withVideos()
+    render(<App />)
+    fireEvent.click(await screen.findByText('Three'))
+    expect(yt.videoId).toBe('v3')
+    end()
+    expect(await screen.findByLabelText('Parents')).toBeTruthy() // back on the grid
+  })
+
+  it('picks another video at random, never the one that just played', async () => {
+    withVideos({ playback: 'RANDOM' })
+    render(<App />)
+    fireEvent.click(await screen.findByText('Two'))
+    for (let i = 0; i < 20; i++) {
+      const was = yt.videoId
+      end()
+      expect(yt.videoId).not.toBe(was)
+      expect(['v1', 'v2', 'v3']).toContain(yt.videoId)
+    }
+  })
+
+  it('stays inside the channel the child stepped into', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        ...three,
+        channels: [
+          three.channels[0],
+          {
+            channel_id: 'UCb',
+            channel_title: 'Other',
+            min_age: 1,
+            max_age: 15,
+            videos: [{ id: 'v9', title: 'Elsewhere', duration: 10, thumbnail: 't.jpg' }],
+          },
+        ],
+      }),
+    })))
+    render(<App />)
+    fireEvent.click(await screen.findByText('Channels'))
+    fireEvent.click(await screen.findByText('Chan'))
+    fireEvent.click(await screen.findByText('One'))
+    end()
+    end()
+    expect(yt.videoId).toBe('v3') // never v9, and there is no rule in the player saying so
   })
 })

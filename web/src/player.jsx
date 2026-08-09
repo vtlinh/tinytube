@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import YouTube from 'react-youtube'
 import { fmtMins, quotaState } from './lib.js'
 
-export default function PlayerView({ video, watchStore, settings, onExit, onQuotaExhausted }) {
+export default function PlayerView({ video, watchStore, settings, onExit, onEnded, onQuotaExhausted }) {
   // the tightest of the four limits is the one that matters, and it already
   // counts what was watched on other devices
   const { secsLeft: left, limitSecs } = quotaState(settings, watchStore)
@@ -54,11 +54,18 @@ export default function PlayerView({ video, watchStore, settings, onExit, onQuot
         </span>
       </nav>
       <div className="player-stage position-relative flex-grow-1">
+        {/* keyed on the video: auto-advance swaps one in under a player whose
+            refs (the tick clock, the unflushed seconds, the last state seen)
+            all describe the video that just finished. A remount starts the
+            next one from nothing, and the unmount flushes what the last one
+            owed. */}
         <VideoPlayer
+          key={video.id}
           video={video}
           watchStore={watchStore}
           settings={settings}
           onExit={onExit}
+          onEnded={onEnded}
           onQuotaExhausted={onQuotaExhausted}
         />
       </div>
@@ -88,7 +95,7 @@ const { ENDED, PLAYING, BUFFERING } = { ENDED: 0, PLAYING: 1, BUFFERING: 3 }
 const RESUME_MIN = 10 // don't bother resuming the first seconds
 const RESUME_TAIL = 20 // ...or into the credits
 
-export function VideoPlayer({ video, watchStore, settings, onExit, onQuotaExhausted }) {
+export function VideoPlayer({ video, watchStore, settings, onExit, onEnded, onQuotaExhausted }) {
   const playerRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState(null)
@@ -185,7 +192,10 @@ export function VideoPlayer({ video, watchStore, settings, onExit, onQuotaExhaus
     setPlayerState(e.data)
     if (e.data === ENDED) {
       watchStore.markCompleted(video.id)
-      onExit()
+      // whether anything follows this is the caller's business — it holds the
+      // list that was tapped and the child's playback mode. Without one, a
+      // finished video does what it always did and returns to the grid.
+      ;(onEnded ?? onExit)()
     } else if (e.data !== PLAYING && e.data !== BUFFERING) {
       save()
     }
