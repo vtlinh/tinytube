@@ -9,7 +9,8 @@ import {
   clampLengthRange,
   mergeChannels,
   activeBonusMins,
-  effectiveQuotaMins,
+  effectiveQuota,
+  quotaState,
   endOfWeek,
   useSettings,
   DEFAULTS,
@@ -96,20 +97,42 @@ describe('filtering the grid by length', () => {
 describe('bonus time', () => {
   const now = new Date(2026, 7, 12, 18, 0).getTime() // a Wednesday evening
 
-  it('counts only while the week it was granted in lasts', () => {
-    const granted = { quotaMins: 60, bonus: { mins: 30, expiresAt: endOfWeek(now) } }
-    expect(activeBonusMins(granted, now)).toBe(30)
-    expect(effectiveQuotaMins(granted, now)).toBe(90)
+  const limits = { per6h: null, perDay: 60, perWeek: null, perMonth: null }
 
-    // ...and stops existing once the week is out
+  it('counts only while the week it was granted in lasts', () => {
+    const granted = { quota: limits, week: { bonusMins: 30, until: endOfWeek(now) } }
+    expect(activeBonusMins(granted, now)).toBe(30)
+    expect(effectiveQuota(granted, now).perDay).toBe(90)
+    // a period with no limit is not given one by a grant
+    expect(effectiveQuota(granted, now).perWeek).toBe(null)
+
+    // ...and it stops existing once the week is out
     const nextWeek = endOfWeek(now) + 1000
     expect(activeBonusMins(granted, nextWeek)).toBe(0)
-    expect(effectiveQuotaMins(granted, nextWeek)).toBe(60)
+    expect(effectiveQuota(granted, nextWeek).perDay).toBe(60)
   })
 
   it('is nothing at all when none was granted', () => {
-    expect(activeBonusMins({ quotaMins: 60 }, now)).toBe(0)
-    expect(effectiveQuotaMins({ quotaMins: 60 }, now)).toBe(60)
+    expect(activeBonusMins({ quota: limits }, now)).toBe(0)
+    expect(effectiveQuota({ quota: limits }, now).perDay).toBe(60)
+  })
+
+  it("this week's limits replace the standing ones until the week is out", () => {
+    const overridden = {
+      quota: limits,
+      week: { limits: { ...limits, perDay: 15 }, until: endOfWeek(now) },
+    }
+    expect(effectiveQuota(overridden, now).perDay).toBe(15)
+    expect(effectiveQuota(overridden, endOfWeek(now) + 1000).perDay).toBe(60) // back to standing
+  })
+
+  it('the tightest limit is the one that stops a child', () => {
+    const store = { usage: { window: {}, days: {}, hours: {} }, remote: { days: {}, hours: {} } }
+    const settings = { quota: { per6h: 30, perDay: 60, perWeek: null, perMonth: null } }
+    const state = quotaState(settings, store, now)
+    expect(state.period).toBe('per6h') // 30 minutes is less than 60
+    expect(state.secsLeft).toBe(30 * 60)
+    expect(state.blocked).toBe(false)
   })
 
   it('ends the week it was granted in, not seven days later', () => {
@@ -140,5 +163,45 @@ describe('granting through the store', () => {
 
     act(() => result.current.addChild('Bob'))
     expect(activeBonusMins(result.current.settings)).toBe(0) // Bob got nothing
+  })
+})
+
+describe('overriding this week from the store', () => {
+  function fakeStorage() {
+    let store = {}
+    return {
+      getItem: k => store[k] ?? null,
+      setItem: (k, v) => { store[k] = String(v) },
+      removeItem: k => { delete store[k] },
+    }
+  }
+  beforeEach(() => vi.stubGlobal('localStorage', fakeStorage()))
+  afterEach(() => vi.unstubAllGlobals())
+
+  const limits = { per6h: null, perDay: 60, perWeek: null, perMonth: null }
+
+  it('replaces the limits for the week and leaves the standing ones alone', () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => result.current.setQuota(limits))
+    act(() => result.current.setWeekLimits({ ...limits, perDay: 15 }))
+
+    expect(effectiveQuota(result.current.settings).perDay).toBe(15) // in force
+    expect(result.current.settings.quota.perDay).toBe(60) // untouched underneath
+
+    act(() => result.current.clearWeekOverride())
+    expect(effectiveQuota(result.current.settings).perDay).toBe(60)
+  })
+
+  it('keeps a grant when the week is overridden, and the override when time is granted', () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => result.current.setQuota(limits))
+
+    act(() => result.current.addBonusMins(30))
+    act(() => result.current.setWeekLimits({ ...limits, perDay: 15 }))
+    // the two are one object: setting limits must not drop the granted minutes
+    expect(effectiveQuota(result.current.settings).perDay).toBe(45)
+
+    act(() => result.current.addBonusMins(15))
+    expect(effectiveQuota(result.current.settings).perDay).toBe(60) // 15 + 45 granted
   })
 })

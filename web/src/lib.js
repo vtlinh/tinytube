@@ -578,10 +578,12 @@ const SETTINGS_KEY = 'tinytube:settings:v1'
 export const CHILD_DEFAULTS = {
   ageRange: [1, 15], // everything; superseded by birthday when set
   birthday: null, // 'YYYY-MM'; the child's age is computed from this (born the 1st)
-  quotaMins: 180, // watch quota per rolling 12h window; 0 = no watching (there is no "off")
+  /* minutes per period, or null for "no limit over this one". 0 means no
+     watching at all, which is still deliberately reachable. */
+  quota: { per6h: null, perDay: 180, perWeek: null, perMonth: null },
+  week: null, // {until, limits?, bonusMins?} — this week's override, see above
   minVideoMins: 0, // the floor: hide videos shorter than this; 0 = no floor
   maxVideoMins: null, // the ceiling: hide videos longer than this; null = none
-  bonus: null, // {mins, expiresAt}: extra watch time a grown-up granted this week
   /* parent-added channels, as the PARENT'S DECISION only:
      [{channel_id, min_age, max_age, disabled?}]. The name, avatar and videos
      are facts about the channel, so they live in the Worker's shared cache
@@ -637,6 +639,9 @@ export function normalizeSettings(parsed = {}) {
       ? parsed.children.map((c, i) => ({
           ...CHILD_DEFAULTS,
           ...c,
+          // the one 12h number became four periods; a daily cap is the
+          // closest thing to what it meant, so that is where it lands
+          quota: c.quota ?? { ...CHILD_DEFAULTS.quota, perDay: c.quotaMins ?? CHILD_DEFAULTS.quota.perDay },
           // channel names and avatars used to be stored here; they are the
           // Worker's now, and a stored copy would only go stale
           customChannels: (c.customChannels ?? []).map(decisionOnly),
@@ -653,6 +658,7 @@ export function normalizeSettings(parsed = {}) {
                 .map(k => [k, parsed[k]]),
             ),
             overrides,
+            quota: parsed.quota ?? { ...CHILD_DEFAULTS.quota, perDay: parsed.quotaMins ?? CHILD_DEFAULTS.quota.perDay },
             customChannels: (parsed.customChannels ?? []).map(decisionOnly),
             id: FIRST_CHILD_ID,
             name: parsed.children?.[0]?.name ?? 'Child 1',
@@ -701,9 +707,17 @@ export function storeApi(settings, update, updateChild = update) {
        Wednesday's bedtime should not expire on Wednesday's grant clock. An
        expired one contributes nothing, so this resets rather than compounds. */
     addBonusMins: mins =>
-      updateChild({ bonus: { mins: activeBonusMins(settings) + mins, expiresAt: endOfWeek() } }),
+      updateChild({
+        week: { ...(activeWeekOverride(settings) ?? {}), bonusMins: activeBonusMins(settings) + mins, until: endOfWeek() },
+      }),
     setAgeRange: ([lo, hi]) => updateChild({ ageRange: [Math.min(lo, hi), Math.max(lo, hi)] }),
-    setQuotaMins: quotaMins => updateChild({ quotaMins }),
+    /* The standing limits, and this week's override of them. Both are set
+       whole, from a dialog with a Save — a half-edited set of four limits is
+       not something to persist a keystroke at a time. */
+    setQuota: quota => updateChild({ quota }),
+    setWeekLimits: limits =>
+      updateChild({ week: { ...(activeWeekOverride(settings) ?? {}), limits, until: endOfWeek() } }),
+    clearWeekOverride: () => updateChild({ week: null }),
     setVideoLength: ([minVideoMins, maxVideoMins]) => updateChild({ minVideoMins, maxVideoMins }),
     setBirthday: birthday => updateChild({ birthday }),
     /* Only the decision is kept, whatever the caller hands over: a search
@@ -839,6 +853,17 @@ const HOUR_MS = 3600_000
 const DAY_MS = 86_400_000
 const EMPTY_USAGE = { window: { start: null, secs: 0 }, days: {}, hours: {} }
 
+/* FOUR LIMITS, and a child is watching under all of them at once: whichever
+   has the least left is the one that stops them. Each is minutes, or null for
+   "no limit over this period" — which is not the same as 0, and 0 still means
+   what it always did: no watching at all. */
+export const QUOTA_PERIODS = [
+  { key: 'per6h', label: 'Every 6 hours', hint: 'a rolling six hours' },
+  { key: 'perDay', label: 'Each day', hint: 'resets at midnight' },
+  { key: 'perWeek', label: 'Each week', hint: 'resets on Sunday' },
+  { key: 'perMonth', label: 'Each month', hint: 'resets on the 1st' },
+]
+
 const pad2 = n => String(n).padStart(2, '0')
 const localDate = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 
@@ -875,6 +900,8 @@ export function usageStats(usage, now = Date.now()) {
     Object.entries(usage.days).reduce((total, [k, secs]) => (k >= key ? total + secs : total), 0)
   const nowHour = Math.floor(now / HOUR_MS)
   return {
+    last6h: Object.entries(usage.hours).reduce((total, [k, secs]) => (+k > nowHour - 6 ? total + secs : total), 0),
+    today: usage.days[localDate(d)] ?? 0,
     session: windowUsed(usage, now),
     last24h: Object.entries(usage.hours).reduce((total, [k, secs]) => (+k > nowHour - 24 ? total + secs : total), 0),
     wtd: daysSince(localDate(new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay()))),
@@ -883,10 +910,29 @@ export function usageStats(usage, now = Date.now()) {
   }
 }
 
+/** Seconds watched in each period, from whichever buckets are handed in —
+ * pass the merged ones (statsUsage) and the limits hold across devices. */
+export function usageByPeriod(usage, now = Date.now()) {
+  const d = new Date(now)
+  const nowHour = Math.floor(now / HOUR_MS)
+  const since = key =>
+    Object.entries(usage.days ?? {}).reduce((total, [k, secs]) => (k >= key ? total + secs : total), 0)
+  return {
+    per6h: Object.entries(usage.hours ?? {}).reduce(
+      (total, [k, secs]) => (+k > nowHour - 6 ? total + secs : total),
+      0,
+    ),
+    perDay: (usage.days ?? {})[localDate(d)] ?? 0,
+    perWeek: since(localDate(new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay()))),
+    perMonth: since(localDate(new Date(d.getFullYear(), d.getMonth(), 1))),
+  }
+}
+
 // ---------------------------------------------------------------------------
-// bonus time — a grown-up standing at the spent-quota screen, past the gate,
-// granting more. It lasts THE WEEK and then stops existing: a top-up that
-// quietly became permanent would be a parental control that erodes.
+// this week's override — a grown-up changing the limits, or adding minutes to
+// them, for THIS WEEK only. It expires with the week and then stops existing:
+// a change that quietly became permanent would be a parental control that
+// erodes.
 
 /** The instant the current week ends. Weeks start Sunday, like the stats. */
 export function endOfWeek(now = Date.now()) {
@@ -895,15 +941,50 @@ export function endOfWeek(now = Date.now()) {
   return sunday.getTime() + 7 * DAY_MS
 }
 
-/** Granted minutes that have not expired; 0 once the week is out. */
-export function activeBonusMins(settings, now = Date.now()) {
-  const bonus = settings?.bonus
-  return bonus && bonus.expiresAt > now ? bonus.mins : 0
+/** The override if it is still this week's, else null. */
+export function activeWeekOverride(settings, now = Date.now()) {
+  const week = settings?.week
+  return week && week.until > now ? week : null
 }
 
-/** The cap a child is actually watching against: their quota plus any grant. */
-export function effectiveQuotaMins(settings, now = Date.now()) {
-  return (settings?.quotaMins ?? 0) + activeBonusMins(settings, now)
+/** Minutes granted on top of every limit this week. */
+export function activeBonusMins(settings, now = Date.now()) {
+  return activeWeekOverride(settings, now)?.bonusMins ?? 0
+}
+
+/** The limits actually in force: this week's if it replaced them, plus any
+ * granted minutes. A period with no limit stays without one — adding time to
+ * "no limit" is not a thing that means anything. */
+export function effectiveQuota(settings, now = Date.now()) {
+  const week = activeWeekOverride(settings, now)
+  const base = week?.limits ?? settings?.quota ?? {}
+  const bonus = week?.bonusMins ?? 0
+  return Object.fromEntries(
+    QUOTA_PERIODS.map(({ key }) => [key, base[key] == null ? null : base[key] + bonus]),
+  )
+}
+
+/**
+ * Where a child stands against every limit at once: how long they have left
+ * (the tightest one), which period that is, and what that limit is — the
+ * player's meter needs all three to draw a bar that means something.
+ */
+export function quotaState(settings, watchStore, now = Date.now()) {
+  const used = usageByPeriod(statsUsage(watchStore), now)
+  const limits = effectiveQuota(settings, now)
+  let secsLeft = Infinity
+  let limitSecs = Infinity
+  let period = null
+  for (const { key } of QUOTA_PERIODS) {
+    if (limits[key] == null) continue
+    const left = limits[key] * 60 - (used[key] ?? 0)
+    if (left < secsLeft) {
+      secsLeft = left
+      limitSecs = limits[key] * 60
+      period = key
+    }
+  }
+  return { secsLeft, limitSecs, period, used, limits, blocked: secsLeft <= 0 }
 }
 
 // ---------------------------------------------------------------------------

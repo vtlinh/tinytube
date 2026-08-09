@@ -3,13 +3,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import YouTube from 'react-youtube'
-import { fmtMins, usedSecs } from './lib.js'
+import { fmtMins, quotaState } from './lib.js'
 
-export default function PlayerView({ video, watchStore, quotaMins, onExit, onQuotaExhausted }) {
-  const quotaSecs = quotaMins * 60
-  // usedSecs, not windowUsed: watching on ANOTHER device counts here too
-  const secsLeft = Math.max(0, quotaSecs - usedSecs(watchStore))
-  const pctLeft = quotaSecs ? (secsLeft / quotaSecs) * 100 : 0
+export default function PlayerView({ video, watchStore, settings, onExit, onQuotaExhausted }) {
+  // the tightest of the four limits is the one that matters, and it already
+  // counts what was watched on other devices
+  const { secsLeft: left, limitSecs } = quotaState(settings, watchStore)
+  const secsLeft = Math.max(0, left)
+  const pctLeft = Number.isFinite(limitSecs) && limitSecs ? (secsLeft / limitSecs) * 100 : 100
 
   // best-effort landscape: fullscreen + orientation lock works on Android;
   // iOS has neither, so CSS rotates the whole view in portrait (see styles)
@@ -56,7 +57,7 @@ export default function PlayerView({ video, watchStore, quotaMins, onExit, onQuo
         <VideoPlayer
           video={video}
           watchStore={watchStore}
-          quotaMins={quotaMins}
+          settings={settings}
           onExit={onExit}
           onQuotaExhausted={onQuotaExhausted}
         />
@@ -87,7 +88,7 @@ const { ENDED, PLAYING, BUFFERING } = { ENDED: 0, PLAYING: 1, BUFFERING: 3 }
 const RESUME_MIN = 10 // don't bother resuming the first seconds
 const RESUME_TAIL = 20 // ...or into the credits
 
-export function VideoPlayer({ video, watchStore, quotaMins, onExit, onQuotaExhausted }) {
+export function VideoPlayer({ video, watchStore, settings, onExit, onQuotaExhausted }) {
   const playerRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState(null)
@@ -136,7 +137,7 @@ export function VideoPlayer({ video, watchStore, quotaMins, onExit, onQuotaExhau
       pending.current += watched
       // hard stop the moment the quota runs out — otherwise a video started
       // with 1 min left plays to the end for free
-      if (usedSecs(watchStore) + pending.current >= quotaMins * 60) {
+      if (pending.current >= quotaState(settings, watchStore).secsLeft) {
         save()
         onQuotaExhausted()
       } else if (pending.current >= 5) {
@@ -152,7 +153,7 @@ export function VideoPlayer({ video, watchStore, quotaMins, onExit, onQuotaExhau
       window.removeEventListener('pagehide', onHide)
       save()
     }
-  }, [save, watchStore, quotaMins, onQuotaExhausted])
+  }, [save, watchStore, settings, onQuotaExhausted])
 
   const pokeControls = useCallback(() => {
     setShowControls(true)

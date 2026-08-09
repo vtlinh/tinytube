@@ -12,8 +12,7 @@ import {
   useSync,
   verify,
   isBiometricAvailable,
-  usedSecs,
-  effectiveQuotaMins,
+  quotaState,
 } from './lib.js'
 import Gallery from './gallery.jsx'
 import PlayerView from './player.jsx'
@@ -81,7 +80,7 @@ export default function App() {
       <PlayerView
         video={current}
         watchStore={watchStore}
-        quotaMins={effectiveQuotaMins(store.settings)}
+        settings={store.settings}
         onExit={close}
         onQuotaExhausted={() => {
           // same history depth: the player's entry becomes the quota screen's,
@@ -173,7 +172,7 @@ export default function App() {
         // the gallery sits idle must unblock immediately (expiry is lazy).
         // usedSecs folds in the synced account-wide usage, so switching
         // devices doesn't reset the meter
-        const over = usedSecs(watchStore) >= effectiveQuotaMins(store.settings) * 60
+        const over = quotaState(store.settings, watchStore).blocked
         if (over) open(() => setView('quota'))()
         else open(setCurrent)(video)
       }}

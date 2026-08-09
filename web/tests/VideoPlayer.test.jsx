@@ -39,18 +39,33 @@ beforeEach(() => {
     addWatchTime: vi.fn(secs => {
       watchStore.usage.window.start ??= Date.now()
       watchStore.usage.window.secs += secs
+      const d = new Date()
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      watchStore.usage.days[key] = (watchStore.usage.days[key] ?? 0) + secs
     }),
   }
   onExit = vi.fn()
   onQuotaExhausted = vi.fn()
 })
 
+// the player reads the four limits off settings now; a daily cap is the one
+// these tests exercise, and the day bucket is where its usage lives
+const settingsWith = (mins = 60) => ({ quota: { per6h: null, perDay: mins, perWeek: null, perMonth: null } })
+
+// pre-spend the day's allowance: the daily limit reads the day bucket, which
+// is where accrued seconds land — the old rolling-12h window is not consulted
+const alreadyWatched = secs => {
+  const d = new Date()
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  watchStore.usage.days[key] = secs
+}
+
 const renderPlayer = (Component = VideoPlayer, quotaMins = 60) =>
   render(
     <Component
       video={video}
       watchStore={watchStore}
-      quotaMins={quotaMins}
+      settings={settingsWith(quotaMins)}
       onExit={onExit}
       onQuotaExhausted={onQuotaExhausted}
     />,
@@ -163,13 +178,13 @@ describe('watch quota', () => {
   })
 
   it('hard-stops the instant the quota runs out mid-video', () => {
-    watchStore.usage.window = { start: Date.now(), secs: 3570 } // 30s left of 60min
+    alreadyWatched(3570) // 30s left of 60min
     const player = startPlaying()
     watchFor(player, 29)
     expect(onQuotaExhausted).not.toHaveBeenCalled()
     watchFor(player, 1)
     expect(onQuotaExhausted).toHaveBeenCalled()
-    expect(watchStore.usage.window.secs).toBe(3600) // spent seconds flushed before exiting
+    expect(watchStore.usage.window.secs).toBe(30) // spent seconds flushed before exiting
   })
 
   // regression: quota used to count 1s per timer tick and only while the last
@@ -216,14 +231,14 @@ describe('top bar countdown', () => {
   })
 
   it('drains and turns red as the quota runs out', () => {
-    watchStore.usage.window = { start: Date.now(), secs: 3570 }
+    alreadyWatched(3570)
     renderPlayer(PlayerView)
     expect(screen.getByText('1m')).toBeTruthy()
     expect(quotaBar().className).toContain('bg-danger')
   })
 
   it('never goes negative', () => {
-    watchStore.usage.window = { start: Date.now(), secs: 9999 }
+    alreadyWatched(9999)
     renderPlayer(PlayerView)
     expect(screen.getByText('0m')).toBeTruthy()
     expect(quotaBar().style.width).toBe('0%')
