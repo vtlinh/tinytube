@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { gallerySort, fraction, windowUsed, accrueUsage, usageStats, fmtMins, QUOTA_WINDOW_MS } from '../src/lib.js'
+import {
+  gallerySort,
+  fraction,
+  windowUsed,
+  accrueUsage,
+  usageStats,
+  fmtMins,
+  QUOTA_WINDOW_MS,
+  WATCHED_THRESHOLD,
+} from '../src/lib.js'
 
 const channels = [
   { channel_title: 'Busy', videos: [{ id: 'b1' }, { id: 'b2' }, { id: 'b3' }, { id: 'b4' }] },
@@ -32,6 +41,32 @@ describe('gallerySort', () => {
       q1: { pos: 90, dur: 100, completed: false },
     }
     expect(gallerySort(channels, watched).slice(0, 2).map(v => v.id)).toEqual(['q1', 'b1'])
+  })
+
+  /* 90% is the parent-facing definition of watched, and ABOVE it is what
+     counts: exactly 90% is still something to finish. */
+  it('draws the watched line above 90%, not at it', () => {
+    expect(WATCHED_THRESHOLD).toBe(0.9)
+    const watched = {
+      b1: { pos: 90, dur: 100, completed: false }, // exactly 90% -> still going
+      b2: { pos: 91, dur: 100, completed: false }, // past it -> watched
+    }
+    const ids = gallerySort(channels, watched).map(v => v.id)
+    expect(ids[0]).toBe('b1') // continue watching, first
+    expect(ids.at(-1)).toBe('b2') // watched, last
+  })
+
+  it('hides watched videos when the parent asks, and only then', () => {
+    const watched = {
+      q1: { pos: 96, dur: 100, completed: true },
+      b3: { pos: 0, dur: 0, completed: true }, // completed with no positions
+    }
+    const shown = gallerySort(channels, watched, { hideWatched: true }).map(v => v.id)
+    expect(shown).toEqual(['b1', 'q2', 'b2', 'b4'])
+    // the default is unchanged: they sink rather than vanish
+    expect(gallerySort(channels, watched).map(v => v.id)).toEqual([
+      'b1', 'q2', 'b2', 'b4', 'b3', 'q1',
+    ])
   })
 })
 

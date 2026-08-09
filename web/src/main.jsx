@@ -13,6 +13,7 @@ import {
   verify,
   isBiometricAvailable,
   quotaState,
+  nextIndex,
 } from './lib.js'
 import Gallery from './gallery.jsx'
 import PlayerView from './player.jsx'
@@ -25,7 +26,10 @@ export default function App() {
   // one history per child: switching child swaps the grid's progress and the quota
   const watchStore = useWatchStore(store.settings.childId)
   const sync = useSync(store, watchStore) // inert until a parent signs in (Settings -> Sync)
-  const [current, setCurrent] = useState(null) // video being played, or null
+  // what is playing: the list the child tapped on and where in it we are, or
+  // null. The list travels with the tap so what plays next can never leave the
+  // slice of the grid that was on screen.
+  const [current, setCurrent] = useState(null) // {list, index} | null
   const [view, setView] = useState('gallery') // 'gallery' | 'gate' | 'settings' | 'quota'
   const [biometric, setBiometric] = useState(null) // null = still checking
   const [granting, setGranting] = useState(null) // minutes waiting on the gate
@@ -78,10 +82,20 @@ export default function App() {
   if (current) {
     return (
       <PlayerView
-        video={current}
+        video={current.list[current.index]}
         watchStore={watchStore}
         settings={store.settings}
         onExit={close}
+        /* One finished, so play the next one the child's mode asks for — in
+           order, or a random other. `nextIndex` returning null means the list
+           is spent, and then the player closes exactly as it always did. This
+           does NOT re-check the quota: the counting loop stops playback the
+           moment it runs out, whichever video is on. */
+        onEnded={() => {
+          const i = nextIndex(current.list.length, current.index, store.settings.playback)
+          if (i == null) close()
+          else setCurrent({ ...current, index: i })
+        }}
         onQuotaExhausted={() => {
           // same history depth: the player's entry becomes the quota screen's,
           // so back still lands on the gallery
@@ -198,15 +212,16 @@ export default function App() {
       onSwitchChild={onSwitchChild}
       groups={store.settings.groups}
       groupOf={store.settings.groupOf}
+      hideWatched={store.settings.hideWatched}
       watchStore={watchStore}
-      onPlay={video => {
+      onPlay={(list, index) => {
         // checked at tap time, not render time: a 12h window that expires while
         // the gallery sits idle must unblock immediately (expiry is lazy).
         // usedSecs folds in the synced account-wide usage, so switching
         // devices doesn't reset the meter
         const over = quotaState(store.settings, watchStore).blocked
         if (over) open(() => setView('quota'))()
-        else open(setCurrent)(video)
+        else open(setCurrent)({ list, index })
       }}
       onParents={onParents}
     />

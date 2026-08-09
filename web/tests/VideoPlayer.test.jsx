@@ -132,6 +132,30 @@ describe('once the player is ready', () => {
   })
 })
 
+/* Whether anything follows a finished video is the CALLER's question — it is
+   the one holding the list that was tapped and the child's playback mode. The
+   player only reports that the video ended. */
+describe('when the caller wants to say what plays next', () => {
+  it('reports ENDED to it instead of leaving the player', () => {
+    const onEnded = vi.fn()
+    render(
+      <VideoPlayer
+        video={video}
+        watchStore={watchStore}
+        settings={settingsWith(60)}
+        onExit={onExit}
+        onEnded={onEnded}
+        onQuotaExhausted={onQuotaExhausted}
+      />,
+    )
+    act(() => yt.onReady({ target: fakePlayer() }))
+    act(() => yt.onStateChange({ data: ENDED }))
+    expect(watchStore.markCompleted).toHaveBeenCalledWith(video.id) // still counted
+    expect(onEnded).toHaveBeenCalled()
+    expect(onExit).not.toHaveBeenCalled() // the caller decides, not the player
+  })
+})
+
 describe('on player error', () => {
   // regression: errors used to call onExit immediately, bouncing the child
   // back to the gallery with no explanation
