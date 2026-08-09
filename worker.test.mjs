@@ -635,3 +635,17 @@ test("CHILD_ID accepts uuids and the migration id, and refuses anything that cou
 test("the migration child id is the literal both sides agree on", () => {
   assert.equal(DEFAULT_CHILD, "default");
 });
+
+/* The cache outlived its own shape once: its first version stored videos and
+   no title, and serving one of those rows inside its day would show a bare
+   channel id where a name belongs. Caught on a live preview, not in a test —
+   so here is the test. */
+
+import { usableRecord } from "./worker.js";
+
+test("a cached row without a title is not a usable record", () => {
+  assert.equal(usableRecord({ channel_id: "UC", videos: [{ id: "x" }] }), false);
+  assert.equal(usableRecord({ channel_id: "UC", title: "Chan", videos: [] }), true);
+  assert.equal(usableRecord({ channel_id: "UC", title: null, videos: [] }), true, "known-to-be-nameless is an answer");
+  assert.equal(usableRecord(null), false);
+});
