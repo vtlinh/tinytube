@@ -341,6 +341,120 @@ export function groupInto(settings, selectedIds, name) {
 }
 
 // ---------------------------------------------------------------------------
+// import / export — a child's channel list as a file, so a parent can copy a
+// setup to another child, to another device, or keep it somewhere safe.
+//
+// EVERYTHING COMING BACK IN IS RE-VALIDATED. The file is the one input to this
+// app that a parent can hand it from anywhere, and what it becomes is the list
+// of channels a child may watch: a bad id reaches a URL, a bad thumbnail URL
+// is fetched and drawn. Nothing is trusted for having been exported by us.
+
+export const EXPORT_KIND = 'tinytube-channels'
+export const EXPORT_VERSION = 1
+
+const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/
+// the hosts YouTube serves avatars and posters from; anything else is dropped
+const IMAGE_HOSTS = new Set(['yt3.ggpht.com', 'yt3.googleusercontent.com', 'i.ytimg.com'])
+const MAX_IMPORT_CHANNELS = 500
+
+const validAge = n => Number.isInteger(n) && n >= AGE_MIN && n <= AGE_MAX
+
+function safeImageUrl(url) {
+  try {
+    const u = new URL(url)
+    return u.protocol === 'https:' && IMAGE_HOSTS.has(u.hostname) ? u.href : null
+  } catch {
+    return null
+  }
+}
+
+/** The active child's channel setup, as the object written to the file. */
+export function exportChannels(settings) {
+  return {
+    kind: EXPORT_KIND,
+    version: EXPORT_VERSION,
+    child: settings.childName,
+    customChannels: settings.customChannels,
+    overrides: settings.overrides,
+    groups: settings.groups,
+    groupOf: settings.groupOf,
+  }
+}
+
+/**
+ * File text -> a child patch, or a thrown Error a parent can read.
+ *
+ * Anything malformed INSIDE a recognised file is dropped rather than fatal —
+ * one unreadable row should not cost a parent the other forty — but the file
+ * itself must say what it is, so picking the wrong file fails loudly instead
+ * of silently emptying a child's grid.
+ */
+export function parseChannelImport(text) {
+  let data
+  try {
+    data = JSON.parse(text)
+  } catch {
+    throw new Error('That file is not JSON.')
+  }
+  if (!data || typeof data !== 'object' || data.kind !== EXPORT_KIND) {
+    throw new Error('That is not a TinyTube channel export.')
+  }
+  if (Number(data.version) > EXPORT_VERSION) {
+    throw new Error('That export came from a newer version of TinyTube.')
+  }
+
+  const customChannels = []
+  const seen = new Set()
+  for (const ch of Array.isArray(data.customChannels) ? data.customChannels : []) {
+    if (!ch || !CHANNEL_ID_RE.test(ch.channel_id ?? '') || seen.has(ch.channel_id)) continue
+    if (customChannels.length >= MAX_IMPORT_CHANNELS) break
+    seen.add(ch.channel_id)
+    // an inverted pair is a typo in someone's file, not a reason to refuse it
+    const lo = validAge(ch.min_age) ? ch.min_age : AGE_MIN
+    const hi = validAge(ch.max_age) ? ch.max_age : AGE_MAX
+    customChannels.push({
+      channel_id: ch.channel_id,
+      channel_title: typeof ch.channel_title === 'string' ? ch.channel_title.slice(0, 200) : ch.channel_id,
+      thumbnail: safeImageUrl(ch.thumbnail) ?? undefined,
+      min_age: Math.min(lo, hi),
+      max_age: Math.max(lo, hi),
+      ...(ch.disabled ? { disabled: true } : {}),
+    })
+  }
+
+  const overrides = {}
+  for (const [id, patch] of Object.entries(data.overrides ?? {})) {
+    if (!CHANNEL_ID_RE.test(id) || !patch || typeof patch !== 'object') continue
+    const kept = {}
+    if (validAge(patch.min_age)) kept.min_age = patch.min_age
+    if (validAge(patch.max_age)) kept.max_age = patch.max_age
+    if (kept.min_age != null && kept.max_age != null && kept.min_age > kept.max_age) {
+      ;[kept.min_age, kept.max_age] = [kept.max_age, kept.min_age]
+    }
+    if (patch.hidden === true) kept.hidden = true
+    if (patch.disabled === true) kept.disabled = true
+    if (Object.keys(kept).length) overrides[id] = kept
+  }
+
+  const groups = []
+  const groupIds = new Set()
+  for (const g of Array.isArray(data.groups) ? data.groups : []) {
+    if (!g || typeof g.id !== 'string' || typeof g.name !== 'string' || groupIds.has(g.id)) continue
+    groupIds.add(g.id)
+    groups.push({ id: g.id, name: g.name.slice(0, 100) })
+  }
+
+  const groupOf = {}
+  for (const [id, gid] of Object.entries(data.groupOf ?? {})) {
+    // a membership pointing at a group the file did not carry is meaningless
+    if (CHANNEL_ID_RE.test(id) && groupIds.has(gid)) groupOf[id] = gid
+  }
+
+  // the >=2 rule holds for imported groups exactly as it does for made ones
+  return { customChannels, overrides, ...tidyGroups({ groups, groupOf }) }
+}
+
+// ---------------------------------------------------------------------------
 // useSettings
 
 const SETTINGS_KEY = 'tinytube:settings:v1'
@@ -469,6 +583,10 @@ export function storeApi(settings, update, updateChild = update) {
     /* Put the selected channels in a (possibly existing — `absorbing`) group,
        or dissolve their membership. Both run `tidy` after, like the Android
        stores do: every mutation can strand a group's last member. */
+    /* An imported file REPLACES the child's channel setup rather than merging
+       into it: a parent importing a list means "this list", and a merge would
+       leave channels behind that they cannot see they still have. */
+    importChannels: patch => updateChild(patch),
     groupChannels: (ids, name) => updateChild(groupInto(settings, ids, name)),
     ungroupChannels: ids => updateChild(tidyGroups({ ...settings, groupOf: withoutIds(settings.groupOf, ids) })),
   }

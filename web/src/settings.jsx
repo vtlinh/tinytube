@@ -23,6 +23,8 @@ import {
   prefillGroupName,
   groupNamesInUse,
   groupNameError,
+  exportChannels,
+  parseChannelImport,
 } from './lib.js'
 import { searchChannels, resolveChannel, evictChannelCache, formatCount, validateApiKey } from './youtubeApi.js'
 import { TabButton } from './gallery.jsx'
@@ -125,7 +127,7 @@ function StatsTab({ watchStore, quotaMins }) {
   )
 }
 
-function ConfirmModal({ title, body, onConfirm, onCancel }) {
+function ConfirmModal({ title, body, onConfirm, onCancel, confirmLabel = 'Delete', confirmIcon = 'fa-trash' }) {
   return (
     <>
       <div className="modal d-block" tabIndex="-1" role="dialog" onClick={onCancel}>
@@ -141,8 +143,8 @@ function ConfirmModal({ title, body, onConfirm, onCancel }) {
                 Cancel
               </button>
               <button type="button" className="btn btn-danger" onClick={onConfirm}>
-                <i className="fa-sharp-duotone fa-regular fa-trash me-2" />
-                Delete
+                <i className={`fa-sharp-duotone fa-regular ${confirmIcon} me-2`} />
+                {confirmLabel}
               </button>
             </div>
           </div>
@@ -169,9 +171,39 @@ function HeaderMenu({ store, sync = {} }) {
   const { session, signIn, signOut } = sync
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [pending, setPending] = useState(null) // a parsed import, awaiting confirmation
   const [error, setError] = useState(null)
   const hiddenBtn = useRef(null)
+  const fileInput = useRef(null)
   const ready = useRef(false)
+
+  /* A file per child rather than per account: the export is what a parent
+     copies to another child, another device, or keeps somewhere safe. */
+  const doExport = () => {
+    setOpen(false)
+    setError(null)
+    const blob = new Blob([JSON.stringify(exportChannels(store.settings), null, 2)], {
+      type: 'application/json',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `tinytube-channels-${(store.settings.childName || 'child').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const onFile = async e => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // so choosing the same file twice still fires
+    if (!file) return
+    setError(null)
+    try {
+      setPending(parseChannelImport(await file.text()))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
   const startSignIn = async () => {
     setOpen(false)
@@ -262,6 +294,23 @@ function HeaderMenu({ store, sync = {} }) {
                 Remove {store.settings.childName}
               </button>
             )}
+            <hr className="dropdown-divider" />
+            <h6 className="dropdown-header">Channel list</h6>
+            <button type="button" className="dropdown-item" onClick={doExport}>
+              <i className="fa-sharp-duotone fa-regular fa-file-export me-2" />
+              Export
+            </button>
+            <button
+              type="button"
+              className="dropdown-item"
+              onClick={() => {
+                setOpen(false)
+                fileInput.current?.click()
+              }}
+            >
+              <i className="fa-sharp-duotone fa-regular fa-file-import me-2" />
+              Import
+            </button>
             {GOOGLE_CLIENT_ID && (
               <>
                 <hr className="dropdown-divider" />
@@ -288,6 +337,29 @@ function HeaderMenu({ store, sync = {} }) {
             )}
           </div>
         </>
+      )}
+      <input
+        ref={fileInput}
+        type="file"
+        accept="application/json,.json"
+        hidden
+        aria-hidden="true"
+        onChange={onFile}
+      />
+      {pending && (
+        <ConfirmModal
+          title="Import channel list?"
+          confirmLabel="Import"
+          confirmIcon="fa-file-import"
+          body={`This replaces ${store.settings.childName}'s channels with ${pending.customChannels.length} channel${
+            pending.customChannels.length === 1 ? '' : 's'
+          } and ${pending.groups.length} group${pending.groups.length === 1 ? '' : 's'}. Nothing else changes.`}
+          onConfirm={() => {
+            store.importChannels(pending)
+            setPending(null)
+          }}
+          onCancel={() => setPending(null)}
+        />
       )}
       {adding && (
         <ChildNameModal
