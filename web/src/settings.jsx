@@ -242,6 +242,15 @@ function DualAgeSlider({ value: [lo, hi], onChange }) {
  * rather than an age: the computed age keeps up on its own instead of going
  * stale a birthday later. The channel filter uses it as a single-point range —
  * see effectiveAgeRange. */
+/* Bare digits get their slash typed for them: "1217" becomes "12/17" on the
+   fourth keystroke. A hand-typed slash is left alone (so "1/17" still works),
+   and anything else is stripped. */
+function formatBirthdayText(raw) {
+  const cleaned = raw.replace(/[^\d/]/g, '')
+  if (cleaned.includes('/')) return cleaned
+  return cleaned.length > 2 ? `${cleaned.slice(0, 2)}/${cleaned.slice(2, 4)}` : cleaned
+}
+
 function BirthdayRow({ value, onChange }) {
   // local text so a half-typed date doesn't thrash the draft; committed on
   // every keystroke that parses, cleared when emptied
@@ -266,14 +275,12 @@ function BirthdayRow({ value, onChange }) {
         aria-label="Child's birthday, month and two-digit year"
         value={text}
         onChange={e => {
-          setText(e.target.value)
-          onChange(e.target.value.trim() === '' ? null : (parseBirthdayInput(e.target.value) ?? value))
+          const formatted = formatBirthdayText(e.target.value)
+          setText(formatted)
+          onChange(formatted.trim() === '' ? null : (parseBirthdayInput(formatted) ?? value))
         }}
       />
       {age != null && <span className="text-secondary text-nowrap">{age} year{age === 1 ? '' : 's'} old</span>}
-      {value == null && !bad && (
-        <span className="text-secondary small text-nowrap">not set — all ages shown</span>
-      )}
     </div>
   )
 }
