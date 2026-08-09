@@ -11,6 +11,15 @@ import {
   loadGoogleSignIn,
   GOOGLE_CLIENT_ID,
   QUOTA_WINDOW_MS,
+  ageFromBirthday,
+  parseBirthdayInput,
+  effectiveAgeRange,
+  canGroup,
+  canUngroup,
+  groupMembers,
+  prefillGroupName,
+  groupNamesInUse,
+  groupNameError,
 } from './lib.js'
 import { searchChannels, resolveChannel, evictChannelCache, formatCount, validateApiKey } from './youtubeApi.js'
 
@@ -24,6 +33,9 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
   const [settings, setSettings] = useState(store.settings)
   const draft = storeApi(settings, patch => setSettings(prev => ({ ...prev, ...patch })))
   const dirty = JSON.stringify(settings) !== JSON.stringify(store.settings)
+  // 'main' | 'channels' — channel management is its own page, reached by the
+  // button below; the draft (and its Save) spans both
+  const [page, setPage] = useState('main')
 
   return (
     <div className="settings container-xl py-4">
@@ -33,13 +45,18 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
           truly centered */}
       <div className="d-flex align-items-center gap-3 mb-4">
         <div style={{ flex: 1 }}>
-          <button type="button" className="btn btn-outline-secondary" aria-label="Back to gallery" onClick={onDone}>
+          <button
+            type="button"
+            className="btn btn-outline-secondary"
+            aria-label={page === 'channels' ? 'Back to settings' : 'Back to gallery'}
+            onClick={page === 'channels' ? () => setPage('main') : onDone}
+          >
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
           </button>
         </div>
         <h1 className="fs-3 fw-bold m-0">
           <i className="fa-sharp-duotone fa-solid fa-remote me-2 text-danger" />
-          Settings
+          {page === 'channels' ? 'Channels' : 'Settings'}
         </h1>
         <div className="d-flex align-items-center justify-content-end gap-3" style={{ flex: 1 }}>
           <VersionLink />
@@ -71,13 +88,30 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
         </div>
       </div>
 
-      <AgeRow value={settings.ageRange} onChange={draft.setAgeRange} />
-      <QuotaRow value={settings.quotaMins} onChange={draft.setQuotaMins} watchStore={watchStore} />
-      <MinLengthRow value={settings.minVideoMins} onChange={draft.setMinVideoMins} />
-      <SyncRow sync={sync} />
-      <ApiKeyRow apiKey={settings.apiKey} onChange={draft.setApiKey} />
-      <SearchRow apiKey={settings.apiKey} store={draft} db={db} />
-      <ChannelTable db={db} store={draft} />
+      {page === 'main' ? (
+        <>
+          <BirthdayRow value={settings.birthday} onChange={draft.setBirthday} />
+          <QuotaRow value={settings.quotaMins} onChange={draft.setQuotaMins} watchStore={watchStore} />
+          <MinLengthRow value={settings.minVideoMins} onChange={draft.setMinVideoMins} />
+          <SyncRow sync={sync} />
+          <ApiKeyRow apiKey={settings.apiKey} onChange={draft.setApiKey} />
+          <div className="mb-4 d-flex align-items-center gap-3">
+            <span className="text-secondary text-nowrap">
+              <i className="fa-brands fa-youtube me-2" />
+              Channels
+            </span>
+            <button type="button" className="btn btn-outline-light" onClick={() => setPage('channels')}>
+              Manage channels
+              <i className="fa-sharp-duotone fa-regular fa-chevron-right ms-2" />
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <SearchRow apiKey={settings.apiKey} store={draft} db={db} />
+          <ChannelTable db={db} store={draft} />
+        </>
+      )}
     </div>
   )
 }
@@ -170,20 +204,12 @@ function SyncRow({ sync = {} }) {
   )
 }
 
+/* "Version N", the way the Android app's About words it — the deploy's run
+   number, not a commit hash a parent can't do anything with. */
 function VersionLink() {
-  const sha = typeof __COMMIT_SHA__ !== 'undefined' ? __COMMIT_SHA__ : ''
-  if (!sha) return null
-  return (
-    <a
-      href={`https://github.com/pathikrit/TinyTube/commit/${sha}`}
-      target="_blank"
-      rel="noreferrer"
-      className="text-secondary small text-decoration-none"
-    >
-      <i className="fa-sharp-duotone fa-regular fa-code-commit me-1" />
-      v{sha.slice(0, 7)}
-    </a>
-  )
+  const version = typeof __BUILD_VERSION__ !== 'undefined' ? __BUILD_VERSION__ : ''
+  if (!version) return null
+  return <span className="text-secondary small text-nowrap">Version {version}</span>
 }
 
 function DualAgeSlider({ value: [lo, hi], onChange }) {
@@ -212,17 +238,42 @@ function DualAgeSlider({ value: [lo, hi], onChange }) {
   )
 }
 
-function AgeRow({ value, onChange }) {
+/** The child's BIRTHDAY (mm/yy, born the 1st of that month by declaration)
+ * rather than an age: the computed age keeps up on its own instead of going
+ * stale a birthday later. The channel filter uses it as a single-point range —
+ * see effectiveAgeRange. */
+function BirthdayRow({ value, onChange }) {
+  // local text so a half-typed date doesn't thrash the draft; committed on
+  // every keystroke that parses, cleared when emptied
+  const [text, setText] = useState(value ? `${value.slice(5, 7)}/${value.slice(2, 4)}` : '')
+  const age = ageFromBirthday(value)
+  const bad = text.trim() !== '' && parseBirthdayInput(text) == null
   return (
     <div className="d-flex align-items-center gap-3 mb-4">
       <span
         className="text-secondary text-nowrap"
-        title="Set your child's age range — only enabled channels overlapping this range are shown"
+        title="Your child's birthday (mm/yy) — only channels rated for their age are shown"
       >
         <i className="fa-duotone fa-solid fa-children me-2" />
-        Age
+        Birthday
       </span>
-      <DualAgeSlider value={value} onChange={onChange} />
+      <input
+        type="text"
+        inputMode="numeric"
+        className={`form-control w-auto ${bad ? 'is-invalid' : ''}`}
+        style={{ maxWidth: '7rem' }}
+        placeholder="mm/yy"
+        aria-label="Child's birthday, month and two-digit year"
+        value={text}
+        onChange={e => {
+          setText(e.target.value)
+          onChange(e.target.value.trim() === '' ? null : (parseBirthdayInput(e.target.value) ?? value))
+        }}
+      />
+      {age != null && <span className="text-secondary text-nowrap">{age} year{age === 1 ? '' : 's'} old</span>}
+      {value == null && !bad && (
+        <span className="text-secondary small text-nowrap">not set — all ages shown</span>
+      )}
     </div>
   )
 }
@@ -644,8 +695,11 @@ function EnabledCheckbox({ ch, store }) {
 }
 
 function ChannelTable({ db, store }) {
-  const { customChannels, overrides } = store.settings
+  const { customChannels, overrides, groups, groupOf } = store.settings
   const hiddenCount = Object.values(overrides).filter(o => o.hidden).length
+  // ticked rows, for grouping; a Set of channel ids
+  const [selected, setSelected] = useState(new Set())
+  const [naming, setNaming] = useState(false)
 
   const data = useMemo(
     () =>
@@ -656,11 +710,34 @@ function ChannelTable({ db, store }) {
     [db, customChannels, overrides],
   )
 
-  const { ageRange } = store.settings
+  const ageRange = effectiveAgeRange(store.settings)
   const inRange = data.filter(ch => !ch.disabled && overlaps(ageRange, ch.min_age, ch.max_age)).length
+
+  const toggle = id =>
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const groupNameOf = id => groups.find(g => g.id === groupOf[id])?.name
 
   const columns = useMemo(
     () => [
+      {
+        id: 'select',
+        header: '',
+        cell: ({ row }) => (
+          <input
+            type="checkbox"
+            className="form-check-input"
+            checked={selected.has(row.original.channel_id)}
+            aria-label={`Select ${row.original.channel_title}`}
+            onChange={() => toggle(row.original.channel_id)}
+          />
+        ),
+      },
       {
         id: 'enabled',
         header: '',
@@ -696,6 +773,28 @@ function ChannelTable({ db, store }) {
         cell: ({ row }) => <TopicBadges ch={row.original} />,
       },
       {
+        header: 'Group',
+        id: 'group',
+        cell: ({ row }) => {
+          const name = groupNameOf(row.original.channel_id)
+          if (!name) return null
+          return (
+            // tapping the badge selects the whole group — a header's tap, table-shaped
+            <button
+              type="button"
+              className="badge text-bg-secondary border-0 fw-normal"
+              title={`Select every channel in ${name}`}
+              onClick={() =>
+                setSelected(prev => new Set([...prev, ...groupMembers(groupOf[row.original.channel_id], groupOf)]))
+              }
+            >
+              <i className="fa-sharp-duotone fa-regular fa-folders me-1" />
+              {name}
+            </button>
+          )
+        },
+      },
+      {
         header: 'Age',
         id: 'ages',
         cell: ({ row }) => <ChannelAgeSlider ch={row.original} store={store} />,
@@ -723,13 +822,58 @@ function ChannelTable({ db, store }) {
         ),
       },
     ],
-    [store, data, inRange],
+    [store, data, inRange, selected, groups, groupOf],
   )
 
   const table = useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() })
 
   return (
     <>
+      {/* the grouping toolbar, live once two rows are ticked — the Android
+          approved-list's Group/Ungroup, table-shaped. Ungroup only when the
+          whole selection sits in ONE group (see canUngroup). */}
+      {selected.size > 0 && (
+        <div className="d-flex align-items-center gap-2 mb-2">
+          <span className="text-secondary small">{selected.size} selected</span>
+          <button
+            type="button"
+            className="btn btn-outline-light btn-sm"
+            disabled={!canGroup(selected)}
+            onClick={() => setNaming(true)}
+          >
+            <i className="fa-sharp-duotone fa-regular fa-folders me-1" />
+            Group
+          </button>
+          {canUngroup(selected, groupOf) && (
+            <button
+              type="button"
+              className="btn btn-outline-light btn-sm"
+              onClick={() => {
+                store.ungroupChannels(selected)
+                setSelected(new Set())
+              }}
+            >
+              Ungroup
+            </button>
+          )}
+          <button type="button" className="btn btn-link btn-sm text-secondary" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
+      {naming && (
+        <GroupNameModal
+          selected={selected}
+          groups={groups}
+          groupOf={groupOf}
+          onConfirm={name => {
+            store.groupChannels(selected, name)
+            setSelected(new Set())
+            setNaming(false)
+          }}
+          onCancel={() => setNaming(false)}
+        />
+      )}
       {/* the ages column reserves real width so the 1-15 dual slider stays as
           readable as the global one up top; narrow screens scroll horizontally
           via table-responsive instead of crushing the track */}
@@ -755,8 +899,7 @@ function ChannelTable({ db, store }) {
               <tr
                 key={row.id}
                 className={
-                  !row.original.disabled &&
-                  overlaps(store.settings.ageRange, row.original.min_age, row.original.max_age)
+                  !row.original.disabled && overlaps(ageRange, row.original.min_age, row.original.max_age)
                     ? undefined
                     : 'out-of-range' // hidden from the kid: age-filtered or toggled off
                 }
@@ -778,6 +921,54 @@ function ChannelTable({ db, store }) {
           restore {hiddenCount} deleted built-in channel{hiddenCount > 1 ? 's' : ''}
         </button>
       )}
+    </>
+  )
+}
+
+/** The group-name dialog, judging the name the way the Android one does:
+ * empty-after-trim and already-taken disable Confirm rather than failing
+ * after it — and "taken" forgives a group this very selection empties, whose
+ * name is exactly what prefill offered. */
+function GroupNameModal({ selected, groups, groupOf, onConfirm, onCancel }) {
+  const [name, setName] = useState(() => prefillGroupName(selected, groups, groupOf) ?? '')
+  const error = groupNameError(name, groupNamesInUse(groups, groupOf, selected))
+  return (
+    <>
+      <div className="modal d-block" tabIndex="-1" role="dialog" onClick={onCancel}>
+        <div className="modal-dialog modal-dialog-centered" onClick={e => e.stopPropagation()}>
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title">Group {selected.size} channels</h5>
+              <button type="button" className="btn-close" aria-label="Close" onClick={onCancel} />
+            </div>
+            <div className="modal-body">
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Group name"
+                aria-label="Group name"
+                autoFocus
+                value={name}
+                onChange={e => setName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !error) onConfirm(name)
+                }}
+              />
+              {error === 'taken' && <div className="form-text text-warning">That name is already a group.</div>}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-secondary" onClick={onCancel}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" disabled={!!error} onClick={() => onConfirm(name)}>
+                <i className="fa-sharp-duotone fa-regular fa-folders me-2" />
+                Group
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="modal-backdrop show" />
     </>
   )
 }

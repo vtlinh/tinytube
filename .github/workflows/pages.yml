@@ -77,6 +77,8 @@ jobs:
           # payload carries no repository object, so the upstream expression
           # would build cron refreshes against a "//" base.
           BASE_PATH: /tinytube/
+          # Settings shows this as "Version N"
+          BUILD_VERSION: ${{ github.run_number }}
       - uses: actions/configure-pages@v5
         with:
           enablement: true

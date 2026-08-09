@@ -123,6 +123,8 @@ export default function App() {
   return (
     <Gallery
       channels={channels}
+      groups={store.settings.groups}
+      groupOf={store.settings.groupOf}
       watchStore={watchStore}
       onPlay={video => {
         // checked at tap time, not render time: a 12h window that expires while

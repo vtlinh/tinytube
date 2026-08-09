@@ -40,16 +40,12 @@ compatibility_date = "2026-07-01"
 enabled = true
 
 # The web app's cross-device sync (worker.js's SYNC section) stores per-account
-# state in D1. UNCOMMENT and fill database_id after creating the database —
-# dashboard: Storage & Databases -> D1 -> Create -> "tinytube"; or:
-#   npx wrangler d1 create tinytube
-# Until this binding exists (and GOOGLE_CLIENT_ID in worker.js is filled in),
-# /sync/* answers 503 and the web app hides its Sync row — the deploy that
-# fills both in is the deploy that turns sync on. A deploy with a bogus
-# database_id FAILS, which on the git-connected build means the old worker
-# keeps serving — do not commit this uncommented with a placeholder id.
-#
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "tinytube"
-# database_id = "FILL-ME-IN"
+# state in D1. This binding plus worker.js's GOOGLE_CLIENT_ID are what turn
+# /sync/* on; without either it answers 503 and the web app hides its Sync row.
+# A deploy naming a database that does not exist FAILS, which on the
+# git-connected build means the old worker keeps serving — never commit a
+# placeholder id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "tinytube"
+database_id = "1374ae0d-c93a-4bd4-afb1-b04a3a483a26"
