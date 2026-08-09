@@ -369,3 +369,14 @@ tr.out-of-range img {
   --bs-table-color: #e9f1f8;
   --bs-table-border-color: #2a3b4d;
 }
+
+/* The dual age slider's pointer surface — see DualAgeSlider. Last in the DOM
+   so it sits above both inputs; touch-action none so a drag across it steers
+   the slider instead of scrolling the settings page under it. The single-thumb
+   sliders render no surface and keep their native thumb dragging. */
+.dual-slider .slider-surface {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: pointer;
+}
