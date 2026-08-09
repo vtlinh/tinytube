@@ -1168,6 +1168,16 @@ async function writeChannelRecord(db, record) {
     .run();
 }
 
+/**
+ * A row is only usable as a record if it IS one. The first version of this
+ * cache stored videos and nothing else, so a row written by it has no title —
+ * and serving it inside its day would show a bare channel id where a name
+ * belongs. Treating those as stale costs one refetch each, once.
+ */
+export function usableRecord(cached) {
+  return !!cached && "title" in cached;
+}
+
 /** The cached record for one channel, refreshing it first when it is stale. */
 async function channelRecord(db, channelId, ytKey) {
   const row = await db
@@ -1175,7 +1185,9 @@ async function channelRecord(db, channelId, ytKey) {
     .bind(channelId)
     .first();
   const cached = row ? JSON.parse(row.data) : null;
-  if (cached && Date.now() - row.fetched_at < CHANNEL_CACHE_TTL_MS) return { ...cached, cached: true };
+  if (usableRecord(cached) && Date.now() - row.fetched_at < CHANNEL_CACHE_TTL_MS) {
+    return { ...cached, cached: true };
+  }
 
   const fresh = await fetchChannelRecord(channelId, ytKey).catch(() => null);
   if (!fresh) {
