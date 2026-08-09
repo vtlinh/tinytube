@@ -38,7 +38,7 @@ export default function Gallery({
   }
 
   return (
-    <div className="gallery pb-5 mb-4">
+    <div className="gallery">
       <nav className="gallery-toolbar d-flex align-items-center px-3 py-2">
         {/* an arrow at the start, like every other app on the phone: narrowing
             to a channel is a step into something, and back steps out */}

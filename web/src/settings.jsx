@@ -64,7 +64,7 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
   const titles = { settings: 'Parents Mode', channels: 'Channels', stats: 'Stats' }
 
   return (
-    <div className="settings container-xl py-4 pb-5 mb-4">
+    <div className="settings container-xl py-4">
       {/* explicit back button: iOS standalone PWAs have no browser chrome or
           hardware back, so without it a no-change visit would strand you here.
           flex: 1 sides keep the title truly centered */}
