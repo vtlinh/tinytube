@@ -1,3 +1,12 @@
+/* THE FIXED BOTTOM BAR'S HEIGHT, in one place. Every screen that scrolls
+   under it has to end this far above the bottom or its last row is hidden
+   behind it — which is exactly what happened to the last channel in the list,
+   and would happen again the next time a screen forgot to say `pb-5`. Screens
+   reserve it in CSS now rather than each remembering a utility class. */
+:root {
+  --bottom-bar: 4.5rem;
+}
+
 html, body, #root {
   height: 100%;
   background: #0e1621; /* Android values-night bg */
@@ -11,7 +20,8 @@ html, body, #root {
 
 .gallery {
   min-height: 100%;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  padding-bottom: calc(var(--bottom-bar) + env(safe-area-inset-bottom));
 }
 
 .gallery-toolbar {
@@ -80,7 +90,7 @@ html, body, #root {
 .settings {
   min-height: 100%;
   padding-top: calc(1.5rem + env(safe-area-inset-top));
-  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--bottom-bar) + env(safe-area-inset-bottom));
 }
 
 /* the global kid-proof user-select:none must not apply on grown-up pages —
