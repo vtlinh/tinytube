@@ -87,7 +87,7 @@ describe('accrueUsage', () => {
 })
 
 describe('usageStats', () => {
-  it('computes session, rolling 24h, and Sunday-start WTD/MTD/YTD', () => {
+  it('computes the periods it reports: 6h, today, rolling 24h, and Sunday-start WTD/MTD/YTD', () => {
     const nowHour = Math.floor(NOW / HOUR)
     const usage = {
       window: { start: NOW - HOUR, secs: 42 },
@@ -99,11 +99,21 @@ describe('usageStats', () => {
       },
       hours: { [nowHour]: 100, [nowHour - 23]: 200, [nowHour - 24]: 400 },
     }
-    expect(usageStats(usage, NOW)).toEqual({ session: 42, last24h: 300, wtd: 400, mtd: 1000, ytd: 1000 })
+    // the whole shape, including the two periods the limits added
+    expect(usageStats(usage, NOW)).toEqual({
+      last6h: 100, // only the current hour is inside six
+      today: 100,
+      session: 42,
+      last24h: 300,
+      wtd: 400,
+      mtd: 1000,
+      ytd: 1000,
+    })
   })
 
   it('is all zeros for fresh usage', () => {
-    expect(usageStats(empty(), NOW)).toEqual({ session: 0, last24h: 0, wtd: 0, mtd: 0, ytd: 0 })
+    expect(usageStats(empty(), NOW)).toEqual({
+      last6h: 0, today: 0, session: 0, last24h: 0, wtd: 0, mtd: 0, ytd: 0 })
   })
 
   it('survives a JSON round-trip (localStorage persistence)', () => {

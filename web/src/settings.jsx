@@ -12,8 +12,11 @@ import {
   ageFromBirthday,
   parseBirthdayInput,
   effectiveAgeRange,
-  effectiveQuotaMins,
+  effectiveQuota,
+  activeWeekOverride,
   activeBonusMins,
+  quotaState,
+  QUOTA_PERIODS,
   LENGTH_STOPS,
   lengthIndex,
   lengthLabel,
@@ -82,7 +85,7 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
       {tab === 'settings' && (
         <>
           <BirthdayRow value={settings.birthday} onChange={store.setBirthday} />
-          <QuotaRow value={settings.quotaMins} onChange={store.setQuotaMins} watchStore={watchStore} />
+          <QuotaRow store={store} watchStore={watchStore} />
           <VideoLengthRow
             value={[settings.minVideoMins, settings.maxVideoMins]}
             onChange={store.setVideoLength}
@@ -100,13 +103,7 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
           <ChannelList db={db} customById={customById} store={store} />
         </>
       )}
-      {tab === 'stats' && (
-        <StatsTab
-          watchStore={watchStore}
-          quotaMins={effectiveQuotaMins(settings)}
-          bonusMins={activeBonusMins(settings)}
-        />
-      )}
+      {tab === 'stats' && <StatsTab watchStore={watchStore} settings={settings} />}
 
       <nav className="bottom-tabs fixed-bottom d-flex border-top">
         <TabButton label="Settings" icon="fa-gear" on={tab === 'settings'} onClick={() => setTab('settings')} />
@@ -119,21 +116,24 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
 
 /** Watch-time stats on their own tab, account-wide: statsUsage folds in what
  * every synced device watched. */
-function StatsTab({ watchStore, quotaMins, bonusMins = 0 }) {
+function StatsTab({ watchStore, settings }) {
   const stats = usageStats(statsUsage(watchStore))
+  const { secsLeft } = quotaState(settings, watchStore)
+  const bonusMins = activeBonusMins(settings)
   const rows = [
-    ['Session', stats.session, `The current ${QUOTA_WINDOW_MS / 3600_000}h quota window`],
-    ['Last 24 hours', stats.last24h, 'A true rolling 24 hours, across synced devices'],
-    ['This week', stats.wtd, 'Week to date, since Sunday'],
-    ['This month', stats.mtd, 'Month to date'],
+    ['Last 6 hours', stats.last6h, 'A rolling six hours'],
+    ['Today', stats.today, 'Since midnight'],
+    ['This week', stats.wtd, 'Since Sunday'],
+    ['This month', stats.mtd, 'Since the 1st'],
     ['This year', stats.ytd, 'Year to date'],
   ]
-  const usedMins = usedSecs(watchStore) / 60
   return (
     <div className="col-md-6 mx-auto">
       <div className="text-secondary mb-3">
         <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
-        {fmtMins(Math.round(usedMins))} of {fmtMins(quotaMins)} used in the current window
+        {Number.isFinite(secsLeft)
+          ? `${fmtMins(Math.max(0, Math.ceil(secsLeft / 60)))} left before the tightest limit`
+          : 'No limit set'}
       </div>
       {bonusMins > 0 && (
         <div className="mb-3">
@@ -547,7 +547,6 @@ function VersionLink() {
 function DualAgeSlider({ value: [lo, hi], onChange }) {
   const track = useRef(null)
   const grabbed = useRef(null)
-  const pos = v => `calc(${(v - AGE_MIN) / (AGE_MAX - AGE_MIN)} * (100% - 32px) + 16px)`
 
   // the thumb's CENTRE travels between 16px and width-16px, matching pos()
   const ageAt = clientX => {
@@ -598,8 +597,6 @@ function DualAgeSlider({ value: [lo, hi], onChange }) {
         aria-label="Oldest age"
         onChange={e => onChange([lo, Math.max(+e.target.value, lo)])}
       />
-      <span className="thumb-label" style={{ left: pos(lo) }}>{lo}</span>
-      <span className="thumb-label" style={{ left: pos(hi) }}>{hi}</span>
       <div
         className="slider-surface"
         onPointerDown={onPointerDown}
@@ -629,7 +626,7 @@ function BirthdayRow({ value, onChange }) {
       <input
         type="text"
         inputMode="numeric"
-        className={`form-control w-auto ${bad ? 'is-invalid' : ''}`}
+        className={`form-control w-auto text-center ${bad ? 'is-invalid' : ''}`}
         style={{ maxWidth: '7rem' }}
         placeholder="mm/yy"
         aria-label="Child's birthday, month and two-digit year"
@@ -648,42 +645,188 @@ function BirthdayRow({ value, onChange }) {
 const QUOTA_MAX_MINS = 240 // 4h, in 15-min steps
 const fmtClock = mins => (mins ? `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}` : '0')
 
-/** Single-thumb sibling of DualAgeSlider on the same track CSS; the fill span
- * shows time already used on the shared 0-4h scale. The thumb is 44px (not the
- * age slider's 32px) so the h:mm label inside it stays readable. */
-function QuotaSlider({ value, usedMins, onChange }) {
-  const pos = v => `calc(${v / QUOTA_MAX_MINS} * (100% - 44px) + 22px)`
+/** One period's limit: the shared track, plus a stop past the end that means
+ * "no limit over this period" — which is a different thing from zero. */
+function LimitSlider({ value, onChange, label }) {
+  const steps = QUOTA_MAX_MINS / 15 + 1 // 0…4h, then "none"
+  const index = value == null ? steps : value / 15
   return (
-    <div className="dual-slider quota-slider flex-grow-1">
-      {usedMins > 0 && <span className="track-fill" style={{ width: pos(Math.min(usedMins, QUOTA_MAX_MINS)) }} />}
+    <div className="dual-slider quota-slider">
       <input
         type="range"
         min="0"
-        max={QUOTA_MAX_MINS}
-        step="15"
-        value={value}
-        aria-label="Watch quota"
-        onChange={e => onChange(+e.target.value)}
+        max={steps}
+        value={index}
+        aria-label={label}
+        onChange={e => onChange(+e.target.value === steps ? null : +e.target.value * 15)}
       />
-      <span className="thumb-label" style={{ left: pos(value) }}>{fmtClock(value)}</span>
     </div>
   )
 }
 
-// no reset button: dragging the quota above what's used grants time, and the
-// 12h window expiry clears usage on its own. The stats table lives on the
-// Stats tab now; the used-time fill on the track is what remains here.
-function QuotaRow({ value, onChange, watchStore }) {
+/**
+ * The four limits, edited together and saved together.
+ *
+ * The one screen in this app that does NOT persist as you go: four limits
+ * half-edited are not a state worth keeping, and a parent dragging the weekly
+ * cap past the daily one on the way to where they meant it should not have
+ * that stick.
+ */
+function QuotaDialog({ title, note, limits, onSave, onClear, onCancel }) {
+  const [draft, setDraft] = useState(limits)
   return (
-    <div className="d-flex align-items-center gap-3 flex-wrap mb-4">
-      <span
-        className="text-secondary text-nowrap"
-        title={`Set the viewing limit (resets every ${QUOTA_WINDOW_MS / 3600_000} hrs)`}
-      >
-        <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
-        Quota
-      </span>
-      <QuotaSlider value={value} usedMins={usedSecs(watchStore) / 60} onChange={onChange} />
+    <>
+      <div className="modal d-block" tabIndex="-1" role="dialog" onClick={onCancel}>
+        <div className="modal-dialog modal-dialog-centered" onClick={e => e.stopPropagation()}>
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title">{title}</h5>
+              <button type="button" className="btn-close" aria-label="Close" onClick={onCancel} />
+            </div>
+            <div className="modal-body">
+              {note && <p className="text-secondary small">{note}</p>}
+              {QUOTA_PERIODS.map(({ key, label, hint }) => (
+                <div key={key} className="mb-3">
+                  <div className="d-flex align-items-baseline gap-2">
+                    <span>{label}</span>
+                    <span className="text-secondary small">{hint}</span>
+                    <span className="ms-auto fw-semibold text-nowrap">
+                      {draft[key] == null ? 'no limit' : fmtClock(draft[key])}
+                    </span>
+                  </div>
+                  <LimitSlider
+                    label={label}
+                    value={draft[key]}
+                    onChange={v => setDraft(prev => ({ ...prev, [key]: v }))}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="modal-footer">
+              {onClear && (
+                <button type="button" className="btn btn-outline-light me-auto" onClick={onClear}>
+                  Remove override
+                </button>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={onCancel}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" onClick={() => onSave(draft)}>
+                <i className="fa-sharp-duotone fa-regular fa-check me-2" />
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="modal-backdrop show" />
+    </>
+  )
+}
+
+/** "1h a day · 5h a week", or "no limits". */
+function limitsSummary(limits) {
+  const said = QUOTA_PERIODS.filter(({ key }) => limits[key] != null).map(
+    ({ key, label }) => `${fmtMins(limits[key])} ${label.toLowerCase()}`,
+  )
+  return said.length ? said.join(' · ') : 'no limits'
+}
+
+// no reset button: raising a limit above what is used grants time, and every
+// period rolls over on its own
+function QuotaRow({ store, watchStore }) {
+  const [editing, setEditing] = useState(null) // 'standing' | 'week'
+  const settings = store.settings
+  const week = activeWeekOverride(settings)
+  const bonus = activeBonusMins(settings)
+  const inForce = effectiveQuota(settings)
+  const { secsLeft } = quotaState(settings, watchStore)
+
+  return (
+    <div className="mb-4">
+      <div className="d-flex align-items-center gap-3">
+        <span className="text-secondary text-nowrap">
+          <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
+          Quota
+        </span>
+        <span className="flex-grow-1" style={{ minWidth: 0 }}>
+          {limitsSummary(settings.quota)}
+        </span>
+        <button
+          type="button"
+          className="btn btn-sm btn-outline-secondary flex-shrink-0"
+          aria-label="Edit quota"
+          onClick={() => setEditing('standing')}
+        >
+          <i className="fa-sharp-duotone fa-regular fa-pencil" />
+        </button>
+      </div>
+
+      <div className="text-secondary small mt-1">
+        {Number.isFinite(secsLeft) ? `${fmtMins(Math.max(0, Math.ceil(secsLeft / 60)))} left right now` : 'no limit'}
+      </div>
+
+      {week && (
+        // red, because it is not what the settings above say: a limit that
+        // silently differs from the one on screen is the confusing kind
+        <div className="d-flex align-items-center gap-2 mt-2 text-danger">
+          <i className="fa-sharp-duotone fa-regular fa-triangle-exclamation" />
+          <span className="flex-grow-1" style={{ minWidth: 0 }}>
+            This week is overridden — {limitsSummary(inForce)}
+            {bonus > 0 && ` (+${fmtMins(bonus)} granted)`}
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-danger flex-shrink-0"
+            aria-label="Edit this week’s quota"
+            onClick={() => setEditing('week')}
+          >
+            <i className="fa-sharp-duotone fa-regular fa-pencil" />
+          </button>
+        </div>
+      )}
+
+      {!week && (
+        <button
+          type="button"
+          className="btn btn-link btn-sm text-secondary ps-0"
+          onClick={() => setEditing('week')}
+        >
+          override for this week only
+        </button>
+      )}
+
+      {editing === 'standing' && (
+        <QuotaDialog
+          title="Quota"
+          limits={settings.quota}
+          onSave={limits => {
+            store.setQuota(limits)
+            setEditing(null)
+          }}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+      {editing === 'week' && (
+        <QuotaDialog
+          title="This week only"
+          note="These limits replace the ones above until Sunday, then stop existing."
+          limits={week?.limits ?? settings.quota}
+          onSave={limits => {
+            store.setWeekLimits(limits)
+            setEditing(null)
+          }}
+          onClear={
+            week
+              ? () => {
+                  store.clearWeekOverride()
+                  setEditing(null)
+                }
+              : undefined
+          }
+          onCancel={() => setEditing(null)}
+        />
+      )}
     </div>
   )
 }
@@ -703,7 +846,6 @@ function VideoLengthSlider({ value: [minMins, maxMins], onChange }) {
   const last = LENGTH_STOPS.length - 1
   const lo = lengthIndex(minMins)
   const hi = lengthIndex(maxMins)
-  const pos = i => `calc(${i / last} * (100% - 44px) + 22px)`
 
   const indexAt = clientX => {
     const r = track.current.getBoundingClientRect()
@@ -752,8 +894,6 @@ function VideoLengthSlider({ value: [minMins, maxMins], onChange }) {
         aria-label="Longest video"
         onChange={e => apply('hi', +e.target.value)}
       />
-      <span className="thumb-label" style={{ left: pos(lo) }}>{lengthLabel(LENGTH_STOPS[lo])}</span>
-      <span className="thumb-label" style={{ left: pos(hi) }}>{lengthLabel(LENGTH_STOPS[hi])}</span>
       <div
         className="slider-surface"
         onPointerDown={onPointerDown}
@@ -765,17 +905,25 @@ function VideoLengthSlider({ value: [minMins, maxMins], onChange }) {
   )
 }
 
-function VideoLengthRow({ value, onChange }) {
+function VideoLengthRow({ value: [minMins, maxMins], onChange }) {
   return (
-    <div className="d-flex align-items-center gap-3 mb-4">
-      <span
-        className="text-secondary text-nowrap"
-        title="Show only videos between these lengths — either end can be “any”"
-      >
-        <i className="fa-duotone fa-solid fa-video-arrow-up-right me-2" />
-        Video Length
-      </span>
-      <VideoLengthSlider value={value} onChange={onChange} />
+    <div className="mb-4">
+      {/* the values live HERE, not inside the thumbs: two thumbs that meet
+          used to print their labels on top of each other, and a slider with
+          the room to be dragged is worth more than one with words in it */}
+      <div className="d-flex align-items-center gap-3 mb-1">
+        <span
+          className="text-secondary text-nowrap"
+          title="Show only videos between these lengths — either end can be “any”"
+        >
+          <i className="fa-duotone fa-solid fa-video-arrow-up-right me-2" />
+          Video Length
+        </span>
+        <span className="ms-auto text-nowrap">
+          {lengthLabel(minMins)} – {lengthLabel(maxMins)}
+        </span>
+      </div>
+      <VideoLengthSlider value={[minMins, maxMins]} onChange={onChange} />
     </div>
   )
 }
@@ -1158,7 +1306,12 @@ function AgeDialog({ ch, store, onClose }) {
               <button type="button" className="btn-close" aria-label="Close" onClick={onClose} />
             </div>
             <div className="modal-body">
-              <div className="text-secondary mb-2">Show this channel to ages</div>
+              <div className="d-flex align-items-baseline gap-2 mb-2">
+                <span className="text-secondary">Show this channel to ages</span>
+                <span className="ms-auto fw-semibold">
+                  {ch.min_age} – {ch.max_age}
+                </span>
+              </div>
               <DualAgeSlider
                 value={[ch.min_age, ch.max_age]}
                 onChange={([min_age, max_age]) => save({ min_age, max_age })}

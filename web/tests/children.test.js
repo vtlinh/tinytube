@@ -38,7 +38,7 @@ describe('normalizeSettings', () => {
       apiKey: 'KEY',
       passkeyId: 'pk',
       birthday: '2022-08',
-      quotaMins: 60,
+      quotaMins: 60, // the pre-periods single number
       customChannels: [{ channel_id: 'UCa' }],
       groups: [{ id: 'g1', name: 'Cartoons' }],
       groupOf: { UCa: 'g1' },
@@ -46,7 +46,9 @@ describe('normalizeSettings', () => {
     expect(s.children).toHaveLength(1)
     // FIXED, not random: the Worker copies existing synced rows under this id
     expect(s.children[0].id).toBe(FIRST_CHILD_ID)
-    expect(s.children[0]).toMatchObject({ birthday: '2022-08', quotaMins: 60, groupOf: { UCa: 'g1' } })
+    // the one 12h number lands on the daily limit, the closest thing it meant
+    expect(s.children[0]).toMatchObject({ birthday: '2022-08', groupOf: { UCa: 'g1' } })
+    expect(s.children[0].quota.perDay).toBe(60)
     expect(s.activeChildId).toBe(FIRST_CHILD_ID)
     // account-level fields stay account-level
     expect(s.apiKey).toBe('KEY')
@@ -77,13 +79,13 @@ describe('childView', () => {
     const stored = normalizeSettings({
       apiKey: 'KEY',
       children: [
-        { id: 'a', name: 'Ann', ...CHILD_DEFAULTS, quotaMins: 30 },
-        { id: 'b', name: 'Bob', ...CHILD_DEFAULTS, quotaMins: 90 },
+        { id: 'a', name: 'Ann', ...CHILD_DEFAULTS, quota: { ...CHILD_DEFAULTS.quota, perDay: 30 } },
+        { id: 'b', name: 'Bob', ...CHILD_DEFAULTS, quota: { ...CHILD_DEFAULTS.quota, perDay: 90 } },
       ],
       activeChildId: 'b',
     })
     const view = childView(stored)
-    expect(view.quotaMins).toBe(90)
+    expect(view.quota.perDay).toBe(90)
     expect(view.childId).toBe('b')
     expect(view.childName).toBe('Bob')
     expect(view.apiKey).toBe('KEY')
@@ -94,21 +96,22 @@ describe('childView', () => {
 describe('useSettings with several children', () => {
   it('adds, switches, and keeps each child’s settings to themselves', () => {
     const { result } = renderHook(() => useSettings())
-    act(() => result.current.setQuotaMins(30))
-    expect(result.current.settings.quotaMins).toBe(30)
+    const perDay = mins => ({ ...CHILD_DEFAULTS.quota, perDay: mins })
+    act(() => result.current.setQuota(perDay(30)))
+    expect(result.current.settings.quota.perDay).toBe(30)
 
     act(() => result.current.addChild('Bob'))
     // adding switches to the new child, who starts from the defaults
     expect(result.current.settings.childName).toBe('Bob')
-    expect(result.current.settings.quotaMins).toBe(CHILD_DEFAULTS.quotaMins)
+    expect(result.current.settings.quota.perDay).toBe(CHILD_DEFAULTS.quota.perDay)
 
-    act(() => result.current.setQuotaMins(90))
+    act(() => result.current.setQuota(perDay(90)))
     act(() => result.current.setBirthday('2021-03'))
-    expect(result.current.settings.quotaMins).toBe(90)
+    expect(result.current.settings.quota.perDay).toBe(90)
 
     // back to the first child: their 30 is untouched by Bob's 90
     act(() => result.current.switchChild(FIRST_CHILD_ID))
-    expect(result.current.settings.quotaMins).toBe(30)
+    expect(result.current.settings.quota.perDay).toBe(30)
     expect(result.current.settings.birthday).toBe(null)
     expect(result.current.children).toHaveLength(2)
   })
@@ -139,10 +142,10 @@ describe('useSettings with several children', () => {
 
   it('persists the un-flattened blob — what sync pushes — not the view', () => {
     const { result } = renderHook(() => useSettings())
-    act(() => result.current.setQuotaMins(45))
+    act(() => result.current.setQuota({ ...CHILD_DEFAULTS.quota, perDay: 45 }))
     const raw = JSON.parse(localStorage.getItem('tinytube:settings:v1'))
-    expect(raw.children[0].quotaMins).toBe(45)
-    expect(raw.quotaMins).toBeUndefined() // no duplicated child fields at the top
+    expect(raw.children[0].quota.perDay).toBe(45)
+    expect(raw.quota).toBeUndefined() // no duplicated child fields at the top
     expect(result.current.stored).toEqual(raw)
   })
 })

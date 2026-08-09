@@ -95,11 +95,14 @@ describe('parent gate', () => {
 })
 
 describe('watch quota gate', () => {
-  const spendQuota = (quotaMins = 15) => {
-    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ quotaMins }))
+  // the day bucket is what a daily limit reads; the key is the local date
+  const today = new Date()
+  const dayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  const spendQuota = (mins = 15) => {
+    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ quotaMins: mins }))
     localStorage.setItem(
       'tinytube:v1',
-      JSON.stringify({ watched: {}, usage: { window: { start: Date.now(), secs: quotaMins * 60 }, days: {}, hours: {} } }),
+      JSON.stringify({ watched: {}, usage: { window: { start: Date.now(), secs: 0 }, days: { [dayKey]: mins * 60 }, hours: {} } }),
     )
   }
 
@@ -124,10 +127,10 @@ describe('watch quota gate', () => {
     expect(await screen.findByText(/Watch Quota Exceeded/)).toBeTruthy()
   })
 
-  it('unblocks by itself once the 12h window has expired', async () => {
+  it('unblocks by itself once the day it was spent in is over', async () => {
     spendQuota()
     const stale = JSON.parse(localStorage.getItem('tinytube:v1'))
-    stale.usage.window.start = Date.now() - 13 * 3600_000
+    stale.usage.days = { '2020-01-01': 15 * 60 } // spent, but not today
     localStorage.setItem('tinytube:v1', JSON.stringify(stale))
     render(<App />)
     fireEvent.click(await screen.findByText('Vid'))
