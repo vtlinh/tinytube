@@ -87,7 +87,7 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
         <>
           <NameRow value={settings.childName} onChange={store.renameChild} />
           <BirthdayRow value={settings.birthday} onChange={store.setBirthday} />
-          <QuotaRow store={store} watchStore={watchStore} />
+          <QuotaRow store={store} />
           <VideoLengthRow
             value={[settings.minVideoMins, settings.maxVideoMins]}
             onChange={store.setVideoLength}
@@ -870,12 +870,11 @@ function QuotaDialog({ title, note, limits, periods = QUOTA_PERIODS, onSave, onC
 
 // no reset button: raising a limit above what is used grants time, and every
 // period rolls over on its own
-function QuotaRow({ store, watchStore }) {
+function QuotaRow({ store }) {
   const [editing, setEditing] = useState(null) // 'standing' | 'today'
   const settings = store.settings
   const today = activeDayOverride(settings)
   const bonus = activeBonusMins(settings)
-  const { secsLeft } = quotaState(settings, watchStore)
 
   return (
     <div className="mb-4">
@@ -896,10 +895,6 @@ function QuotaRow({ store, watchStore }) {
         >
           <i className="fa-sharp-duotone fa-regular fa-pencil" />
         </button>
-      </div>
-
-      <div className="text-secondary small mt-1">
-        {Number.isFinite(secsLeft) ? `${fmtMins(Math.max(0, Math.ceil(secsLeft / 60)))} left right now` : 'no limit'}
       </div>
 
       {today && (
