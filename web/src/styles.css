@@ -447,3 +447,16 @@ tr.out-of-range img {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* A SETTING'S NAME IS NOT A HINT. These read as muted grey while the values
+   beside them were full strength, which on a dark screen is exactly how a
+   disabled control looks — a parent could reasonably think the row was off.
+   The label takes the body colour; muted stays for the things that really are
+   secondary, like the computed age beside a birthday. */
+.settings-label {
+  color: var(--bs-body-color);
+}
+
+.settings-label > i {
+  color: #9db0c4; /* the icon may stay quiet; the word may not */
+}
