@@ -437,3 +437,13 @@ tr.out-of-range img {
 .channel-row.out-of-range img {
   filter: grayscale(1);
 }
+
+/* Two lines, then an ellipsis. A channel's name is how a parent finds it in
+   the list, and one truncated line threw away everything after the third
+   word on a phone. */
+.channel-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

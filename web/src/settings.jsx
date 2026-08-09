@@ -11,7 +11,6 @@ import {
   QUOTA_WINDOW_MS,
   ageFromBirthday,
   effectiveAgeRange,
-  effectiveQuota,
   activeDayOverride,
   lastFiniteLimit,
   activeBonusMins,
@@ -601,6 +600,12 @@ function DualAgeSlider({ value: [lo, hi], onChange }) {
         aria-label="Oldest age"
         onChange={e => onChange([lo, Math.max(+e.target.value, lo)])}
       />
+      {/* the ages themselves, in the thumbs. They went missing when the
+          labels moved out of the thumbs and back: the edit that returned them
+          anchored on the wrong component and the dialog shipped two blank
+          circles, which say nothing about what they are setting. */}
+      <span className="thumb-label" style={{ left: pos(lo) }}>{lo}</span>
+      <span className="thumb-label" style={{ left: pos(hi) }}>{hi}</span>
       <div
         className="slider-surface"
         onPointerDown={onPointerDown}
@@ -863,14 +868,6 @@ function QuotaDialog({ title, note, limits, periods = QUOTA_PERIODS, onSave, onC
   )
 }
 
-/** "1h a day · 5h a week", or "no limits". */
-function limitsSummary(limits) {
-  const said = QUOTA_PERIODS.filter(({ key }) => limits[key] != null).map(
-    ({ key, label }) => `${fmtMins(limits[key])} ${label.toLowerCase()}`,
-  )
-  return said.length ? said.join(' · ') : 'no limits'
-}
-
 // no reset button: raising a limit above what is used grants time, and every
 // period rolls over on its own
 function QuotaRow({ store, watchStore }) {
@@ -878,7 +875,6 @@ function QuotaRow({ store, watchStore }) {
   const settings = store.settings
   const today = activeDayOverride(settings)
   const bonus = activeBonusMins(settings)
-  const inForce = effectiveQuota(settings)
   const { secsLeft } = quotaState(settings, watchStore)
 
   return (
@@ -888,9 +884,10 @@ function QuotaRow({ store, watchStore }) {
           <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
           Quota
         </span>
-        <span className="flex-grow-1" style={{ minWidth: 0 }}>
-          {limitsSummary(settings.quota)}
-        </span>
+        {/* no summary of the limits here: they are set in the dialog and read
+            there, and spelling all four out inline took three lines to repeat
+            what the pencil opens */}
+        <span className="flex-grow-1" />
         <button
           type="button"
           className="btn btn-sm btn-outline-secondary flex-shrink-0"
@@ -911,8 +908,7 @@ function QuotaRow({ store, watchStore }) {
         <div className="d-flex align-items-center gap-2 mt-2 text-danger">
           <i className="fa-sharp-duotone fa-regular fa-triangle-exclamation" />
           <span className="flex-grow-1" style={{ minWidth: 0 }}>
-            Today is overridden — {limitsSummary(inForce)}
-            {bonus > 0 && ` (+${fmtMins(bonus)} granted)`}
+            Today is overridden{bonus > 0 && ` — +${fmtMins(bonus)} granted`}
           </span>
           <button
             type="button"
@@ -1366,18 +1362,24 @@ const channelPatcher = (ch, store) =>
     ? patch => store.updateCustomChannel(ch.channel_id, patch)
     : patch => store.setOverride(ch.channel_id, patch)
 
-/** "1.2M subscribers · 340 videos · 89M views", or nothing at all. Under the
- * name rather than in a column of its own, and unlabelled: a row of numbers
- * with units does not need the word "stats" over it. */
+/** "1.2M subs · 340 videos · 89M views", or nothing at all. Under the name
+ * rather than in a column of its own, and unlabelled: a row of numbers with
+ * units does not need the word "stats" over it.
+ *
+ * It WRAPS rather than truncating. Truncating cost the last two numbers
+ * entirely on a phone — "1.3M subscribers · 395 vid…" — and the point of the
+ * line is the comparison between them; a second line is cheaper than losing
+ * two thirds of it. "subs" for the same reason: it is the longest word here
+ * and the one carrying the least. */
 function StatsLine({ ch }) {
   const parts = [
-    [ch.subscribers, 'subscribers'],
+    [ch.subscribers, 'subs'],
     [ch.video_count, 'videos'],
     [ch.view_count, 'views'],
   ].filter(([n]) => n)
   if (!parts.length) return null
   return (
-    <div className="text-secondary small text-truncate">
+    <div className="text-secondary small">
       {parts.map(([n, label]) => `${formatCount(n)} ${label}`).join(' · ')}
     </div>
   )
@@ -1405,12 +1407,10 @@ function ChannelRow({ ch, store, selected, onToggle, onEdit, onDelete }) {
       {/* min-width:0 is what lets the truncation happen instead of the row
           growing wider than the phone */}
       <div className="flex-grow-1" style={{ minWidth: 0 }}>
-        <a
-          href={channelUrl(ch)}
-          target="_blank"
-          rel="noreferrer"
-          className="fw-semibold text-truncate d-block text-decoration-none"
-        >
+        {/* two lines at most, then an ellipsis: a channel called "Vooks -
+            Stories and Read Alouds for Kids" lost everything after the third
+            word on one line, and its name is how a parent finds it */}
+        <a href={channelUrl(ch)} target="_blank" rel="noreferrer" className="fw-semibold d-block text-decoration-none channel-name">
           {ch.channel_title}
         </a>
         <StatsLine ch={ch} />
