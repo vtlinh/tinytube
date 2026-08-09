@@ -2,9 +2,72 @@
  * folds in what other devices watched. The network half is the Worker's
  * problem and is tested in worker.test.mjs at the repo root. */
 
-import { mergeWatched, remoteRecentSecs, usedSecs, statsUsage, watchedDeltas } from '../src/lib.js'
+import {
+  mergeWatched,
+  remoteRecentSecs,
+  usedSecs,
+  statsUsage,
+  watchedDeltas,
+  usagePushDelta,
+  PUSH_RECENT_HOURS,
+} from '../src/lib.js'
 
 const HOUR_MS = 3600_000
+
+/* A device is an authority on its OWN recent watching and nothing else: the
+   trailing 6 hours (what per6h reads) and today (the only day still moving).
+   Week, month and year are summed out of D1 across every device on the pull,
+   so pushing them again was hundreds of rows of settled history every few
+   seconds. */
+describe('usagePushDelta', () => {
+  const now = new Date(2026, 7, 9, 14, 30).getTime() // local 9 Aug 2026, 14:30
+  const nowHour = Math.floor(now / HOUR_MS)
+  const usage = {
+    days: { '2026-08-09': 600, '2026-08-08': 900, '2026-07-31': 1200, '2025-12-25': 60 },
+    hours: {
+      [nowHour]: 100,
+      [nowHour - 1]: 200,
+      [nowHour - PUSH_RECENT_HOURS + 1]: 300, // just inside
+      [nowHour - PUSH_RECENT_HOURS]: 400, // just outside
+      [nowHour - 30]: 500, // long gone
+    },
+  }
+
+  it('sends today and the trailing 6 hours, and nothing else', () => {
+    const out = usagePushDelta(usage, 1000, now)
+    expect(out.days).toEqual({ '2026-08-09': 600 })
+    expect(out.hours).toEqual({
+      [nowHour]: 100,
+      [nowHour - 1]: 200,
+      [nowHour - PUSH_RECENT_HOURS + 1]: 300,
+    })
+  })
+
+  it('matches the window per6h actually reads, so the tightest limit is never short', () => {
+    // usageByPeriod counts hours with `+k > nowHour - 6`; the push must carry
+    // every bucket that check can see or a fresh device under-counts
+    const out = usagePushDelta(usage, 1000, now)
+    const counted = Object.keys(usage.hours).filter(k => +k > nowHour - 6)
+    expect(Object.keys(out.hours).sort()).toEqual(counted.sort())
+  })
+
+  /* A phone used offline for a week and then signed in owes the account that
+     history, and the first push is the one moment nothing else carries it. */
+  it('sends everything on a device’s first push', () => {
+    expect(usagePushDelta(usage, 0, now)).toEqual({ days: usage.days, hours: usage.hours })
+    expect(usagePushDelta(usage, undefined, now)).toEqual({ days: usage.days, hours: usage.hours })
+  })
+
+  it('sends no day at all when nothing was watched today', () => {
+    const out = usagePushDelta({ days: { '2026-08-08': 900 }, hours: {} }, 1000, now)
+    expect(out).toEqual({ days: {}, hours: {} })
+  })
+
+  it('survives empty and absent buckets', () => {
+    expect(usagePushDelta({}, 1000, now)).toEqual({ days: {}, hours: {} })
+    expect(usagePushDelta(undefined, 1000, now)).toEqual({ days: {}, hours: {} })
+  })
+})
 
 describe('mergeWatched', () => {
   const local = {

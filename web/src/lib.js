@@ -1064,6 +1064,36 @@ export function usageByPeriod(usage, now = Date.now()) {
   }
 }
 
+/* WHAT A DEVICE PUSHES, versus what it asks the DB for. A device is only an
+   authority on its own recent watching: the trailing 6 hours of hour buckets
+   (which is exactly what the per6h limit reads) and TODAY's day bucket, the
+   only day whose total can still move. Everything longer — this week, this
+   month, this year — is summed out of D1 across every device on the pull, so
+   re-sending it was ~416 rows of already-settled history every few seconds.
+
+   Today's day bucket is sent even though the hours could in principle add up
+   to it, because the day key is LOCAL and an hour key is an epoch hour: the
+   Worker cannot derive one from the other without knowing the device's
+   timezone, and a day boundary that lands an hour out is a quota that resets
+   at the wrong time.
+
+   The FIRST push of a device (no high-water mark yet) carries everything it
+   has. A phone used offline for a week and then signed in owes the account
+   that history, and it is the one moment nothing else will carry it up. */
+export const PUSH_RECENT_HOURS = 6
+
+export function usagePushDelta(usage, since, now = Date.now()) {
+  const days = usage?.days ?? {}
+  const hours = usage?.hours ?? {}
+  if (!since) return { days, hours }
+  const oldest = Math.floor(now / HOUR_MS) - PUSH_RECENT_HOURS
+  const today = localDate(new Date(now))
+  return {
+    days: today in days ? { [today]: days[today] } : {},
+    hours: Object.fromEntries(Object.entries(hours).filter(([k]) => +k > oldest)),
+  }
+}
+
 // ---------------------------------------------------------------------------
 // today's override — a grown-up changing the limits, or adding minutes to
 // them, for TODAY only. It dies at midnight: an exception that outlived the
@@ -1382,6 +1412,9 @@ export const GOOGLE_CLIENT_ID = '559900350228-kamkqhee408lf7nh0kg5p9njgo71qjtt.a
 
 const SYNC_KEY = 'tinytube:sync:v1' // {token, email, expiresAt, deviceId, lastPushAt}
 const PUSH_DEBOUNCE_MS = 5_000
+/* How often a re-pull is actually answered. Every playback asks; this is what
+   keeps that from being a request per video. `force` bypasses it. */
+export const PULL_MIN_MS = 15 * 60_000
 const RECENT_HOURS = 12 // mirror of the quota window, in whole clock hours
 
 export function loadSyncSession() {
@@ -1497,16 +1530,18 @@ export function loadGoogleSignIn() {
  */
 export function useSync(settingsStore, watchStore) {
   const [session, setSession] = useState(loadSyncSession)
-  // which children this session has already pulled — switching child pulls
-  // that child's history, and only once
-  const pulled = useRef(new Set())
+  const [pulling, setPulling] = useState(false)
+  /* When each child was last pulled, so a re-pull can be asked for freely and
+     answered at most every PULL_MIN_MS. A ref, not storage: every launch is
+     entitled to a fresh pull, and a child never pulled has no entry at all. */
+  const pulledAt = useRef({})
   const timer = useRef(null)
   const childId = settingsStore.settings.childId
 
   const signOut = useCallback(() => {
     saveSyncSession(null)
     setSession(null)
-    pulled.current = new Set()
+    pulledAt.current = {}
   }, [])
 
   /* 401 means the session aged out server-side — surface as signed-out so the
@@ -1530,7 +1565,7 @@ export function useSync(settingsStore, watchStore) {
       lastPushAt: 0,
     }
     saveSyncSession(session)
-    pulled.current = new Set()
+    pulledAt.current = {}
     setSession(session)
     return email
   }, [])
@@ -1541,18 +1576,44 @@ export function useSync(settingsStore, watchStore) {
   // the STORED blob (every child), not the flattened view — the view's child
   // fields are a copy, and pushing them would round-trip duplicates
   const stored = settingsStore.stored ?? settingsStore.settings
-  useEffect(() => {
-    if (!session || pulled.current.has(childId)) return
-    pulled.current.add(childId)
-    syncFetch('/sync/pull', { child: childId }, session.token)
-      .then(remote => {
+  /* Ask the DB what it has for this child. Throttled to PULL_MIN_MS so it can
+     be called from anywhere without anyone counting — every playback asks,
+     and most asks cost nothing. `force` is for the two cases where the answer
+     is the point rather than a refresh: the parent's Refresh button, and a
+     child standing at a spent quota, where the DB is the only place a grown-up
+     could have granted more time from another device.
+
+     Returns the remote payload when it actually pulled, else null. */
+  const pull = useCallback(
+    async ({ force = false } = {}) => {
+      if (!session) return null
+      const last = pulledAt.current[childId] ?? 0
+      if (!force && Date.now() - last < PULL_MIN_MS) return null
+      pulledAt.current[childId] = Date.now()
+      setPulling(true)
+      try {
+        const remote = await syncFetch('/sync/pull', { child: childId }, session.token)
         applyRemote({ watched: remote.watched, usage: remote.usage })
         if (remote.settings && (remote.settings.updatedAt ?? 0) > (stored.updatedAt ?? 0)) {
           // keep the remote stamp: adopting a blob is not an edit
           save({ ...remote.settings.data, updatedAt: remote.settings.updatedAt })
         }
-      })
-      .catch(dead)
+        return remote
+      } catch (err) {
+        // a failed pull is not a pull: let the next ask through immediately
+        pulledAt.current[childId] = last
+        dead(err)
+        return null
+      } finally {
+        setPulling(false)
+      }
+    },
+    [session, childId, stored, save, applyRemote, dead],
+  )
+
+  // pull on boot / sign-in / child switch — a child with no mark yet is due one
+  useEffect(() => {
+    pull()
   }, [session, childId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // push deltas, debounced, whenever local state moves
@@ -1566,7 +1627,8 @@ export function useSync(settingsStore, watchStore) {
       const since = marks[childId] ?? 0
       const payload = {
         child: childId,
-        usage: { deviceId: session.deviceId, days: usage.days, hours: usage.hours },
+        // this device's recent watching only — see usagePushDelta
+        usage: { deviceId: session.deviceId, ...usagePushDelta(usage, since) },
       }
       const deltas = watchedDeltas(watched, since)
       if (deltas.length) payload.watched = deltas
@@ -1584,5 +1646,5 @@ export function useSync(settingsStore, watchStore) {
     return () => clearTimeout(timer.current)
   }, [session, stored, watched, usage, childId, dead])
 
-  return { session, signIn, signOut }
+  return { session, signIn, signOut, pull, pulling }
 }

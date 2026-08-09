@@ -174,6 +174,77 @@ describe('watch quota gate', () => {
   })
 })
 
+/* Every playback is an occasion to catch up with the DB, and a spent quota is
+ * the one moment the answer matters enough to wait for: a grown-up may have
+ * granted time from another device, and that grant lives in the settings blob. */
+describe('pulling from the DB on playback', () => {
+  const today = new Date()
+  const dayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
+  // signed in, with 15 of 15 daily minutes already spent
+  const spentAndSignedIn = () => {
+    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ quotaMins: 15 }))
+    localStorage.setItem(
+      'tinytube:v1',
+      JSON.stringify({ watched: {}, usage: { window: { start: Date.now(), secs: 0 }, days: { [dayKey]: 15 * 60 }, hours: {} } }),
+    )
+    localStorage.setItem(
+      'tinytube:sync:v1',
+      JSON.stringify({ token: 't', email: 'a@b.c', expiresAt: Date.now() + 1e9, deviceId: 'd1', lastPushAt: {} }),
+    )
+  }
+
+  const syncStub = (settings = null) => {
+    const calls = []
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      if (String(url).includes('videos.json')) return { ok: true, json: async () => db }
+      calls.push(String(url))
+      return { ok: true, status: 200, json: async () => ({ settings, watched: [], usage: { days: {}, hours: {} } }) }
+    }))
+    return calls
+  }
+
+  it('asks the DB when a video is tapped, without holding the tap up', async () => {
+    localStorage.setItem(
+      'tinytube:sync:v1',
+      JSON.stringify({ token: 't', email: 'a@b.c', expiresAt: Date.now() + 1e9, deviceId: 'd1', lastPushAt: {} }),
+    )
+    const calls = syncStub()
+    render(<App />)
+    fireEvent.click(await screen.findByText('Vid'))
+    expect(await screen.findByTitle('Watch time left')).toBeTruthy() // player opened
+    expect(calls.filter(u => u.endsWith('/sync/pull'))).toHaveLength(1) // the boot one; the tap's was throttled
+  })
+
+  /* The grant is in the settings blob, so a pull that brings a newer blob with
+     bonus minutes has to unblock this device without a reload. */
+  it('lets the child through when the DB says a parent granted more time', async () => {
+    spentAndSignedIn()
+    syncStub({
+      updatedAt: Date.now() + 10_000, // newer than anything local
+      data: {
+        children: [{ id: 'default', name: 'Child 1', quota: { per6h: null, perDay: 15, perWeek: null, perMonth: null },
+          day: { until: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).getTime(), bonusMins: 30 } }],
+        activeChildId: 'default',
+      },
+    })
+    render(<App />)
+    fireEvent.click(await screen.findByText('Vid'))
+    expect(await screen.findByTitle('Watch time left')).toBeTruthy()
+    expect(screen.queryByText(/Watch Quota Exceeded/)).toBeNull()
+  })
+
+  it('still blocks when the DB has nothing new to say', async () => {
+    spentAndSignedIn()
+    const calls = syncStub()
+    render(<App />)
+    fireEvent.click(await screen.findByText('Vid'))
+    expect(await screen.findByText(/Watch Quota Exceeded/)).toBeTruthy()
+    // forced past the throttle: boot pull + the tap's
+    expect(calls.filter(u => u.endsWith('/sync/pull'))).toHaveLength(2)
+  })
+})
+
 /* One video ending starts the next one, out of the list the child tapped on —
  * the whole point of carrying that list into the player. What "the next one"
  * means is the parent's Play Next setting. */
