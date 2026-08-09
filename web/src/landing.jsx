@@ -43,20 +43,59 @@ export function EnrollGate({ onEnrolled }) {
 
 /** Shown when the watch quota is spent: only a grown-up (via the parent gate)
  * can grant more time, from the settings screen. */
-export function QuotaGate({ onParents, onBack }) {
+/**
+ * The spent-quota screen. A grown-up can add time here without going all the
+ * way into settings — but only past the gate: `onAddTime` runs the same
+ * biometric (or, on a device with no lock, the arithmetic fallback) that
+ * parent mode does, and the grant lasts the week rather than forever.
+ */
+export function QuotaGate({ onParents, onAddTime, onBack }) {
+  const [asking, setAsking] = useState(false)
   return (
     <div className="math-gate d-flex flex-column align-items-center justify-content-center gap-4 p-4 text-center">
       <i className="fa-sharp-duotone fa-regular fa-stopwatch fa-3x text-danger" />
       <div className="fs-3 fw-bold">Watch Quota Exceeded</div>
       <div className="fs-5 text-secondary">Time for a break! A grown-up can add more time.</div>
-      <button type="button" className="btn btn-danger btn-lg px-5" onClick={onParents}>
-        <i className="fa-sharp-duotone fa-regular fa-family me-2" />
-        Parents
-      </button>
-      <button type="button" className="btn btn-outline-light" onClick={onBack}>
-        <i className="fa-sharp-duotone fa-regular fa-grid-2 me-2" />
-        Back to videos
-      </button>
+
+      {asking ? (
+        <>
+          <div className="text-secondary">How much more, for the rest of this week?</div>
+          <div className="d-flex gap-2 flex-wrap justify-content-center">
+            {[15, 30, 60].map(mins => (
+              <button
+                key={mins}
+                type="button"
+                className="btn btn-danger btn-lg px-4"
+                onClick={() => onAddTime(mins)}
+              >
+                +{mins} min
+              </button>
+            ))}
+          </div>
+          <div className="text-secondary small">
+            <i className="fa-sharp-duotone fa-regular fa-fingerprint me-2" />
+            A grown-up has to confirm
+          </div>
+          <button type="button" className="btn btn-outline-light" onClick={() => setAsking(false)}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <>
+          <button type="button" className="btn btn-danger btn-lg px-5" onClick={() => setAsking(true)}>
+            <i className="fa-sharp-duotone fa-regular fa-gift me-2" />
+            Add more time
+          </button>
+          <button type="button" className="btn btn-outline-light" onClick={onParents}>
+            <i className="fa-sharp-duotone fa-regular fa-family me-2" />
+            Parents
+          </button>
+          <button type="button" className="btn btn-outline-light" onClick={onBack}>
+            <i className="fa-sharp-duotone fa-regular fa-grid-2 me-2" />
+            Back to videos
+          </button>
+        </>
+      )}
     </div>
   )
 }

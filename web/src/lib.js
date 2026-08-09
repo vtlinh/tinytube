@@ -179,6 +179,48 @@ export function hydrateChannel(ch, record = {}) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// video length — a RANGE: a floor and a ceiling, 15 minutes apart at the very
+// least, in 15-minute steps up to two hours. Both ends can say "any": the
+// floor at 0 (nothing is too short) and the ceiling at the far end (nothing is
+// too long), which is why the ceiling's last stop is Infinity rather than 2h.
+
+export const LENGTH_STEP_MINS = 15
+export const LENGTH_MAX_MINS = 120
+
+/** The stops both thumbs move between: 0, 15, … 120, then no ceiling at all. */
+export const LENGTH_STOPS = [
+  ...Array.from({ length: LENGTH_MAX_MINS / LENGTH_STEP_MINS + 1 }, (_, i) => i * LENGTH_STEP_MINS),
+  Infinity,
+]
+
+/** minutes -> the stop index that holds them; Infinity and null are the last. */
+export function lengthIndex(mins) {
+  if (mins == null || !Number.isFinite(mins)) return LENGTH_STOPS.length - 1
+  const i = LENGTH_STOPS.indexOf(mins)
+  return i >= 0 ? i : Math.max(0, Math.min(LENGTH_STOPS.length - 1, Math.round(mins / LENGTH_STEP_MINS)))
+}
+
+/** What a thumb says. Both ends read "any" where they stop filtering. */
+export function lengthLabel(mins) {
+  return !mins || !Number.isFinite(mins) ? 'any' : fmtMins(mins)
+}
+
+/**
+ * Move one end of the length range, in stop indexes.
+ *
+ * THE ENDS MAY NOT MEET. A floor equal to its ceiling would hide every video
+ * but the ones exactly that long, which is never what a parent dragging a
+ * slider means — so they stay a step (15 minutes) apart, and pushing one into
+ * the other moves it as far as it may go instead of past.
+ */
+export function clampLengthRange([lo, hi], end, v) {
+  const last = LENGTH_STOPS.length - 1
+  return end === 'lo'
+    ? [Math.max(0, Math.min(v, hi - 1)), hi]
+    : [lo, Math.min(last, Math.max(v, lo + 1))]
+}
+
 /**
  * Curated channels from videos.json with the parent's per-channel edits
  * applied — overrides[channel_id] may adjust min_age/max_age or set hidden.
@@ -195,7 +237,7 @@ export function curatedChannels(db, overrides = {}) {
  * already-curated channel.
  */
 export function mergeChannels(db, customVideosById, settings) {
-  const { customChannels, overrides, minVideoMins = 0 } = settings
+  const { customChannels, overrides, minVideoMins = 0, maxVideoMins = null } = settings
   const ageRange = effectiveAgeRange(settings)
   const curated = curatedChannels(db, overrides).filter(
     ch => !ch.hidden && overlaps(ageRange, ch.min_age, ch.max_age),
@@ -208,10 +250,16 @@ export function mergeChannels(db, customVideosById, settings) {
   const custom = customChannels
     .filter(ch => !curatedIds.has(ch.channel_id) && overlaps(ageRange, ch.min_age, ch.max_age))
     .map(ch => hydrateChannel(ch, customVideosById[ch.channel_id]))
-  // unknown durations count as too short: don't let un-probed videos slip past
+  /* Unknown durations count as too short: don't let un-probed videos slip past
+     the floor. They pass the ceiling for the same reason — a video we could
+     not measure is treated as a very short one, consistently at both ends. */
+  const ceiling = maxVideoMins == null || !Number.isFinite(maxVideoMins) ? Infinity : maxVideoMins * 60
   return [...curated, ...custom].map(ch => ({
     ...ch,
-    videos: (ch.videos ?? []).filter(v => (v.duration ?? 0) >= minVideoMins * 60),
+    videos: (ch.videos ?? []).filter(v => {
+      const secs = v.duration ?? 0
+      return secs >= minVideoMins * 60 && secs <= ceiling
+    }),
   }))
 }
 
@@ -531,7 +579,9 @@ export const CHILD_DEFAULTS = {
   ageRange: [1, 15], // everything; superseded by birthday when set
   birthday: null, // 'YYYY-MM'; the child's age is computed from this (born the 1st)
   quotaMins: 180, // watch quota per rolling 12h window; 0 = no watching (there is no "off")
-  minVideoMins: 0, // hide videos shorter than this; 0 = show everything
+  minVideoMins: 0, // the floor: hide videos shorter than this; 0 = no floor
+  maxVideoMins: null, // the ceiling: hide videos longer than this; null = none
+  bonus: null, // {mins, expiresAt}: extra watch time a grown-up granted this week
   /* parent-added channels, as the PARENT'S DECISION only:
      [{channel_id, min_age, max_age, disabled?}]. The name, avatar and videos
      are facts about the channel, so they live in the Worker's shared cache
@@ -647,9 +697,14 @@ export function storeApi(settings, update, updateChild = update) {
     settings,
     setApiKey: apiKey => update({ apiKey: apiKey.trim() }),
     setPasskey: id => update({ passkeyId: id }),
+    /* Grants stack within the week and restart it: a second helping at
+       Wednesday's bedtime should not expire on Wednesday's grant clock. An
+       expired one contributes nothing, so this resets rather than compounds. */
+    addBonusMins: mins =>
+      updateChild({ bonus: { mins: activeBonusMins(settings) + mins, expiresAt: endOfWeek() } }),
     setAgeRange: ([lo, hi]) => updateChild({ ageRange: [Math.min(lo, hi), Math.max(lo, hi)] }),
     setQuotaMins: quotaMins => updateChild({ quotaMins }),
-    setMinVideoMins: minVideoMins => updateChild({ minVideoMins }),
+    setVideoLength: ([minVideoMins, maxVideoMins]) => updateChild({ minVideoMins, maxVideoMins }),
     setBirthday: birthday => updateChild({ birthday }),
     /* Only the decision is kept, whatever the caller hands over: a search
        result arrives with a title, avatar, subscriber counts and topics, and
@@ -826,6 +881,29 @@ export function usageStats(usage, now = Date.now()) {
     mtd: daysSince(localDate(new Date(d.getFullYear(), d.getMonth(), 1))),
     ytd: daysSince(localDate(new Date(d.getFullYear(), 0, 1))),
   }
+}
+
+// ---------------------------------------------------------------------------
+// bonus time — a grown-up standing at the spent-quota screen, past the gate,
+// granting more. It lasts THE WEEK and then stops existing: a top-up that
+// quietly became permanent would be a parental control that erodes.
+
+/** The instant the current week ends. Weeks start Sunday, like the stats. */
+export function endOfWeek(now = Date.now()) {
+  const d = new Date(now)
+  const sunday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay())
+  return sunday.getTime() + 7 * DAY_MS
+}
+
+/** Granted minutes that have not expired; 0 once the week is out. */
+export function activeBonusMins(settings, now = Date.now()) {
+  const bonus = settings?.bonus
+  return bonus && bonus.expiresAt > now ? bonus.mins : 0
+}
+
+/** The cap a child is actually watching against: their quota plus any grant. */
+export function effectiveQuotaMins(settings, now = Date.now()) {
+  return (settings?.quotaMins ?? 0) + activeBonusMins(settings, now)
 }
 
 // ---------------------------------------------------------------------------
