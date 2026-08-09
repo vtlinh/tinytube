@@ -20,6 +20,7 @@ import {
   lengthIndex,
   lengthLabel,
   minuteLabel,
+  shortDuration,
   clampLengthRange,
   hydrateChannel,
   arrangeChannels,
@@ -327,7 +328,7 @@ function HeaderMenu({ store, sync = {} }) {
               </button>
             )}
             <hr className="dropdown-divider" />
-            <h6 className="dropdown-header">Channel list</h6>
+            <h6 className="dropdown-header">{store.settings.childName}’s channels</h6>
             <button type="button" className="dropdown-item" onClick={doExport}>
               <i className="fa-sharp-duotone fa-regular fa-file-export me-2" />
               Export
@@ -758,13 +759,15 @@ function BirthdayRow({ value, onChange }) {
   )
 }
 
-const QUOTA_MAX_MINS = 240 // 4h, in 15-min steps
 
 /** One period's limit: the shared track, plus a stop past the end that means
  * "no limit over this period" — which is a different thing from zero. */
-function LimitSlider({ value, onChange, label }) {
-  const steps = QUOTA_MAX_MINS / 15 + 1 // 0…4h, then "no limit"
-  const index = value == null ? steps : value / 15
+/** One period's limit, on that period's own scale: 0 to the whole window in
+ * its own step, then one stop past the end for "no limit". */
+function LimitSlider({ value, onChange, label, maxMins, stepMins }) {
+  const steps = maxMins / stepMins + 1 // the last one is "no limit"
+  // a value stored under an older, finer scale may sit between stops
+  const index = value == null ? steps : Math.min(steps - 1, Math.round(value / stepMins))
   const pos = i => `calc(${i / steps} * (100% - 44px) + 22px)`
   return (
     <div className="dual-slider quota-slider">
@@ -774,9 +777,9 @@ function LimitSlider({ value, onChange, label }) {
         max={steps}
         value={index}
         aria-label={label}
-        onChange={e => onChange(+e.target.value === steps ? null : +e.target.value * 15)}
+        onChange={e => onChange(+e.target.value === steps ? null : +e.target.value * stepMins)}
       />
-      <span className="thumb-label" style={{ left: pos(index) }}>{value == null ? '∞' : value}</span>
+      <span className="thumb-label" style={{ left: pos(index) }}>{shortDuration(value)}</span>
     </div>
   )
 }
@@ -802,18 +805,20 @@ function QuotaDialog({ title, note, limits, periods = QUOTA_PERIODS, onSave, onC
             </div>
             <div className="modal-body">
               {note && <p className="text-secondary small">{note}</p>}
-              {periods.map(({ key, label, hint }) => (
+              {periods.map(({ key, label, hint, maxMins, stepMins }) => (
                 <div key={key} className="mb-3">
                   <div className="d-flex align-items-baseline gap-2">
                     <span>{label}</span>
                     <span className="text-secondary small">{hint}</span>
                     <span className="ms-auto fw-semibold text-nowrap">
-                      {draft[key] == null ? 'no limit' : `${draft[key]} min`}
+                      {draft[key] == null ? 'no limit' : fmtMins(draft[key])}
                     </span>
                   </div>
                   <LimitSlider
                     label={label}
                     value={draft[key]}
+                    maxMins={maxMins}
+                    stepMins={stepMins}
                     onChange={v => setDraft(prev => ({ ...prev, [key]: v }))}
                   />
                 </div>
