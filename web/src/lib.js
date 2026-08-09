@@ -580,21 +580,30 @@ export function applyImport(settings, imported, mode = 'replace') {
 // ---------------------------------------------------------------------------
 // what plays next
 
-/* The Android app's `Playlist`, ported line for line — same names, same
-   semantics, same `roll` injection so the random half is testable rather than
-   sampled. It lives up here rather than beside the gallery sort it serves
-   because CHILD_DEFAULTS names the default mode, and a const cannot be read
-   before it is declared.
+/* The Android app's `Playlist`, ported from it — same names, same semantics,
+   same `roll` injection so the random half is testable rather than sampled.
+   It lives up here rather than beside the gallery sort it serves because
+   CHILD_DEFAULTS names the default mode, and a const cannot be read before it
+   is declared.
 
-   Two rules that look like details and are not:
+   Three rules that look like details and are not:
 
    IN_ORDER STOPS AT THE END rather than wrapping. A grid that loops is a grid
    a child never reaches the bottom of.
 
    RANDOM NEVER REPEATS THE CURRENT VIDEO, and gives up when there is nothing
-   else — `roll` picks out of the OTHER count-1 videos and the answer steps
-   over the current index, so the same video cannot come round again
-   immediately.
+   else — the roll picks out of the OTHER videos, so the same one cannot come
+   round again immediately.
+
+   RANDOM PREFERS WHAT HAS NOT BEEN WATCHED. This is the one place the web app
+   DIVERGES from Playlist.kt, which knows only a count and an index. Random
+   over everything meant a child who had seen most of a channel kept being
+   handed repeats, which is the complaint random was supposed to answer. So
+   the pool is the unwatched videos when there are any, and every other video
+   when there are not — a preference, not a restriction, because running out
+   of new things must not stop playback. Watched means the same thing here as
+   everywhere else, `WATCHED_THRESHOLD`; and when `hideWatched` is on this
+   changes nothing, because those videos never reach the list.
 
    And the list is whatever the child was looking at when they tapped: a video
    started from inside one channel cannot lead out of it, and there is no rule
@@ -609,17 +618,35 @@ export function playbackMode(name) {
 }
 
 /** The index to play after `current`, or null for "nothing follows this".
- * `roll(bound)` returns an integer in [0, bound), like Kotlin's nextInt. */
-export function nextIndex(count, current, mode, roll = n => Math.floor(Math.random() * n)) {
+ * `roll(bound)` returns an integer in [0, bound), like Kotlin's nextInt.
+ * `isWatched(i)` is optional; without it this is Playlist.kt exactly. */
+export function nextIndex(count, current, mode, roll = n => Math.floor(Math.random() * n), isWatched = null) {
   if (count <= 0 || current < 0 || current >= count) return null
   if (playbackMode(mode) === PLAYBACK_IN_ORDER) return current + 1 < count ? current + 1 : null
   if (count < 2) return null
+
+  /* Every video but this one, in order. Rolling over this list rather than
+     doing the skip-past arithmetic is the same answer for the same roll —
+     `others[n]` is `n` below `current` and `n + 1` at or above it — and it is
+     what lets the pool narrow to the unwatched without a second rule. */
+  const others = []
+  for (let i = 0; i < count; i++) if (i !== current) others.push(i)
+  const unseen = isWatched ? others.filter(i => !isWatched(i)) : []
+  const pool = unseen.length ? unseen : others
+
   /* The roll is the one input from outside this file, so it is floored and
      clamped rather than trusted — and NaN is clamped too, which Math.min/max
      would pass straight through into an index. */
-  const raw = Math.floor(roll(count - 1))
-  const n = Number.isFinite(raw) ? Math.min(count - 2, Math.max(0, raw)) : 0
-  return n >= current ? n + 1 : n
+  const raw = Math.floor(roll(pool.length))
+  const n = Number.isFinite(raw) ? Math.min(pool.length - 1, Math.max(0, raw)) : 0
+  return pool[n]
+}
+
+/** What the app calls: the same rule, with "watched" read off the store the
+ * grid already uses, so the player and the badge cannot disagree about what
+ * counts as seen. */
+export function nextVideoIndex(list, current, mode, watched = {}, roll) {
+  return nextIndex(list.length, current, mode, roll, i => fraction(watched[list[i]?.id]) > WATCHED_THRESHOLD)
 }
 
 // ---------------------------------------------------------------------------

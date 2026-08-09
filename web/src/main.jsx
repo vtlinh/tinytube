@@ -13,7 +13,7 @@ import {
   verify,
   isBiometricAvailable,
   quotaState,
-  nextIndex,
+  nextVideoIndex,
 } from './lib.js'
 import Gallery from './gallery.jsx'
 import PlayerView from './player.jsx'
@@ -94,12 +94,13 @@ export default function App() {
         settings={store.settings}
         onExit={close}
         /* One finished, so play the next one the child's mode asks for — in
-           order, or a random other. `nextIndex` returning null means the list
-           is spent, and then the player closes exactly as it always did. This
-           does NOT re-check the quota: the counting loop stops playback the
-           moment it runs out, whichever video is on. */
+           order, or a random one they have not seen. `nextVideoIndex` reads
+           watched off the same store the grid's badges do; returning null
+           means the list is spent, and then the player closes exactly as it
+           always did. This does NOT re-check the quota: the counting loop
+           stops playback the moment it runs out, whichever video is on. */
         onEnded={() => {
-          const i = nextIndex(current.list.length, current.index, store.settings.playback)
+          const i = nextVideoIndex(current.list, current.index, store.settings.playback, watchStore.watched)
           if (i == null) close()
           else setCurrent({ ...current, index: i })
         }}
