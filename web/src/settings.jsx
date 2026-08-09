@@ -119,24 +119,23 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
 /** Watch-time stats on their own tab, account-wide: statsUsage folds in what
  * every synced device watched. */
 function StatsTab({ watchStore, settings }) {
+  /* `used` comes from quotaState rather than being computed again here, so
+     what this screen reports and what the player enforces cannot disagree. */
+  const { used, limits } = quotaState(settings, watchStore)
   const stats = usageStats(statsUsage(watchStore))
-  const { secsLeft } = quotaState(settings, watchStore)
   const bonusMins = activeBonusMins(settings)
   const rows = [
-    ['Last 6 hours', stats.last6h, 'A rolling six hours'],
-    ['Today', stats.today, 'Since midnight'],
-    ['This week', stats.wtd, 'Since Sunday'],
-    ['This month', stats.mtd, 'Since the 1st'],
-    ['This year', stats.ytd, 'Year to date'],
+    ['Last 6 hours', 'A rolling six hours', used.per6h, 'per6h'],
+    ['Today', 'Since midnight', used.perDay, 'perDay'],
+    ['This week', 'Since Sunday', used.perWeek, 'perWeek'],
+    ['This month', 'Since the 1st', used.perMonth, 'perMonth'],
+    // no limit governs a year; it is here as a figure, not as a budget
+    ['This year', 'Year to date', stats.ytd, null],
   ]
+  const mins = secs => Math.round(secs / 60)
+
   return (
     <div className="col-md-6 mx-auto">
-      <div className="text-secondary mb-3">
-        <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
-        {Number.isFinite(secsLeft)
-          ? `${fmtMins(Math.max(0, Math.ceil(secsLeft / 60)))} left before the tightest limit`
-          : 'No limit set'}
-      </div>
       {bonusMins > 0 && (
         <div className="mb-3">
           <i className="fa-sharp-duotone fa-regular fa-gift text-danger me-2" />
@@ -145,13 +144,25 @@ function StatsTab({ watchStore, settings }) {
       )}
       <table className="table align-middle">
         <tbody>
-          {rows.map(([label, secs, hint]) => (
+          {rows.map(([label, hint, secs, key]) => (
             <tr key={label}>
               <td>
                 <div className="fw-semibold">{label}</div>
                 <div className="text-secondary small">{hint}</div>
               </td>
-              <td className="text-end fs-5">{fmtMins(Math.round(secs / 60))}</td>
+              {/* each period carries its OWN limit, beside its own number: one
+                  line at the top said which limit was tightest and nothing
+                  about the other three */}
+              <td className="text-end">
+                <div className="fs-5">{fmtMins(mins(secs))}</div>
+                {key && (
+                  <div className="text-secondary small">
+                    {limits[key] == null
+                      ? 'no limit'
+                      : `${fmtMins(Math.max(0, limits[key] - mins(secs)))} left of ${fmtMins(limits[key])}`}
+                  </div>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
