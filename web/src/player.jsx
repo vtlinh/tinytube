@@ -115,13 +115,20 @@ export function VideoPlayer({ video, watchStore, settings, onExit, onQuotaExhaus
     if (pos > 0 && dur > 0) watchStore.saveProgress(video.id, pos, dur)
   }, [video.id, watchStore])
 
-  // poll every second; watch time = playback-position delta, NOT ticks gated
-  // on the PLAYING event: iOS standalone throttles/suspends timers and drops
-  // iframe state events, either of which froze the quota while the video
-  // kept playing. Position only advances by actually watching (there is no
-  // scrubber), a paused video contributes 0, and a late tick back-fills the
-  // whole gap. Capped at wall-clock elapsed so a stale player object can
-  // never over-charge. Persist every 5 watched seconds and on pause/hide/unmount.
+  /* Poll every second; watch time = playback-position delta, NOT ticks gated
+     on the PLAYING *event*: iOS standalone throttles timers and drops iframe
+     state events, either of which froze the quota while the video kept
+     playing. Position only advances by actually watching (there is no
+     scrubber), so a late tick back-fills the whole gap, and it is capped at
+     wall-clock elapsed so a stale player object can never over-charge.
+     Persist every 5 watched seconds and on pause/hide/unmount.
+
+     PAUSE IS AUTHORITATIVE, and asked rather than awaited. getPlayerState()
+     is a question put to the player on this very tick, so no dropped event can
+     freeze the quota — the reason the counting was never gated on events —
+     while a position that creeps for any other reason (an ad, jitter around a
+     pause boundary, a stale object still reporting) cannot bill a child for
+     time nobody watched. */
   useEffect(() => {
     const interval = setInterval(() => {
       const p = playerRef.current
@@ -132,6 +139,8 @@ export function VideoPlayer({ video, watchStore, settings, onExit, onQuotaExhaus
       const prev = lastTick.current
       lastTick.current = { at: now, pos }
       if (!prev) return
+      // not playing, not counted — whatever the position says
+      if ((p.getPlayerState?.() ?? PLAYING) !== PLAYING) return
       const watched = Math.min(pos - prev.pos, (now - prev.at) / 1000)
       if (watched <= 0) return
       pending.current += watched

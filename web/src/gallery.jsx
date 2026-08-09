@@ -68,20 +68,10 @@ export default function Gallery({
             <i className="fa-sharp-duotone fa-regular fa-user-group text-danger" />
           </button>
         )}
-        <span className="fs-4 fw-bold me-auto text-truncate d-flex align-items-center">
-          {!filter && (
-            // the REAL app icon, not a lookalike glyph — same master as the
-            // Android launcher (art/app-icon.png via make-icons.py)
-            <img
-              src={`${import.meta.env.BASE_URL}icons/icon-192.png?v=2`}
-              alt=""
-              width="28"
-              height="28"
-              className="me-2 rounded"
-            />
-          )}
-          {filter?.title ?? 'TinyTube'}
-        </span>
+        {/* the wordmark alone: the launcher icon is already on the home
+            screen and in the tab, and a third copy of it here was taking room
+            from the title of whatever the child has narrowed the grid to */}
+        <span className="fs-4 fw-bold me-auto text-truncate">{filter?.title ?? 'TinyTube'}</span>
         {/* a worded button, not an icon — the Android status bar's Parent
             button. Visible rather than hidden: what stops a child using it is
             the gate behind it, not obscurity. */}
