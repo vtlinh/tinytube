@@ -814,6 +814,17 @@ stops, green publishes.
   devices, and why a device must never fold pulled totals back into the
   buckets it pushes).
 
+  **The `/sync/*` rows are keyed by CHILD as well as by account.** One
+  household has several children and each owns their own age, quota, channels
+  and watch history, so `sync_watched_v2`/`sync_usage_v2` carry a `child_id` in
+  their primary key — new tables rather than an ALTER, because SQLite cannot
+  widen a PRIMARY KEY in place. The pre-children tables are still there and
+  their rows are copied once, idempotently, under `DEFAULT_CHILD` (`"default"`),
+  which is the id the web app's own migration gives its first child. Those two
+  literals have to stay equal: change one alone and every already-syncing
+  account silently starts from an empty history. Settings stay ACCOUNT-wide —
+  the blob carries every child — so only history and usage take the child.
+
   **`/videos` is the shared-vs-per-user line, drawn deliberately.** Which
   videos a channel has is a fact about the channel, so it is cached ONCE, in
   D1's `channel_cache`, keyed by channel id and shared by every account —

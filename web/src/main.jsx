@@ -14,7 +14,8 @@ import { EnrollGate, MathGate, QuotaGate } from './landing.jsx'
 export default function App() {
   const store = useSettings()
   const { db, channels, error } = useVideos(store.settings)
-  const watchStore = useWatchStore()
+  // one history per child: switching child swaps the grid's progress and the quota
+  const watchStore = useWatchStore(store.settings.childId)
   const sync = useSync(store, watchStore) // inert until a parent signs in (Settings -> Sync)
   const [current, setCurrent] = useState(null) // video being played, or null
   const [view, setView] = useState('gallery') // 'gallery' | 'gate' | 'settings' | 'quota'
