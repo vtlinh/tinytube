@@ -167,7 +167,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: node --test
+      # Named rather than bare: `node --test` sweeps every *.test.js under the
+      # tree, and web/tests are vitest files that cannot run under node's
+      # runner (web/ has its own suite, run by pages.yml).
+      - run: node --test worker.test.mjs
       - name: The Worker still bundles
         run: npx wrangler deploy --dry-run
 
