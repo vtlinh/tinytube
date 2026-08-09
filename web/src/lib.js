@@ -1179,15 +1179,27 @@ export function fraction(entry) {
 }
 
 export function useWatchStore(childId = FIRST_CHILD_ID) {
-  const [store, setStore] = useState(() => loadWatchStore(childId))
+  /* The store carries WHOSE it is, and every writer checks before writing.
+     There is one `setStore` for every child, so a write whose childId came
+     from an earlier render would otherwise land on whoever is showing now:
+     a /sync/pull for A that resolves after the parent switched to B put A's
+     rows AND A's account-wide usage into B's store, and B's quota then read
+     A's watch time out of `remote`. Dropping the late write is right rather
+     than merely safe — the pull's answer describes a child nobody is looking
+     at, and the next launch pulls it again. */
+  const [store, setStore] = useState(() => ({ ...loadWatchStore(childId), childId }))
+  const forThisChild = useCallback(
+    fn => setStore(prev => (prev.childId === childId ? fn(prev) : prev)),
+    [childId],
+  )
 
   // switching child swaps the whole history under us
   useEffect(() => {
-    setStore(loadWatchStore(childId))
+    setStore({ ...loadWatchStore(childId), childId })
   }, [childId])
 
   const saveProgress = useCallback((id, pos, dur) => {
-    setStore(prev => {
+    forThisChild(prev => {
       const entry = prev.watched[id]
       const completed = (entry?.completed ?? false) || (dur > 0 && pos / dur > WATCHED_THRESHOLD)
       const next = {
@@ -1198,10 +1210,10 @@ export function useWatchStore(childId = FIRST_CHILD_ID) {
       persist(next, childId)
       return next
     })
-  }, [childId])
+  }, [forThisChild, childId])
 
   const markCompleted = useCallback(id => {
-    setStore(prev => {
+    forThisChild(prev => {
       const entry = prev.watched[id] ?? { pos: 0, dur: 0 }
       const next = {
         ...prev,
@@ -1211,22 +1223,22 @@ export function useWatchStore(childId = FIRST_CHILD_ID) {
       persist(next, childId)
       return next
     })
-  }, [childId])
+  }, [forThisChild, childId])
 
   const addWatchTime = useCallback(secs => {
-    setStore(prev => {
+    forThisChild(prev => {
       const next = { ...prev, usage: accrueUsage(prev.usage, secs) }
       persist(next, childId)
       return next
     })
-  }, [childId])
+  }, [forThisChild, childId])
 
   /* A /sync/pull's answer folded in: watched merges row-wise LWW; the
      account-wide usage sums land in `remote`, NEVER in `usage` — usage is what
      this device pushes back up, so folding remote into it would compound
      everyone's totals on every round trip. */
   const applyRemote = useCallback(({ watched, usage }) => {
-    setStore(prev => {
+    forThisChild(prev => {
       const next = {
         ...prev,
         watched: mergeWatched(prev.watched, watched),
@@ -1235,7 +1247,7 @@ export function useWatchStore(childId = FIRST_CHILD_ID) {
       persist(next, childId)
       return next
     })
-  }, [childId])
+  }, [forThisChild, childId])
 
   return {
     watched: store.watched,
