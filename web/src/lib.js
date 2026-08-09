@@ -138,6 +138,33 @@ export function parseBirthdayInput(text) {
   return m ? `20${m[2]}-${String(m[1]).padStart(2, '0')}` : null
 }
 
+// ---------------------------------------------------------------------------
+// the age slider's arithmetic, pure so it can be tested without a layout
+
+export const AGE_MIN = 1
+export const AGE_MAX = 15
+
+/** 0..1 along the track -> an age on the 1-15 scale, clamped at both ends. */
+export function ageAtFraction(t) {
+  return Math.round(AGE_MIN + Math.min(1, Math.max(0, t)) * (AGE_MAX - AGE_MIN))
+}
+
+/**
+ * Which end of a [lo, hi] pair a press at `v` should drag: the nearer one, or
+ * the end being pushed when the press is outside the pair.
+ *
+ * 'pending' when the two ends are SITTING ON THE SAME VALUE and that is where
+ * the press landed — the answer is not knowable until the pointer moves, and
+ * guessing is exactly how an end gets stuck: pick `lo`, drag right, and every
+ * value clamps against `hi`, which looks like a dead slider.
+ */
+export function grabEnd(v, lo, hi) {
+  if (v < lo) return 'lo'
+  if (v > hi) return 'hi'
+  if (lo === hi) return 'pending'
+  return v - lo <= hi - v ? 'lo' : 'hi'
+}
+
 /**
  * Curated channels from videos.json with the parent's per-channel edits
  * applied — overrides[channel_id] may adjust min_age/max_age or set hidden.

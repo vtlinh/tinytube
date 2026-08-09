@@ -13,6 +13,10 @@ import {
   ageFromBirthday,
   parseBirthdayInput,
   effectiveAgeRange,
+  AGE_MIN,
+  AGE_MAX,
+  ageAtFraction,
+  grabEnd,
   canGroup,
   canUngroup,
   groupMembers,
@@ -361,43 +365,84 @@ function VersionLink() {
   return <span className="text-secondary small text-nowrap">Version {version}</span>
 }
 
+/* THE POINTER IS OURS HERE, and that is the fix rather than a flourish.
+ *
+ * Two stacked <input type="range"> expose only their THUMBS to a pointer, so
+ * the moment lo and hi meet, the upper input's thumb sits exactly over the
+ * other's and that end can never be dragged again — and a press anywhere on
+ * the track does nothing at all, because the track itself takes no events.
+ *
+ * So a transparent surface over the pair handles the dragging and decides
+ * which end moves (see grabEnd). The inputs stay exactly where they are, for
+ * the keyboard and for screen readers; the single-thumb sliders below share
+ * this CSS and are untouched, which is why the thumbs keep their own pointer
+ * handling rather than having it taken away globally.
+ */
 function DualAgeSlider({ value: [lo, hi], onChange }) {
-  const pos = v => `calc(${(v - 1) / 14} * (100% - 32px) + 16px)`
+  const track = useRef(null)
+  const grabbed = useRef(null)
+  const pos = v => `calc(${(v - AGE_MIN) / (AGE_MAX - AGE_MIN)} * (100% - 32px) + 16px)`
+
+  // the thumb's CENTRE travels between 16px and width-16px, matching pos()
+  const ageAt = clientX => {
+    const r = track.current.getBoundingClientRect()
+    return ageAtFraction((clientX - r.left - 16) / Math.max(1, r.width - 32))
+  }
+  const apply = (end, v) => (end === 'lo' ? onChange([Math.min(v, hi), hi]) : onChange([lo, Math.max(v, lo)]))
+
+  const onPointerDown = e => {
+    const v = ageAt(e.clientX)
+    grabbed.current = grabEnd(v, lo, hi)
+    // capture, so a drag that leaves the row keeps steering the slider
+    e.currentTarget.setPointerCapture(e.pointerId)
+    if (grabbed.current !== 'pending') apply(grabbed.current, v)
+  }
+
+  const onPointerMove = e => {
+    if (!grabbed.current) return
+    const v = ageAt(e.clientX)
+    // two ends on one value: the first move that goes anywhere says which
+    if (grabbed.current === 'pending') {
+      if (v === lo) return
+      grabbed.current = v > hi ? 'hi' : 'lo'
+    }
+    apply(grabbed.current, v)
+  }
+
+  // capture releases itself on pointerup/cancel; only the grab needs clearing
+  const release = () => {
+    grabbed.current = null
+  }
+
   return (
-    <div className="dual-slider flex-grow-1">
+    <div className="dual-slider flex-grow-1" ref={track}>
       <input
         type="range"
-        min="1"
-        max="15"
+        min={AGE_MIN}
+        max={AGE_MAX}
         value={lo}
         aria-label="Youngest age"
         onChange={e => onChange([Math.min(+e.target.value, hi), hi])}
       />
       <input
         type="range"
-        min="1"
-        max="15"
+        min={AGE_MIN}
+        max={AGE_MAX}
         value={hi}
         aria-label="Oldest age"
         onChange={e => onChange([lo, Math.max(+e.target.value, lo)])}
       />
       <span className="thumb-label" style={{ left: pos(lo) }}>{lo}</span>
       <span className="thumb-label" style={{ left: pos(hi) }}>{hi}</span>
+      <div
+        className="slider-surface"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={release}
+        onPointerCancel={release}
+      />
     </div>
   )
-}
-
-/** The child's BIRTHDAY (mm/yy, born the 1st of that month by declaration)
- * rather than an age: the computed age keeps up on its own instead of going
- * stale a birthday later. The channel filter uses it as a single-point range —
- * see effectiveAgeRange. */
-/* Bare digits get their slash typed for them: "1217" becomes "12/17" on the
-   fourth keystroke. A hand-typed slash is left alone (so "1/17" still works),
-   and anything else is stripped. */
-function formatBirthdayText(raw) {
-  const cleaned = raw.replace(/[^\d/]/g, '')
-  if (cleaned.includes('/')) return cleaned
-  return cleaned.length > 2 ? `${cleaned.slice(0, 2)}/${cleaned.slice(2, 4)}` : cleaned
 }
 
 function BirthdayRow({ value, onChange }) {
