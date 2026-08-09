@@ -12,6 +12,12 @@ import {
   ageFromBirthday,
   parseBirthdayInput,
   effectiveAgeRange,
+  effectiveQuotaMins,
+  activeBonusMins,
+  LENGTH_STOPS,
+  lengthIndex,
+  lengthLabel,
+  clampLengthRange,
   hydrateChannel,
   arrangeChannels,
   AGE_MIN,
@@ -77,7 +83,10 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
         <>
           <BirthdayRow value={settings.birthday} onChange={store.setBirthday} />
           <QuotaRow value={settings.quotaMins} onChange={store.setQuotaMins} watchStore={watchStore} />
-          <MinLengthRow value={settings.minVideoMins} onChange={store.setMinVideoMins} />
+          <VideoLengthRow
+            value={[settings.minVideoMins, settings.maxVideoMins]}
+            onChange={store.setVideoLength}
+          />
           <ApiKeyRow apiKey={settings.apiKey} onChange={store.setApiKey} />
           {/* the About position, like the Android app: the bottom of settings */}
           <div className="text-center mt-5">
@@ -91,7 +100,13 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
           <ChannelList db={db} customById={customById} store={store} />
         </>
       )}
-      {tab === 'stats' && <StatsTab watchStore={watchStore} quotaMins={settings.quotaMins} />}
+      {tab === 'stats' && (
+        <StatsTab
+          watchStore={watchStore}
+          quotaMins={effectiveQuotaMins(settings)}
+          bonusMins={activeBonusMins(settings)}
+        />
+      )}
 
       <nav className="bottom-tabs fixed-bottom d-flex border-top">
         <TabButton label="Settings" icon="fa-gear" on={tab === 'settings'} onClick={() => setTab('settings')} />
@@ -104,7 +119,7 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
 
 /** Watch-time stats on their own tab, account-wide: statsUsage folds in what
  * every synced device watched. */
-function StatsTab({ watchStore, quotaMins }) {
+function StatsTab({ watchStore, quotaMins, bonusMins = 0 }) {
   const stats = usageStats(statsUsage(watchStore))
   const rows = [
     ['Session', stats.session, `The current ${QUOTA_WINDOW_MS / 3600_000}h quota window`],
@@ -120,6 +135,12 @@ function StatsTab({ watchStore, quotaMins }) {
         <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
         {fmtMins(Math.round(usedMins))} of {fmtMins(quotaMins)} used in the current window
       </div>
+      {bonusMins > 0 && (
+        <div className="mb-3">
+          <i className="fa-sharp-duotone fa-regular fa-gift text-danger me-2" />
+          {fmtMins(bonusMins)} extra granted — until the end of this week
+        </div>
+      )}
       <table className="table align-middle">
         <tbody>
           {rows.map(([label, secs, hint]) => (
@@ -667,40 +688,94 @@ function QuotaRow({ value, onChange, watchStore }) {
   )
 }
 
-const MIN_LENGTH_MAX_MINS = 60 // 1h, in 5-min steps
+/**
+ * The length range: two thumbs on the 0…2h scale, in 15-minute steps, with
+ * "any" at both ends — no floor on the left, no ceiling on the right.
+ *
+ * Built on the same pointer surface as the age slider (the native thumbs
+ * cannot be trusted to stay reachable once two of them meet), stepping over
+ * LENGTH_STOPS by index rather than by minutes so the last stop can be
+ * "no ceiling" rather than a number.
+ */
+function VideoLengthSlider({ value: [minMins, maxMins], onChange }) {
+  const track = useRef(null)
+  const grabbed = useRef(null)
+  const last = LENGTH_STOPS.length - 1
+  const lo = lengthIndex(minMins)
+  const hi = lengthIndex(maxMins)
+  const pos = i => `calc(${i / last} * (100% - 44px) + 22px)`
 
-/** Same 44px-thumb track as QuotaSlider, but no usage fill — the thumb label
- * is the minimum video length; 0 means show everything. */
-function MinLengthSlider({ value, onChange }) {
-  const pos = v => `calc(${v / MIN_LENGTH_MAX_MINS} * (100% - 44px) + 22px)`
+  const indexAt = clientX => {
+    const r = track.current.getBoundingClientRect()
+    const t = (clientX - r.left - 22) / Math.max(1, r.width - 44)
+    return Math.round(Math.min(1, Math.max(0, t)) * last)
+  }
+  const apply = (end, v) => {
+    const [nextLo, nextHi] = clampLengthRange([lo, hi], end, v)
+    onChange([LENGTH_STOPS[nextLo], Number.isFinite(LENGTH_STOPS[nextHi]) ? LENGTH_STOPS[nextHi] : null])
+  }
+
+  const onPointerDown = e => {
+    const v = indexAt(e.clientX)
+    grabbed.current = grabEnd(v, lo, hi)
+    e.currentTarget.setPointerCapture(e.pointerId)
+    if (grabbed.current !== 'pending') apply(grabbed.current, v)
+  }
+  const onPointerMove = e => {
+    if (!grabbed.current) return
+    const v = indexAt(e.clientX)
+    if (grabbed.current === 'pending') {
+      if (v === lo) return
+      grabbed.current = v > hi ? 'hi' : 'lo'
+    }
+    apply(grabbed.current, v)
+  }
+  const release = () => {
+    grabbed.current = null
+  }
+
   return (
-    <div className="dual-slider quota-slider flex-grow-1">
+    <div className="dual-slider quota-slider flex-grow-1" ref={track}>
       <input
         type="range"
         min="0"
-        max={MIN_LENGTH_MAX_MINS}
-        step="5"
-        value={value}
-        aria-label="Minimum video length"
-        onChange={e => onChange(+e.target.value)}
+        max={last}
+        value={lo}
+        aria-label="Shortest video"
+        onChange={e => apply('lo', +e.target.value)}
       />
-      {/* ">" marks it as a floor; at 0 nothing is filtered, so "all" */}
-      <span className="thumb-label" style={{ left: pos(value) }}>{value ? `>${fmtMins(value)}` : 'all'}</span>
+      <input
+        type="range"
+        min="0"
+        max={last}
+        value={hi}
+        aria-label="Longest video"
+        onChange={e => apply('hi', +e.target.value)}
+      />
+      <span className="thumb-label" style={{ left: pos(lo) }}>{lengthLabel(LENGTH_STOPS[lo])}</span>
+      <span className="thumb-label" style={{ left: pos(hi) }}>{lengthLabel(LENGTH_STOPS[hi])}</span>
+      <div
+        className="slider-surface"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={release}
+        onPointerCancel={release}
+      />
     </div>
   )
 }
 
-function MinLengthRow({ value, onChange }) {
+function VideoLengthRow({ value, onChange }) {
   return (
     <div className="d-flex align-items-center gap-3 mb-4">
       <span
         className="text-secondary text-nowrap"
-        title="Hide videos shorter than this — keeps quick-hit clips out of the gallery (0m shows everything)"
+        title="Show only videos between these lengths — either end can be “any”"
       >
         <i className="fa-duotone fa-solid fa-video-arrow-up-right me-2" />
         Video Length
       </span>
-      <MinLengthSlider value={value} onChange={onChange} />
+      <VideoLengthSlider value={value} onChange={onChange} />
     </div>
   )
 }

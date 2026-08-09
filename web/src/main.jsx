@@ -5,7 +5,16 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import './styles.css'
-import { useSettings, useVideos, useWatchStore, useSync, verify, isBiometricAvailable, usedSecs } from './lib.js'
+import {
+  useSettings,
+  useVideos,
+  useWatchStore,
+  useSync,
+  verify,
+  isBiometricAvailable,
+  usedSecs,
+  effectiveQuotaMins,
+} from './lib.js'
 import Gallery from './gallery.jsx'
 import PlayerView from './player.jsx'
 import Settings from './settings.jsx'
@@ -20,6 +29,7 @@ export default function App() {
   const [current, setCurrent] = useState(null) // video being played, or null
   const [view, setView] = useState('gallery') // 'gallery' | 'gate' | 'settings' | 'quota'
   const [biometric, setBiometric] = useState(null) // null = still checking
+  const [granting, setGranting] = useState(null) // minutes waiting on the gate
 
   useEffect(() => {
     isBiometricAvailable().then(setBiometric)
@@ -71,7 +81,7 @@ export default function App() {
       <PlayerView
         video={current}
         watchStore={watchStore}
-        quotaMins={store.settings.quotaMins}
+        quotaMins={effectiveQuotaMins(store.settings)}
         onExit={close}
         onQuotaExhausted={() => {
           // same history depth: the player's entry becomes the quota screen's,
@@ -104,12 +114,43 @@ export default function App() {
     return 'gate'
   }
 
+  /* Extra time is a parent's decision, so it goes through the same gate parent
+     mode does: the biometric where there is one, the arithmetic where there is
+     not. The grant itself lasts the week — see addBonusMins. */
+  const grant = mins => {
+    store.addBonusMins(mins)
+    setGranting(null)
+    close() // back to the grid, with time on the clock
+  }
+
+  if (view === 'grant-gate') {
+    return (
+      <MathGate
+        onPass={() => grant(granting)}
+        onFail={() => {
+          setGranting(null)
+          setView('quota')
+        }}
+      />
+    )
+  }
+
   if (view === 'quota') {
     return (
       <QuotaGate
         onParents={async () => {
           const v = await parentGate()
           if (v) setView(v) // same history depth, like MathGate onPass
+        }}
+        onAddTime={async mins => {
+          // called from inside the tap handler, which is what keeps iOS's
+          // user activation alive for the biometric prompt
+          if (store.settings.passkeyId) {
+            if (await verify(store.settings.passkeyId)) grant(mins)
+            return
+          }
+          setGranting(mins)
+          setView('grant-gate') // same history depth as the quota screen
         }}
         onBack={close}
       />
@@ -132,7 +173,7 @@ export default function App() {
         // the gallery sits idle must unblock immediately (expiry is lazy).
         // usedSecs folds in the synced account-wide usage, so switching
         // devices doesn't reset the meter
-        const over = usedSecs(watchStore) >= store.settings.quotaMins * 60
+        const over = usedSecs(watchStore) >= effectiveQuotaMins(store.settings) * 60
         if (over) open(() => setView('quota'))()
         else open(setCurrent)(video)
       }}
