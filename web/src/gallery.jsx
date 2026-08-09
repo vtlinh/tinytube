@@ -42,11 +42,17 @@ export default function Gallery({ channels, groups = [], groupOf = {}, watchStor
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
           </button>
         )}
-        <span className="fs-4 fw-bold me-auto text-truncate">
+        <span className="fs-4 fw-bold me-auto text-truncate d-flex align-items-center">
           {!filter && (
-            // not fa-jelly-duo: the kit token only serves classic/duotone/sharp
-            // fonts, so jelly-duo renders its two layers as two glyphs
-            <i className="fa-duotone fa-regular fa-tv-retro me-2 text-danger" />
+            // the REAL app icon, not a lookalike glyph — same master as the
+            // Android launcher (art/app-icon.png via make-icons.py)
+            <img
+              src={`${import.meta.env.BASE_URL}icons/icon-192.png?v=2`}
+              alt=""
+              width="28"
+              height="28"
+              className="me-2 rounded"
+            />
           )}
           {filter?.title ?? 'TinyTube'}
         </span>

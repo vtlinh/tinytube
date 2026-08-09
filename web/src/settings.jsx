@@ -54,10 +54,7 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
           </button>
         </div>
-        <h1 className="fs-3 fw-bold m-0">
-          <i className="fa-sharp-duotone fa-solid fa-remote me-2 text-danger" />
-          {page === 'channels' ? 'Channels' : 'Settings'}
-        </h1>
+        <h1 className="fs-3 fw-bold m-0">{page === 'channels' ? 'Channels' : 'Parents Mode'}</h1>
         <div className="d-flex align-items-center justify-content-end gap-3" style={{ flex: 1 }}>
           <VersionLink />
           {dirty && (
