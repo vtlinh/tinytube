@@ -1034,7 +1034,19 @@ async function syncPush(request, db) {
  * a day.
  * ------------------------------------------------------------------------- */
 
-const CHANNEL_CACHE_TTL_MS = 24 * 3600_000; // the standing once-a-day-per-channel clock
+/* NOTHING IS REFETCHED INSIDE 23 HOURS — not by a browser asking, not by the
+ * cron. Twenty-three rather than twenty-four for an operational reason: the
+ * cron runs once a day at a fixed minute, so a row fetched a minute after the
+ * previous run is 23h59m old when the next one comes round, would not count as
+ * due at a 24h threshold, and would sit unrefreshed for another whole day. The
+ * floor also caps how often YouTube is asked about any one channel, however
+ * many accounts approve it.
+ *
+ * The one thing that ignores it is a row that is not a RECORD at all — see
+ * usableRecord — because serving those is worse than a fetch, and it converges
+ * after one. */
+export const MIN_REFRESH_MS = 23 * 3600_000;
+const CHANNEL_CACHE_TTL_MS = MIN_REFRESH_MS;
 
 /** PT1H2M3S -> seconds; null when unparsable (e.g. P0D live placeholders). */
 export function parseIsoDuration(iso) {
@@ -1233,7 +1245,7 @@ export async function refreshStaleChannels(db, ytKey, now = Date.now()) {
   await ensureSchema(db);
   const { results } = await db
     .prepare("SELECT channel_id FROM channel_cache WHERE fetched_at < ?1 ORDER BY fetched_at ASC LIMIT ?2")
-    .bind(now - CHANNEL_CACHE_TTL_MS, CRON_REFRESH_LIMIT)
+    .bind(now - MIN_REFRESH_MS, CRON_REFRESH_LIMIT)
     .all();
   let refreshed = 0;
   for (const { channel_id: id } of results ?? []) {

@@ -649,3 +649,14 @@ test("a cached row without a title is not a usable record", () => {
   assert.equal(usableRecord({ channel_id: "UC", title: null, videos: [] }), true, "known-to-be-nameless is an answer");
   assert.equal(usableRecord(null), false);
 });
+
+/* The refresh floor: 23 hours, and 23 rather than 24 on purpose — a daily
+   cron at a fixed minute would never find a row fetched just after the
+   previous run "due" at a 24-hour threshold, and it would sit for another
+   whole day. */
+import { MIN_REFRESH_MS } from "./worker.js";
+
+test("nothing is refetched inside 23 hours, and the floor clears a daily cron", () => {
+  assert.equal(MIN_REFRESH_MS, 23 * 3600_000);
+  assert.ok(MIN_REFRESH_MS < 24 * 3600_000, "a 24h floor and a daily cron never line up");
+});

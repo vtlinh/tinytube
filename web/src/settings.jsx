@@ -10,7 +10,6 @@ import {
   GOOGLE_CLIENT_ID,
   QUOTA_WINDOW_MS,
   ageFromBirthday,
-  parseBirthdayInput,
   effectiveAgeRange,
   effectiveQuota,
   activeWeekOverride,
@@ -20,6 +19,7 @@ import {
   LENGTH_STOPS,
   lengthIndex,
   lengthLabel,
+  minuteLabel,
   clampLengthRange,
   hydrateChannel,
   arrangeChannels,
@@ -84,6 +84,7 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
 
       {tab === 'settings' && (
         <>
+          <NameRow value={settings.childName} onChange={store.renameChild} />
           <BirthdayRow value={settings.birthday} onChange={store.setBirthday} />
           <QuotaRow store={store} watchStore={watchStore} />
           <VideoLengthRow
@@ -547,6 +548,7 @@ function VersionLink() {
 function DualAgeSlider({ value: [lo, hi], onChange }) {
   const track = useRef(null)
   const grabbed = useRef(null)
+  const pos = v => `calc(${(v - AGE_MIN) / (AGE_MAX - AGE_MIN)} * (100% - 32px) + 16px)`
 
   // the thumb's CENTRE travels between 16px and width-16px, matching pos()
   const ageAt = clientX => {
@@ -608,48 +610,162 @@ function DualAgeSlider({ value: [lo, hi], onChange }) {
   )
 }
 
+/** Whose settings these are. Renames the child in place — the name is theirs,
+ * not a label on a screen, so it travels with them everywhere. */
+function NameRow({ value, onChange }) {
+  const [text, setText] = useState(value)
+  useEffect(() => setText(value), [value])
+  return (
+    <div className="d-flex align-items-center gap-3 mb-4">
+      <span className="text-secondary text-nowrap">
+        <i className="fa-sharp-duotone fa-regular fa-child me-2" />
+        Name
+      </span>
+      <input
+        type="text"
+        className="form-control"
+        aria-label="Child’s name"
+        value={text}
+        onChange={e => {
+          setText(e.target.value)
+          // a blank name is not stored: the store would fall back to "Child"
+          // and the field would fight whoever is mid-edit
+          if (e.target.value.trim()) onChange(e.target.value)
+        }}
+      />
+    </div>
+  )
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const OLDEST_YEARS = 17 // a 16-year-old is past this app; one spare year of room
+
+/**
+ * The birthday, PICKED rather than typed: a year to step through and twelve
+ * months to tap. Typing mm/yy meant a keyboard, a format to get right, and a
+ * field that could hold something meaningless — a grid of months cannot, and
+ * a month that has not happened yet is simply not offered.
+ */
+function BirthdayDialog({ value, onPick, onCancel }) {
+  const now = new Date()
+  const thisYear = now.getFullYear()
+  const [year, setYear] = useState(value ? +value.slice(0, 4) : thisYear - 5)
+  const step = by => setYear(y => Math.min(thisYear, Math.max(thisYear - OLDEST_YEARS, y + by)))
+  return (
+    <>
+      <div className="modal d-block" tabIndex="-1" role="dialog" onClick={onCancel}>
+        <div className="modal-dialog modal-dialog-centered" onClick={e => e.stopPropagation()}>
+          <div className="modal-content">
+            <div className="modal-header">
+              <h5 className="modal-title">Birthday</h5>
+              <button type="button" className="btn-close" aria-label="Close" onClick={onCancel} />
+            </div>
+            <div className="modal-body">
+              <div className="d-flex align-items-center justify-content-between mb-3">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  aria-label="Previous year"
+                  disabled={year <= thisYear - OLDEST_YEARS}
+                  onClick={() => step(-1)}
+                >
+                  <i className="fa-sharp-duotone fa-regular fa-chevron-left" />
+                </button>
+                <span className="fs-4 fw-bold">{year}</span>
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  aria-label="Next year"
+                  disabled={year >= thisYear}
+                  onClick={() => step(1)}
+                >
+                  <i className="fa-sharp-duotone fa-regular fa-chevron-right" />
+                </button>
+              </div>
+              <div className="d-grid gap-2" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                {MONTHS.map((name, i) => {
+                  const picked = value && +value.slice(0, 4) === year && +value.slice(5, 7) === i + 1
+                  const future = year === thisYear && i > now.getMonth()
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      className={`btn ${picked ? 'btn-danger' : 'btn-outline-light'}`}
+                      disabled={future}
+                      onClick={() => onPick(`${year}-${String(i + 1).padStart(2, '0')}`)}
+                    >
+                      {name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="modal-footer">
+              {value && (
+                <button type="button" className="btn btn-outline-light me-auto" onClick={() => onPick(null)}>
+                  Clear
+                </button>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={onCancel}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="modal-backdrop show" />
+    </>
+  )
+}
+
+/** The child's BIRTHDAY (born the 1st of that month by declaration) rather
+ * than an age: the computed age keeps up on its own instead of going stale a
+ * birthday later. The channel filter uses it as a single-point range. */
 function BirthdayRow({ value, onChange }) {
-  // local text so a half-typed date doesn't thrash the draft; committed on
-  // every keystroke that parses, cleared when emptied
-  const [text, setText] = useState(value ? `${value.slice(5, 7)}/${value.slice(2, 4)}` : '')
+  const [picking, setPicking] = useState(false)
   const age = ageFromBirthday(value)
-  const bad = text.trim() !== '' && parseBirthdayInput(text) == null
+  const shown = value ? `${MONTHS[+value.slice(5, 7) - 1]} ${value.slice(0, 4)}` : 'not set'
   return (
     <div className="d-flex align-items-center gap-3 mb-4">
       <span
         className="text-secondary text-nowrap"
-        title="Your child's birthday (mm/yy) — only channels rated for their age are shown"
+        title="Your child’s birthday — only channels rated for their age are shown"
       >
         <i className="fa-duotone fa-solid fa-children me-2" />
         Birthday
       </span>
-      <input
-        type="text"
-        inputMode="numeric"
-        className={`form-control w-auto text-center ${bad ? 'is-invalid' : ''}`}
-        style={{ maxWidth: '7rem' }}
-        placeholder="mm/yy"
-        aria-label="Child's birthday, month and two-digit year"
-        value={text}
-        onChange={e => {
-          const formatted = formatBirthdayText(e.target.value)
-          setText(formatted)
-          onChange(formatted.trim() === '' ? null : (parseBirthdayInput(formatted) ?? value))
-        }}
-      />
+      <button
+        type="button"
+        className="btn btn-outline-secondary"
+        aria-label="Child’s birthday"
+        onClick={() => setPicking(true)}
+      >
+        {shown}
+        <i className="fa-sharp-duotone fa-regular fa-calendar-days ms-2" />
+      </button>
       {age != null && <span className="text-secondary text-nowrap">{age} year{age === 1 ? '' : 's'} old</span>}
+      {picking && (
+        <BirthdayDialog
+          value={value}
+          onPick={v => {
+            onChange(v)
+            setPicking(false)
+          }}
+          onCancel={() => setPicking(false)}
+        />
+      )}
     </div>
   )
 }
 
 const QUOTA_MAX_MINS = 240 // 4h, in 15-min steps
-const fmtClock = mins => (mins ? `${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, '0')}` : '0')
 
 /** One period's limit: the shared track, plus a stop past the end that means
  * "no limit over this period" — which is a different thing from zero. */
 function LimitSlider({ value, onChange, label }) {
-  const steps = QUOTA_MAX_MINS / 15 + 1 // 0…4h, then "none"
+  const steps = QUOTA_MAX_MINS / 15 + 1 // 0…4h, then "no limit"
   const index = value == null ? steps : value / 15
+  const pos = i => `calc(${i / steps} * (100% - 44px) + 22px)`
   return (
     <div className="dual-slider quota-slider">
       <input
@@ -660,6 +776,7 @@ function LimitSlider({ value, onChange, label }) {
         aria-label={label}
         onChange={e => onChange(+e.target.value === steps ? null : +e.target.value * 15)}
       />
+      <span className="thumb-label" style={{ left: pos(index) }}>{value == null ? '∞' : value}</span>
     </div>
   )
 }
@@ -672,7 +789,7 @@ function LimitSlider({ value, onChange, label }) {
  * cap past the daily one on the way to where they meant it should not have
  * that stick.
  */
-function QuotaDialog({ title, note, limits, onSave, onClear, onCancel }) {
+function QuotaDialog({ title, note, limits, periods = QUOTA_PERIODS, onSave, onClear, onCancel }) {
   const [draft, setDraft] = useState(limits)
   return (
     <>
@@ -685,13 +802,13 @@ function QuotaDialog({ title, note, limits, onSave, onClear, onCancel }) {
             </div>
             <div className="modal-body">
               {note && <p className="text-secondary small">{note}</p>}
-              {QUOTA_PERIODS.map(({ key, label, hint }) => (
+              {periods.map(({ key, label, hint }) => (
                 <div key={key} className="mb-3">
                   <div className="d-flex align-items-baseline gap-2">
                     <span>{label}</span>
                     <span className="text-secondary small">{hint}</span>
                     <span className="ms-auto fw-semibold text-nowrap">
-                      {draft[key] == null ? 'no limit' : fmtClock(draft[key])}
+                      {draft[key] == null ? 'no limit' : `${draft[key]} min`}
                     </span>
                   </div>
                   <LimitSlider
@@ -711,7 +828,11 @@ function QuotaDialog({ title, note, limits, onSave, onClear, onCancel }) {
               <button type="button" className="btn btn-secondary" onClick={onCancel}>
                 Cancel
               </button>
-              <button type="button" className="btn btn-danger" onClick={() => onSave(draft)}>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => onSave(Object.fromEntries(periods.map(({ key }) => [key, draft[key]])))}
+              >
                 <i className="fa-sharp-duotone fa-regular fa-check me-2" />
                 Save
               </button>
@@ -811,6 +932,9 @@ function QuotaRow({ store, watchStore }) {
         <QuotaDialog
           title="This week only"
           note="These limits replace the ones above until Sunday, then stop existing."
+          // no monthly limit here: a week cannot sensibly redraw a month, and
+          // the standing one keeps applying underneath (see setWeekLimits)
+          periods={QUOTA_PERIODS.filter(({ key }) => key !== 'perMonth')}
           limits={week?.limits ?? settings.quota}
           onSave={limits => {
             store.setWeekLimits(limits)
@@ -846,6 +970,7 @@ function VideoLengthSlider({ value: [minMins, maxMins], onChange }) {
   const last = LENGTH_STOPS.length - 1
   const lo = lengthIndex(minMins)
   const hi = lengthIndex(maxMins)
+  const pos = i => `calc(${i / last} * (100% - 44px) + 22px)`
 
   const indexAt = clientX => {
     const r = track.current.getBoundingClientRect()
@@ -894,6 +1019,11 @@ function VideoLengthSlider({ value: [minMins, maxMins], onChange }) {
         aria-label="Longest video"
         onChange={e => apply('hi', +e.target.value)}
       />
+      {/* MINUTES ONLY, inside the thumb: "1h 15m" beside "1h" was two wide
+          labels colliding whenever the ends came close. A bare number is
+          three characters at its worst and fits the thumb it belongs to. */}
+      <span className="thumb-label" style={{ left: pos(lo) }}>{minuteLabel(LENGTH_STOPS[lo])}</span>
+      <span className="thumb-label" style={{ left: pos(hi) }}>{minuteLabel(LENGTH_STOPS[hi])}</span>
       <div
         className="slider-surface"
         onPointerDown={onPointerDown}
@@ -918,9 +1048,6 @@ function VideoLengthRow({ value: [minMins, maxMins], onChange }) {
         >
           <i className="fa-duotone fa-solid fa-video-arrow-up-right me-2" />
           Video Length
-        </span>
-        <span className="ms-auto text-nowrap">
-          {lengthLabel(minMins)} – {lengthLabel(maxMins)}
         </span>
       </div>
       <VideoLengthSlider value={[minMins, maxMins]} onChange={onChange} />
@@ -1306,12 +1433,7 @@ function AgeDialog({ ch, store, onClose }) {
               <button type="button" className="btn-close" aria-label="Close" onClick={onClose} />
             </div>
             <div className="modal-body">
-              <div className="d-flex align-items-baseline gap-2 mb-2">
-                <span className="text-secondary">Show this channel to ages</span>
-                <span className="ms-auto fw-semibold">
-                  {ch.min_age} – {ch.max_age}
-                </span>
-              </div>
+              <div className="text-secondary mb-2">Show this channel to ages</div>
               <DualAgeSlider
                 value={[ch.min_age, ch.max_age]}
                 onChange={([min_age, max_age]) => save({ min_age, max_age })}
@@ -1342,6 +1464,7 @@ function AgeDialog({ ch, store, onClose }) {
  */
 function ChannelList({ db, customById = {}, store }) {
   const { customChannels, overrides, groups, groupOf } = store.settings
+  const ageRange = effectiveAgeRange(store.settings)
   const [selected, setSelected] = useState(new Set())
   const [naming, setNaming] = useState(false)
   const [editing, setEditing] = useState(null)
@@ -1362,7 +1485,8 @@ function ChannelList({ db, customById = {}, store }) {
   // disagree about what a group contains or where it sits
   const sections = useMemo(() => {
     const out = []
-    for (const row of arrangeChannels(all, groups, groupOf)) {
+    const inRangeFor = ch => overlaps(ageRange, ch.min_age, ch.max_age)
+    for (const row of arrangeChannels(all, groups, groupOf, inRangeFor)) {
       if (row.type === 'header') out.push({ group: row.group, items: [] })
       else if (row.grouped && out.length) out[out.length - 1].items.push(row.channel)
       else {
@@ -1371,9 +1495,9 @@ function ChannelList({ db, customById = {}, store }) {
       }
     }
     return out
-  }, [all, groups, groupOf])
+  }, [all, groups, groupOf, ageRange])
 
-  const ageRange = effectiveAgeRange(store.settings)
+  
   const inRange = all.filter(ch => overlaps(ageRange, ch.min_age, ch.max_age)).length
 
   const toggle = id =>
