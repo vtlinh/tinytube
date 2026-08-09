@@ -147,3 +147,33 @@ export function MathGate({ onPass, onFail }) {
     </div>
   )
 }
+
+/**
+ * Whose feed the grid shows. Reached from the child's status bar but only
+ * through the gate, because picking a child picks a different set of approved
+ * channels — the same reason parent mode is behind one.
+ */
+export function ChildPicker({ children, activeId, onPick, onCancel }) {
+  return (
+    <div className="math-gate d-flex flex-column align-items-center justify-content-center gap-4 p-4 text-center">
+      <i className="fa-sharp-duotone fa-regular fa-user-group fa-3x text-danger" />
+      <div className="fs-3 fw-bold">Who is watching?</div>
+      <div className="d-grid gap-2" style={{ minWidth: 240 }}>
+        {children.map(child => (
+          <button
+            key={child.id}
+            type="button"
+            className={`btn btn-lg ${child.id === activeId ? 'btn-danger' : 'btn-outline-light'}`}
+            onClick={() => onPick(child.id)}
+          >
+            {child.id === activeId && <i className="fa-sharp-duotone fa-regular fa-check me-2" />}
+            {child.name}
+          </button>
+        ))}
+      </div>
+      <button type="button" className="btn btn-outline-light" onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  )
+}

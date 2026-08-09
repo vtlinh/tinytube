@@ -9,7 +9,17 @@
 import { useMemo, useState } from 'react'
 import { gallerySort, fraction, arrangeChannels, WATCHED_THRESHOLD } from './lib.js'
 
-export default function Gallery({ channels, groups = [], groupOf = {}, watchStore, onPlay, onParents }) {
+export default function Gallery({
+  channels,
+  groups = [],
+  groupOf = {},
+  childName,
+  canSwitchChild = false,
+  onSwitchChild,
+  watchStore,
+  onPlay,
+  onParents,
+}) {
   const [tab, setTab] = useState('videos')
   // {kind: 'channel'|'group', id, title} — which slice of the grid is showing
   const [filter, setFilter] = useState(null)
@@ -40,6 +50,22 @@ export default function Gallery({ channels, groups = [], groupOf = {}, watchStor
             onClick={() => setFilter(null)}
           >
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
+          </button>
+        )}
+        {/* Whose feed this is, and the way to change it — gated exactly like
+            the Parent button beside it, because choosing a child chooses a
+            different set of approved channels. Only here at all when there IS
+            another child: an inert control on the child's screen is one more
+            thing to poke. */}
+        {canSwitchChild && !filter && (
+          <button
+            type="button"
+            className="btn btn-lg ps-0 pe-2"
+            aria-label={`Watching as ${childName}`}
+            title={`Watching as ${childName}`}
+            onClick={onSwitchChild}
+          >
+            <i className="fa-sharp-duotone fa-regular fa-user-group text-danger" />
           </button>
         )}
         <span className="fs-4 fw-bold me-auto text-truncate d-flex align-items-center">

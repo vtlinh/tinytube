@@ -201,7 +201,14 @@ export function lengthIndex(mins) {
   return i >= 0 ? i : Math.max(0, Math.min(LENGTH_STOPS.length - 1, Math.round(mins / LENGTH_STEP_MINS)))
 }
 
-/** What a thumb says. Both ends read "any" where they stop filtering. */
+/** What a thumb says: bare minutes, and "any" at the ends that stop
+ * filtering. No "1h 15m" — two wide labels collided whenever the two thumbs
+ * came close, and a number is three characters at its worst. */
+export function minuteLabel(mins) {
+  return !mins || !Number.isFinite(mins) ? 'any' : String(mins)
+}
+
+/** The same value in words, for prose rather than for a thumb. */
 export function lengthLabel(mins) {
   return !mins || !Number.isFinite(mins) ? 'any' : fmtMins(mins)
 }
@@ -284,8 +291,14 @@ export function mergeChannels(db, customVideosById, settings) {
  * A group whose visible members fall below two is SKIPPED, not drawn — and its
  * members then count as loose, because a defensive skip must never hide a
  * channel from the list entirely. */
-export function arrangeChannels(channels, groups = [], groupOf = {}) {
+export function arrangeChannels(channels, groups = [], groupOf = {}, isActive = () => true) {
+  /* GROUPED FIRST (groups A-Z among themselves), then the ones the child can
+     actually see, then A-Z. The middle key matters on the parent's screen,
+     where channels outside this child's age are still listed but greyed: they
+     belong under the ones in use, not scattered through them. The child's own
+     tab passes nothing, so everything there is active and it is plain A-Z. */
   const byTitle = (a, b) =>
+    (isActive(b) ? 1 : 0) - (isActive(a) ? 1 : 0) ||
     (a.channel_title ?? '').toLowerCase().localeCompare((b.channel_title ?? '').toLowerCase()) ||
     a.channel_id.localeCompare(b.channel_id)
   const byGroup = {}
@@ -715,8 +728,17 @@ export function storeApi(settings, update, updateChild = update) {
        whole, from a dialog with a Save — a half-edited set of four limits is
        not something to persist a keystroke at a time. */
     setQuota: quota => updateChild({ quota }),
+    /* The week's dialog offers no monthly limit — a week cannot redraw a
+       month — so the standing one is carried through rather than dropped:
+       an override must never quietly REMOVE a cap. */
     setWeekLimits: limits =>
-      updateChild({ week: { ...(activeWeekOverride(settings) ?? {}), limits, until: endOfWeek() } }),
+      updateChild({
+        week: {
+          ...(activeWeekOverride(settings) ?? {}),
+          limits: { ...settings.quota, ...limits },
+          until: endOfWeek(),
+        },
+      }),
     clearWeekOverride: () => updateChild({ week: null }),
     setVideoLength: ([minVideoMins, maxVideoMins]) => updateChild({ minVideoMins, maxVideoMins }),
     setBirthday: birthday => updateChild({ birthday }),

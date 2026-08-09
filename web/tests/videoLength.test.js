@@ -205,3 +205,23 @@ describe('overriding this week from the store', () => {
     expect(effectiveQuota(result.current.settings).perDay).toBe(60) // 15 + 45 granted
   })
 })
+
+describe('the week override and the monthly limit', () => {
+  function fakeStorage() {
+    let store = {}
+    return { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v) }, removeItem: k => { delete store[k] } }
+  }
+  beforeEach(() => vi.stubGlobal('localStorage', fakeStorage()))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('carries the standing monthly cap through a week that does not mention it', () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => result.current.setQuota({ per6h: null, perDay: 60, perWeek: null, perMonth: 600 }))
+    // the week's dialog offers no month, so it saves three periods
+    act(() => result.current.setWeekLimits({ per6h: null, perDay: 15, perWeek: null }))
+
+    const inForce = effectiveQuota(result.current.settings)
+    expect(inForce.perDay).toBe(15) // overridden
+    expect(inForce.perMonth).toBe(600) // NOT dropped: an override may not remove a cap
+  })
+})

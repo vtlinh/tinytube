@@ -17,7 +17,7 @@ import {
 import Gallery from './gallery.jsx'
 import PlayerView from './player.jsx'
 import Settings from './settings.jsx'
-import { EnrollGate, MathGate, QuotaGate } from './landing.jsx'
+import { EnrollGate, MathGate, QuotaGate, ChildPicker } from './landing.jsx'
 
 export default function App() {
   const store = useSettings()
@@ -122,6 +122,26 @@ export default function App() {
     close() // back to the grid, with time on the clock
   }
 
+  /* Choosing whose feed this is changes which channels are approved, so it
+     goes through the gate exactly as parent mode does. */
+  if (view === 'children') {
+    return (
+      <ChildPicker
+        children={store.children}
+        activeId={store.settings.childId}
+        onPick={id => {
+          store.switchChild(id)
+          close()
+        }}
+        onCancel={close}
+      />
+    )
+  }
+
+  if (view === 'children-gate') {
+    return <MathGate onPass={() => setView('children')} onFail={() => close()} />
+  }
+
   if (view === 'grant-gate') {
     return (
       <MathGate
@@ -161,9 +181,21 @@ export default function App() {
     if (v) open(() => setView(v))()
   }
 
+  const onSwitchChild = async () => {
+    // inside the tap handler, so iOS still counts it as user activation
+    if (store.settings.passkeyId) {
+      if (await verify(store.settings.passkeyId)) open(() => setView('children'))()
+      return
+    }
+    open(() => setView('children-gate'))()
+  }
+
   return (
     <Gallery
       channels={channels}
+      childName={store.settings.childName}
+      canSwitchChild={store.children.length > 1}
+      onSwitchChild={onSwitchChild}
       groups={store.settings.groups}
       groupOf={store.settings.groupOf}
       watchStore={watchStore}
