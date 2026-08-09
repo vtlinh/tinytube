@@ -3,7 +3,6 @@ import { useReactTable, getCoreRowModel, flexRender } from '@tanstack/react-tabl
 import {
   curatedChannels,
   overlaps,
-  storeApi,
   fmtMins,
   usageStats,
   usedSecs,
@@ -28,21 +27,18 @@ const looksLikeLink = s => /^@|^UC[0-9A-Za-z_-]{22}$|youtube\.com/.test(s.trim()
 const channelUrl = ch => ch.source_url ?? `https://www.youtube.com/channel/${ch.channel_id}`
 
 export default function Settings({ db, store, watchStore, sync, onDone }) {
-  // edits accumulate in an in-memory draft; localStorage is only touched by
-  // Save, which appears once the draft diverges (back/edge-swipe discards)
-  const [settings, setSettings] = useState(store.settings)
-  const draft = storeApi(settings, patch => setSettings(prev => ({ ...prev, ...patch })))
-  const dirty = JSON.stringify(settings) !== JSON.stringify(store.settings)
-  // 'main' | 'channels' — channel management is its own page, reached by the
-  // button below; the draft (and its Save) spans both
+  // every valid change persists the moment it is made — no draft, no Save
+  // button; half-typed values are held locally by their rows (see BirthdayRow)
+  // and only committed once they parse
+  const settings = store.settings
+  // 'main' | 'channels' — channel management is its own page
   const [page, setPage] = useState('main')
 
   return (
     <div className="settings container-xl py-4">
       {/* explicit back button: iOS standalone PWAs have no browser chrome or
-          hardware back, so without it a no-change visit would strand you here;
-          like edge-swipe it discards the draft. flex: 1 sides keep the title
-          truly centered */}
+          hardware back, so without it a no-change visit would strand you here.
+          flex: 1 sides keep the title truly centered */}
       <div className="d-flex align-items-center gap-3 mb-4">
         <div style={{ flex: 1 }}>
           <button
@@ -56,41 +52,16 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
         </div>
         <h1 className="fs-3 fw-bold m-0">{page === 'channels' ? 'Channels' : 'Parents Mode'}</h1>
         <div className="d-flex align-items-center justify-content-end gap-3" style={{ flex: 1 }}>
-          {dirty && (
-            <>
-              {/* discards the draft but stays on the page, unlike Back */}
-              <button
-                type="button"
-                className="btn btn-outline-secondary btn-lg"
-                onClick={() => setSettings(store.settings)}
-              >
-                <i className="fa-sharp-duotone fa-regular fa-arrow-rotate-left me-2" />
-                Revert
-              </button>
-              <button
-                type="submit"
-                form="api-key-form"
-                className="btn btn-danger btn-lg"
-                onClick={() => {
-                  store.save(settings)
-                  onDone()
-                }}
-              >
-                <i className="fa-sharp-duotone fa-regular fa-check me-2" />
-                Save
-              </button>
-            </>
-          )}
           <SyncMenu sync={sync} />
         </div>
       </div>
 
       {page === 'main' ? (
         <>
-          <BirthdayRow value={settings.birthday} onChange={draft.setBirthday} />
-          <QuotaRow value={settings.quotaMins} onChange={draft.setQuotaMins} watchStore={watchStore} />
-          <MinLengthRow value={settings.minVideoMins} onChange={draft.setMinVideoMins} />
-          <ApiKeyRow apiKey={settings.apiKey} onChange={draft.setApiKey} />
+          <BirthdayRow value={settings.birthday} onChange={store.setBirthday} />
+          <QuotaRow value={settings.quotaMins} onChange={store.setQuotaMins} watchStore={watchStore} />
+          <MinLengthRow value={settings.minVideoMins} onChange={store.setMinVideoMins} />
+          <ApiKeyRow apiKey={settings.apiKey} onChange={store.setApiKey} />
           <div className="mb-4 d-flex align-items-center gap-3">
             <span className="text-secondary text-nowrap">
               <i className="fa-brands fa-youtube me-2" />
@@ -108,8 +79,8 @@ export default function Settings({ db, store, watchStore, sync, onDone }) {
         </>
       ) : (
         <>
-          <SearchRow apiKey={settings.apiKey} store={draft} db={db} />
-          <ChannelTable db={db} store={draft} />
+          <SearchRow apiKey={settings.apiKey} store={store} db={db} />
+          <ChannelTable db={db} store={store} />
         </>
       )}
     </div>
