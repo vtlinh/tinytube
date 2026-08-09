@@ -18,11 +18,15 @@ const { ENDED, PLAYING, PAUSED, BUFFERING } = { ENDED: 0, PLAYING: 1, PAUSED: 2,
 function fakePlayer() {
   return {
     pos: 5, // playback position; quota tests advance it to simulate watching
+    state: PLAYING, // what getPlayerState answers on the next tick
     playVideo: vi.fn(),
     pauseVideo: vi.fn(),
     seekTo: vi.fn(),
     getCurrentTime() {
       return this.pos
+    },
+    getPlayerState() {
+      return this.state
     },
     getDuration: () => 100,
   }
@@ -242,5 +246,64 @@ describe('top bar countdown', () => {
     renderPlayer(PlayerView)
     expect(screen.getByText('0m')).toBeTruthy()
     expect(quotaBar().style.width).toBe('0%')
+  })
+})
+
+describe('only real playing time counts', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  const start = () => {
+    renderPlayer(VideoPlayer, 60)
+    const player = fakePlayer()
+    act(() => yt.onReady({ target: player }))
+    act(() => yt.onStateChange({ data: PLAYING }))
+    act(() => vi.advanceTimersByTime(1000))
+    return player
+  }
+
+  it('bills nothing while the player says paused, even if the position creeps', () => {
+    const player = start()
+    player.state = PAUSED
+    // an ad, jitter around the pause boundary, or a stale player object: the
+    // position moves but nobody is watching
+    act(() => {
+      for (let i = 0; i < 30; i++) {
+        player.pos += 1
+        vi.advanceTimersByTime(1000)
+      }
+    })
+    expect(watchStore.addWatchTime).not.toHaveBeenCalled()
+    expect(onQuotaExhausted).not.toHaveBeenCalled()
+  })
+
+  it('resumes counting from where playing resumes, not from the pause', () => {
+    const player = start()
+    player.state = PAUSED
+    act(() => {
+      player.pos += 60 // whatever happened while paused is not ours to bill
+      vi.advanceTimersByTime(1000)
+    })
+    player.state = PLAYING
+    act(() => {
+      for (let i = 0; i < 6; i++) {
+        player.pos += 1
+        vi.advanceTimersByTime(1000)
+      }
+    })
+    expect(watchStore.addWatchTime).toHaveBeenCalledWith(5) // the six seconds actually watched
+  })
+
+  it('still back-fills a throttled gap while genuinely playing', () => {
+    // the reason counting was never gated on the PLAYING *event*: iOS drops
+    // them. Asking the player directly must not reintroduce that freeze —
+    // the wall clock moves with no tick firing, exactly as a throttled phone
+    const player = start()
+    act(() => {
+      player.pos += 30
+      vi.setSystemTime(Date.now() + 29_000)
+      vi.advanceTimersByTime(1000) // the one tick that finally fires
+    })
+    expect(watchStore.addWatchTime).toHaveBeenCalledWith(30)
   })
 })
