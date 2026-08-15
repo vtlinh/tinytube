@@ -205,6 +205,43 @@ html, body, #root {
 .browser-find {
   max-width: 40rem;
   margin: 0 auto;
+  min-width: 0;
+}
+
+/* Search hits used to be one horizontal row (avatar, tags, nowrap stats,
+   Add). That was wider than a phone, so the page scrolled sideways and the
+   right edge looked cut off. Stack like an approved-channel row instead. */
+.search-hit {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  margin-top: 0.5rem;
+  background: #182534;
+  border-radius: 0.75rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.search-hit-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-hit-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.search-hit-top .channel-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-hit .badge {
+  font-size: 0.65rem;
+  font-weight: 500;
 }
 
 .settings .form-switch {
@@ -556,6 +593,12 @@ tr.out-of-range img {
    A list, not a table: with the ages behind a dialog and the group as the
    section a row sits in, there are no columns left to line up — and a phone
    never has to scroll sideways to reach a control. */
+.channel-row {
+  min-width: 0;
+  padding: 0.55rem 0.75rem;
+  overflow: hidden;
+}
+
 .channel-row + .channel-row {
   border-top: 1px solid #2a3b4d;
 }

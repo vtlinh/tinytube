@@ -1482,47 +1482,46 @@ function SearchRow({ store }) {
       {results.map(ch => {
         const added = store.settings.customChannels.some(c => c.channel_id === ch.channel_id)
         return (
-          <div key={ch.channel_id} className="d-flex align-items-center gap-2 rounded p-2 mt-2" style={{ background: '#182534' }}>
+          <div key={ch.channel_id} className="search-hit">
             {ch.thumbnail ? (
-              <img src={ch.thumbnail} alt="" width="36" height="36" className="rounded-circle flex-shrink-0" />
+              <img src={ch.thumbnail} alt="" width="36" height="36" className="rounded-circle object-fit-cover flex-shrink-0" />
             ) : (
               <i className="fa-duotone fa-regular fa-tv-retro fs-5 text-secondary flex-shrink-0" />
             )}
-            <span className="fw-semibold text-truncate">{ch.channel_title}</span>
-            <TopicBadges ch={ch} />
-            <div className="ms-auto">
-              <StatsCell ch={ch} />
+            <div className="search-hit-body">
+              <div className="search-hit-top">
+                <span className="fw-semibold channel-name">{ch.channel_title}</span>
+                {added ? (
+                  <button
+                    type="button"
+                    className="btn btn-outline-danger btn-sm flex-shrink-0"
+                    onClick={() => {
+                      store.removeCustomChannel(ch.channel_id)
+                      evictChannelCache(ch.channel_id)
+                    }}
+                  >
+                    <i className="fa-sharp-duotone fa-regular fa-trash me-1" />
+                    Remove
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm flex-shrink-0"
+                    onClick={() => {
+                      seedChannelMeta(ch)
+                      cacheResolvedChannel(ch)
+                      store.addCustomChannel({ ...ch, min_age: AGE_MIN, max_age: AGE_MAX })
+                      setQuery('')
+                    }}
+                  >
+                    <i className="fa-sharp-duotone fa-regular fa-plus me-1" />
+                    Add
+                  </button>
+                )}
+              </div>
+              <StatsLine ch={ch} />
+              <TopicBadges ch={ch} />
             </div>
-            {added ? (
-              <button
-                type="button"
-                className="btn btn-outline-danger btn-sm"
-                onClick={() => {
-                  store.removeCustomChannel(ch.channel_id)
-                  evictChannelCache(ch.channel_id)
-                }}
-              >
-                <i className="fa-sharp-duotone fa-regular fa-trash me-1" />
-                Remove
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-danger btn-sm"
-                onClick={() => {
-                  // the search already showed the parent this channel's name
-                  // and avatar; seeding them means the row it becomes is not
-                  // a bare id until the Worker has been asked
-                  seedChannelMeta(ch)
-                  cacheResolvedChannel(ch)
-                  store.addCustomChannel({ ...ch, min_age: AGE_MIN, max_age: AGE_MAX })
-                  setQuery('')
-                }}
-              >
-                <i className="fa-sharp-duotone fa-regular fa-plus me-1" />
-                Add
-              </button>
-            )}
           </div>
         )
       })}
@@ -1544,24 +1543,6 @@ function TopicBadges({ ch }) {
       )}
       {labels.slice(0, 3).map(t => (
         <span key={t} className="badge text-bg-secondary fw-normal">{t}</span>
-      ))}
-    </div>
-  )
-}
-
-function StatsCell({ ch }) {
-  const stats = [
-    [ch.subscribers, 'fa-users', 'subscribers'],
-    [ch.video_count, 'fa-clapperboard', 'videos'],
-    [ch.view_count, 'fa-eye', 'views'],
-  ].filter(([n]) => n)
-  return (
-    <div className="text-secondary small text-nowrap">
-      {stats.map(([n, icon, label]) => (
-        <div key={label} title={`${n.toLocaleString('en')} ${label}`}>
-          <i className={`fa-sharp-duotone fa-regular ${icon} me-1`} />
-          {formatCount(n)} {label}
-        </div>
       ))}
     </div>
   )
