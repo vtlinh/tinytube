@@ -72,10 +72,11 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
   const lock = settingsLock(store.children, sync?.session)
 
   return (
-    <div className="settings container-xl">
+    <div className="settings">
       {/* explicit back button: iOS standalone PWAs have no browser chrome or
           hardware back, so without it a no-change visit would strand you here.
           flex: 1 sides keep the title truly centered */}
+      <div className="settings-body container-xl">
       <header className="settings-header">
         <div className="settings-header-side">
           <button type="button" className="settings-icon-btn" aria-label="Back to gallery" onClick={onDone}>
@@ -126,8 +127,9 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
       {tab === 'browser' && <BrowserTab store={store} />}
       {tab === 'stats' && <StatsTab watchStore={watchStore} settings={settings} />}
       </fieldset>
+      </div>
 
-      <nav className="bottom-tabs fixed-bottom d-flex border-top">
+      <nav className="bottom-tabs d-flex border-top">
         <TabButton label="Settings" icon="fa-gear" on={tab === 'settings'} onClick={() => setTab('settings')} />
         <TabButton label="Channels" icon="fa-list" on={tab === 'channels'} onClick={() => setTab('channels')} />
         <TabButton label="Browser" icon="fa-browser" on={tab === 'browser'} onClick={() => setTab('browser')} />
