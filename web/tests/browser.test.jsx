@@ -1,7 +1,8 @@
-/** The Parents Mode Browser tab: YouTube in a webview, with the same bar the
- *  phone uses (Kids mode, +, approved list, settings). */
+/** The Parents Mode Browser tab: find a channel by name or URL, through the
+ *  Worker, with no parent API key. Same header and bottom tabs as the other
+ *  parent screens — YouTube cannot be iframed. */
 
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import Settings from '../src/settings.jsx'
 import { useSettings, useWatchStore } from '../src/lib.js'
@@ -31,7 +32,20 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url, init) => {
-      if (String(url).includes('/channel')) {
+      const u = String(url)
+      if (u.includes('/search')) {
+        const body = JSON.parse(init.body)
+        return {
+          ok: true,
+          json: async () => ({
+            channels:
+              String(body.query).toLowerCase().includes('coco')
+                ? [{ id: UC, title: 'Cocomelon', avatarUrl: 'https://yt3.ggpht.com/a.jpg' }]
+                : [],
+          }),
+        }
+      }
+      if (u.includes('/channel')) {
         const body = JSON.parse(init.body)
         return {
           ok: true,
@@ -68,91 +82,52 @@ function openBrowser() {
   fireEvent.click(screen.getByText('Browser'))
 }
 
-function standOn(url) {
-  act(() => window.postMessage({ tinytubeUrl: url }, '*'))
-}
-
 describe('the Browser tab', () => {
-  it('is on the parent-mode bottom bar', () => {
-    render(<Harness />)
-    expect(screen.getByText('Browser')).toBeTruthy()
+  it('uses the same header and bottom tabs as the other parent screens', () => {
+    openBrowser()
+    expect(screen.getByRole('heading', { name: 'Browser' })).toBeTruthy()
+    expect(screen.getByLabelText('Back to gallery')).toBeTruthy()
+    expect(screen.getByLabelText('More options')).toBeTruthy()
     expect(screen.getByText('Settings')).toBeTruthy()
     expect(screen.getByText('Channels')).toBeTruthy()
     expect(screen.getByText('Stats')).toBeTruthy()
+    expect(screen.getByLabelText('Find a channel')).toBeTruthy()
+    expect(screen.queryByTitle('YouTube')).toBeNull()
+    expect(screen.queryByText('← Kids mode')).toBeNull()
   })
 
-  it('opens mobile youtube under the Android parent bar, with + dimmed', () => {
+  it('searches by name through the Worker, with no API key', async () => {
     openBrowser()
-    expect(screen.getByText('← Kids mode')).toBeTruthy()
-    expect(screen.getByLabelText('Approve this channel').disabled).toBe(true)
-    expect(screen.getByLabelText('Approved channels')).toBeTruthy()
-    expect(screen.getByLabelText('Settings')).toBeTruthy()
-    expect(screen.getByTitle('YouTube').getAttribute('src')).toBe('https://m.youtube.com/')
-    expect(screen.queryByLabelText('YouTube address')).toBeNull()
-    expect(screen.queryByText('Open YouTube')).toBeNull()
-    expect(screen.queryByText('Browser')).toBeNull() // the tab label is gone; this IS the screen
+    fireEvent.change(screen.getByLabelText('Find a channel'), { target: { value: 'cocomelon' } })
+    expect(await screen.findByText('Cocomelon')).toBeTruthy()
+    const call = fetch.mock.calls.find(([u]) => String(u).includes('/search'))
+    expect(JSON.parse(call[1].body)).toEqual({ query: 'cocomelon' })
+    expect(fetch.mock.calls.some(([u]) => String(u).includes('googleapis'))).toBe(false)
   })
 
-  it('the list and gear open the same screens the phone bar does', () => {
+  it('adds a search hit to the approved list', async () => {
     openBrowser()
-    fireEvent.click(screen.getByLabelText('Approved channels'))
-    expect(screen.getByText('Add Channel')).toBeTruthy() // Channels tab
-
-    fireEvent.click(screen.getByText('Browser'))
-    fireEvent.click(screen.getByLabelText('Settings'))
-    expect(screen.getByText('Parents Mode')).toBeTruthy()
-  })
-
-  it('enables approve on a channel page, not on a watch page', async () => {
-    openBrowser()
-    standOn(`https://m.youtube.com/channel/${UC}`)
-    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(false))
-
-    standOn('https://m.youtube.com/watch?v=aaaaaaaaaaa')
-    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(true))
-  })
-
-  it('treats a handle page as a channel', async () => {
-    openBrowser()
-    standOn('https://m.youtube.com/@SomeChannel')
-    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(false))
-  })
-
-  it('ignores a site that is not youtube', async () => {
-    openBrowser()
-    standOn('https://example.com/')
-    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(true))
-    expect(screen.queryByText(/Blocked/)).toBeNull()
-  })
-
-  it('approves via the Worker, with no API key, then the button becomes remove', async () => {
-    openBrowser()
-    standOn(`https://m.youtube.com/channel/${UC}`)
-    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(false))
-    fireEvent.click(screen.getByLabelText('Approve this channel'))
-
-    expect(await screen.findByText(/Approved “Cocomelon”/)).toBeTruthy()
-    const call = fetch.mock.calls.find(([u]) => String(u).includes('/channel'))
-    expect(JSON.parse(call[1].body)).toEqual({ url: `https://m.youtube.com/channel/${UC}` })
-    expect(screen.getByLabelText('Remove this channel')).toBeTruthy()
-
-    const stored = JSON.parse(localStorage.getItem('tinytube:settings:v1'))
-    expect(stored.children[0].customChannels).toEqual([{ channel_id: UC, min_age: 1, max_age: 15 }])
-  })
-
-  it('confirms before removing', async () => {
-    openBrowser()
-    standOn(`https://m.youtube.com/channel/${UC}`)
-    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(false))
-    fireEvent.click(screen.getByLabelText('Approve this channel'))
-    await screen.findByLabelText('Remove this channel')
-
-    fireEvent.click(screen.getByLabelText('Remove this channel'))
-    expect(screen.getByText(/Its videos will stop appearing/)).toBeTruthy()
-    fireEvent.click(screen.getByText('Remove'))
+    fireEvent.change(screen.getByLabelText('Find a channel'), { target: { value: 'cocomelon' } })
+    fireEvent.click(await screen.findByText('Add'))
     await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem('tinytube:settings:v1')).children[0].customChannels).toEqual([])
+      expect(JSON.parse(localStorage.getItem('tinytube:settings:v1')).children[0].customChannels).toEqual([
+        { channel_id: UC, min_age: 1, max_age: 15 },
+      ])
     })
-    expect(screen.getByLabelText('Approve this channel')).toBeTruthy()
+  })
+
+  it('approves a pasted channel URL via the Worker, with no API key', async () => {
+    openBrowser()
+    const page = `https://m.youtube.com/channel/${UC}`
+    fireEvent.change(screen.getByLabelText('Find a channel'), { target: { value: page } })
+    expect(await screen.findByText('Cocomelon')).toBeTruthy()
+    const call = fetch.mock.calls.find(([u]) => String(u).includes('/channel'))
+    expect(JSON.parse(call[1].body)).toEqual({ url: page })
+    fireEvent.click(screen.getByText('Add'))
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem('tinytube:settings:v1')).children[0].customChannels).toEqual([
+        { channel_id: UC, min_age: 1, max_age: 15 },
+      ])
+    })
   })
 })

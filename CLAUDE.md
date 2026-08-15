@@ -89,12 +89,12 @@ Two answers already bought with a spike, so don't re-derive them:
 
 ```
 worker.js / wrangler.toml        Cloudflare Worker: release assets, /uploads
-                                 and /channel — ALL the YouTube parsing —
-                                 /sync/*, the web app's per-account state in
-                                 D1, and /videos, the SHARED per-channel video
-                                 cache (one YouTube fetch a day per channel
-                                 serves every account; the Worker alone writes
-                                 it)
+                                 and /channel and /search — ALL the YouTube
+                                 parsing — /sync/*, the web app's per-account
+                                 state in D1, and /videos, the SHARED
+                                 per-channel video cache (one YouTube fetch a
+                                 day per channel serves every account; the
+                                 Worker alone writes it)
 worker.test.mjs                  its parsers, under `node --test worker.test.mjs`
                                  (CI runs it; named because bare `node --test`
                                  would sweep up web/tests too)
@@ -790,6 +790,12 @@ stops, green publishes.
   YouTube channel, which is the whole point of the route. Reading YouTube —
   including reading its URLs — is the Worker's job; the apps send what they
   are standing on.
+
+  `/search` takes **a query string**, not a URL. `searchQueryFrom` rejects
+  empties, control characters and anything with `://`, then `channelSearchUrl`
+  **rebuilds** a `youtube.com/results` address with YouTube's Type=Channel
+  filter. The most a caller can name is a search term. That is how a parent
+  adds "Cocomelon" without minting a Google Cloud key.
 
   So the rule is not "never accept a URL", it is **never `fetch()` a string a
   caller supplied**. Don't let a caller-supplied host, port, scheme or path

@@ -376,6 +376,29 @@ export async function resolveChannelPage(url) {
   return { channel_id: id, channel_title: title, thumbnail, videos: json.videos }
 }
 
+/** Name search via the Worker: no parent API key. Re-validates ids and avatars
+ *  even though our own server said so. */
+export async function searchChannelsViaWorker(query) {
+  const resp = await fetch(`${WORKER_URL}/search`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ query }),
+  })
+  if (!resp.ok) throw new Error("Couldn't search for channels")
+  const body = await resp.json()
+  const out = []
+  for (const ch of body.channels ?? []) {
+    const id = typeof ch.id === 'string' && isValidChannelId(ch.id) ? ch.id : null
+    if (!id) continue
+    out.push({
+      channel_id: id,
+      channel_title: typeof ch.title === 'string' && ch.title.trim() ? ch.title.trim() : id,
+      thumbnail: isAllowedAvatar(ch.avatarUrl ?? '') ? ch.avatarUrl : null,
+    })
+  }
+  return out
+}
+
 /** Write the Worker's /channel reply into the local cache so the grid is full
  *  before the parent has closed Parents Mode. An empty/missing videos list
  *  is "could not tell" — fetchedAt stays 0 so a later refresh still asks. */
