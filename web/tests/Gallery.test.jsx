@@ -5,6 +5,15 @@ import Gallery from '../src/gallery.jsx'
 const channels = [{ channel_title: 'Chan', videos: [{ id: 'v1', title: 'Vid', thumbnail: 't.jpg' }] }]
 const watchStore = { watched: {} }
 
+describe('bottom tabs', () => {
+  it('sit in the layout rather than overlaying the last row', () => {
+    render(<Gallery channels={channels} watchStore={watchStore} onPlay={() => {}} onParents={() => {}} />)
+    const nav = document.querySelector('.bottom-tabs')
+    expect(nav.classList.contains('fixed-bottom')).toBe(false)
+    expect(nav.previousElementSibling.classList.contains('gallery-body')).toBe(true)
+  })
+})
+
 describe('Parents button', () => {
   it('is always visible and opens the parent gate', () => {
     const onParents = vi.fn()

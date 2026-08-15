@@ -94,6 +94,19 @@ describe('the Browser tab', () => {
     expect(screen.getByLabelText('Find a channel')).toBeTruthy()
     expect(screen.queryByTitle('YouTube')).toBeNull()
     expect(screen.queryByText('← Kids mode')).toBeNull()
+    const nav = document.querySelector('.bottom-tabs')
+    expect(nav.classList.contains('fixed-bottom')).toBe(false)
+    expect(document.querySelector('.settings-body')).toBeTruthy()
+  })
+
+  it('keeps the last channel above the tab bar', () => {
+    render(<Harness />)
+    fireEvent.click(screen.getByText('Channels'))
+    const nav = document.querySelector('.bottom-tabs')
+    const body = document.querySelector('.settings-body')
+    expect(nav.classList.contains('fixed-bottom')).toBe(false)
+    expect(body.contains(screen.getByText(/shown to/))).toBe(true)
+    expect(nav.contains(screen.getByText(/shown to/))).toBe(false)
   })
 
   it('searches by name through the Worker, with no API key', async () => {

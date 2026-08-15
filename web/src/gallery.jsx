@@ -89,25 +89,27 @@ export default function Gallery({
         </button>
       </nav>
 
-      {tab === 'videos' ? (
-        <div className="container-fluid py-3">
-          <div className="row g-3">
-            {/* the WHOLE visible list goes with the tap, not just the video:
-                what plays next comes from the list the child was looking at,
-                so a video started from a channel-filtered grid cannot lead
-                out of that channel — and the player needs no rule saying so */}
-            {videos.map((video, i) => (
-              <div key={video.id} className="col-6 col-md-4 col-lg-3">
-                <VideoCard video={video} entry={watchStore.watched[video.id]} onPlay={() => onPlay(videos, i)} />
-              </div>
-            ))}
+      <div className="gallery-body">
+        {tab === 'videos' ? (
+          <div className="container-fluid py-3">
+            <div className="row g-3">
+              {/* the WHOLE visible list goes with the tap, not just the video:
+                  what plays next comes from the list the child was looking at,
+                  so a video started from a channel-filtered grid cannot lead
+                  out of that channel — and the player needs no rule saying so */}
+              {videos.map((video, i) => (
+                <div key={video.id} className="col-6 col-md-4 col-lg-3">
+                  <VideoCard video={video} entry={watchStore.watched[video.id]} onPlay={() => onPlay(videos, i)} />
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ) : (
-        <ChannelsTab channels={channels} groups={groups} groupOf={groupOf} onPick={pick} />
-      )}
+        ) : (
+          <ChannelsTab channels={channels} groups={groups} groupOf={groupOf} onPick={pick} />
+        )}
+      </div>
 
-      <nav className="bottom-tabs fixed-bottom d-flex border-top">
+      <nav className="bottom-tabs d-flex border-top">
         <TabButton
           label="Videos"
           icon="fa-tv-retro"
