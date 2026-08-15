@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   searchChannels,
+  searchChannelsViaWorker,
   resolveChannel,
   resolveChannelPage,
   cacheResolvedChannel,
@@ -173,6 +174,32 @@ describe('resolveChannelPage', () => {
     expect(cached.videos[0]).toMatchObject({ id: 'dQw4w9WgXcQ', title: 'Hello' })
     cacheResolvedChannel({ channel_id: UC, channel_title: 'Cocomelon', videos: null })
     expect(JSON.parse(localStorage.getItem('tinytube:videocache:v1'))[UC].fetchedAt).toBe(0)
+  })
+})
+
+describe('searchChannelsViaWorker', () => {
+  it('posts the query to the Worker and re-validates what comes back', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url, init) => {
+        expect(String(url)).toMatch(/\/search$/)
+        expect(JSON.parse(init.body)).toEqual({ query: 'cocomelon' })
+        return {
+          ok: true,
+          json: async () => ({
+            channels: [
+              { id: UC, title: 'Cocomelon', avatarUrl: 'https://yt3.ggpht.com/a.jpg' },
+              { id: 'not-an-id', title: 'Nope', avatarUrl: 'https://yt3.ggpht.com/b.jpg' },
+              { id: UC2, title: 'Other', avatarUrl: 'https://attacker.example/x.png' },
+            ],
+          }),
+        }
+      }),
+    )
+    expect(await searchChannelsViaWorker('cocomelon')).toEqual([
+      { channel_id: UC, channel_title: 'Cocomelon', thumbnail: 'https://yt3.ggpht.com/a.jpg' },
+      { channel_id: UC2, channel_title: 'Other', thumbnail: null },
+    ])
   })
 })
 

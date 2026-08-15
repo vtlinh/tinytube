@@ -42,24 +42,19 @@ import {
   applyImport,
 } from './lib.js'
 import {
-  searchChannels,
-  resolveChannel,
   evictChannelCache,
   seedChannelMeta,
   formatCount,
   validateApiKey,
-  PARENT_START,
   parentBrowseUrl,
   isChannelPage,
-  channelIdFromUrl,
-  handleFromUrl,
   resolveChannelPage,
   cacheResolvedChannel,
+  searchChannelsViaWorker,
 } from './youtubeApi.js'
 import { TabButton } from './gallery.jsx'
 
 const API_CONSOLE_URL = 'https://console.cloud.google.com/apis/library/youtube.googleapis.com'
-const looksLikeLink = s => /^@|^UC[0-9A-Za-z_-]{22}$|youtube\.com/.test(s.trim())
 const channelUrl = ch => ch.source_url ?? `https://www.youtube.com/channel/${ch.channel_id}`
 
 export default function Settings({ customById = {}, store, watchStore, sync, onDone }) {
@@ -76,47 +71,27 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
      it lives up there. */
   const lock = settingsLock(store.children, sync?.session)
 
-  const browsing = tab === 'browser'
-  /* The Browser tab is ParentActivity, not a settings page: a 44dp bar over
-     YouTube, the same order as Android (Kids mode, +, approved list, settings).
-     The other tabs keep the form header and the bottom bar, which is how you
-     get back to Browser from them. */
-  if (browsing) {
-    return (
-      <div className="settings settings-as-browser">
-        <BrowserTab
-          store={store}
-          customById={customById}
-          lock={lock}
-          onKidsMode={onDone}
-          onApprovedList={() => setTab('channels')}
-          onSettings={() => setTab('settings')}
-        />
-      </div>
-    )
-  }
-
   return (
-    <div className="settings container-xl py-4">
+    <div className="settings container-xl">
       {/* explicit back button: iOS standalone PWAs have no browser chrome or
           hardware back, so without it a no-change visit would strand you here.
           flex: 1 sides keep the title truly centered */}
-      <div className="d-flex align-items-center gap-3 mb-4">
-        <div style={{ flex: 1 }}>
-          <button type="button" className="btn btn-outline-secondary" aria-label="Back to gallery" onClick={onDone}>
+      <header className="settings-header">
+        <div className="settings-header-side">
+          <button type="button" className="settings-icon-btn" aria-label="Back to gallery" onClick={onDone}>
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
           </button>
         </div>
-        <div className="text-center">
-          <h1 className="fs-3 fw-bold m-0">{titles[tab]}</h1>
+        <div className="settings-header-title">
+          <h1>{titles[tab]}</h1>
           {/* whose settings these are — the menu switches children */}
-          <div className="text-secondary small">{settings.childName}</div>
+          <div className="settings-child">{settings.childName}</div>
         </div>
-        <div className="d-flex align-items-center justify-content-end gap-3" style={{ flex: 1 }}>
+        <div className="settings-header-side settings-header-actions">
           <RefreshButton sync={sync} />
           <HeaderMenu store={store} sync={sync} locked={lock} />
         </div>
-      </div>
+      </header>
 
       {lock && <LockNotice lock={lock} />}
 
@@ -125,7 +100,7 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
           are driven by a plain div that a disabled fieldset cannot reach. */}
       <fieldset disabled={!!lock} className={lock ? 'settings-locked' : undefined}>
       {tab === 'settings' && (
-        <>
+        <div className="settings-card">
           <NameRow value={settings.childName} onChange={store.renameChild} />
           <ChildEmailRow
             value={settings.email}
@@ -142,17 +117,13 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
           <PlaybackRow value={settings.playback} onChange={store.setPlayback} />
           <ApiKeyRow apiKey={settings.apiKey} onChange={store.setApiKey} />
           {/* the About position, like the Android app: the bottom of settings */}
-          <div className="text-center mt-5">
+          <div className="settings-version">
             <VersionLink />
           </div>
-        </>
+        </div>
       )}
-      {tab === 'channels' && (
-        <>
-          <SearchRow apiKey={settings.apiKey} store={store} />
-          <ChannelList customById={customById} store={store} />
-        </>
-      )}
+      {tab === 'channels' && <ChannelList customById={customById} store={store} />}
+      {tab === 'browser' && <BrowserTab store={store} />}
       {tab === 'stats' && <StatsTab watchStore={watchStore} settings={settings} />}
       </fieldset>
 
@@ -185,26 +156,26 @@ function StatsTab({ watchStore, settings }) {
   const mins = secs => Math.round(secs / 60)
 
   return (
-    <div className="col-md-6 mx-auto">
+    <div className="settings-card">
       {bonusMins > 0 && (
-        <div className="mb-3">
+        <div className="settings-row">
           <i className="fa-sharp-duotone fa-regular fa-gift text-danger me-2" />
           {fmtMins(bonusMins)} extra granted — until midnight
         </div>
       )}
-      <table className="table align-middle">
+      <table className="table align-middle mb-0">
         <tbody>
           {rows.map(([label, hint, secs, key]) => (
             <tr key={label}>
               <td>
                 <div className="fw-semibold">{label}</div>
-                <div className="text-secondary small">{hint}</div>
+                <div className="text-secondary" style={{ fontSize: '0.75rem' }}>{hint}</div>
               </td>
               {/* each period carries its OWN limit, beside its own number: one
                   line at the top said which limit was tightest and nothing
                   about the other three */}
               <td className="text-end">
-                <div className="fs-5">{fmtMins(mins(secs))}</div>
+                <div className="fw-semibold">{fmtMins(mins(secs))}</div>
                 {key && (
                   <div className="text-secondary small">
                     {limits[key] == null
@@ -268,8 +239,8 @@ function ConfirmModal({ title, body, onConfirm, onCancel, confirmLabel = 'Delete
 function LockNotice({ lock }) {
   const child = lock.kind === 'child'
   return (
-    <div className="alert alert-warning d-flex align-items-center gap-3" role="alert">
-      <i className={`fa-sharp-duotone fa-regular ${child ? 'fa-lock' : 'fa-right-to-bracket'} fs-4`} />
+    <div className="alert alert-warning d-flex align-items-center gap-2" role="alert">
+      <i className={`fa-sharp-duotone fa-regular ${child ? 'fa-lock' : 'fa-right-to-bracket'}`} />
       <div>
         {child ? (
           <>
@@ -310,8 +281,8 @@ function ChildEmailRow({ value, signedInAs, onChange }) {
   }
 
   return (
-    <div className="mb-4">
-      <div className="d-flex align-items-center gap-3">
+    <div className="settings-row settings-row-stack">
+      <div className="d-flex align-items-center gap-2">
         <span
           className="settings-label text-nowrap"
           title="If this child signs in with this account, these settings lock. Leave blank if they have no account."
@@ -329,7 +300,7 @@ function ChildEmailRow({ value, signedInAs, onChange }) {
           onChange={e => commit(e.target.value)}
         />
       </div>
-      {error && <div className="text-danger small mt-1">{error}</div>}
+      {error && <div className="text-danger" style={{ fontSize: '0.75rem' }}>{error}</div>}
     </div>
   )
 }
@@ -347,7 +318,7 @@ function RefreshButton({ sync = {} }) {
   return (
     <button
       type="button"
-      className="btn btn-outline-secondary"
+      className="settings-icon-btn"
       aria-label="Refresh from sync"
       title="Fetch the latest settings and history from your other devices"
       disabled={pulling}
@@ -437,7 +408,7 @@ function HeaderMenu({ store, sync = {}, locked = null }) {
     <div className="position-relative">
       <button
         type="button"
-        className="btn btn-outline-secondary"
+        className="settings-icon-btn"
         aria-label="More options"
         onClick={() => setOpen(o => !o)}
       >
@@ -794,7 +765,7 @@ function NameRow({ value, onChange }) {
   const [text, setText] = useState(value)
   useEffect(() => setText(value), [value])
   return (
-    <div className="d-flex align-items-center gap-3 mb-4">
+    <div className="settings-row">
       <span className="settings-label text-nowrap">
         <i className="fa-sharp-duotone fa-regular fa-child me-2" />
         Name
@@ -904,7 +875,7 @@ function BirthdayRow({ value, onChange }) {
   const age = ageFromBirthday(value)
   const shown = value ? `${MONTHS[+value.slice(5, 7) - 1]} ${value.slice(0, 4)}` : 'not set'
   return (
-    <div className="d-flex align-items-center gap-3 mb-4">
+    <div className="settings-row">
       <span
         className="settings-label text-nowrap"
         title="Your child’s birthday — only channels rated for their age are shown"
@@ -914,14 +885,14 @@ function BirthdayRow({ value, onChange }) {
       </span>
       <button
         type="button"
-        className="btn btn-outline-secondary"
+        className="btn btn-sm btn-outline-secondary"
         aria-label="Child’s birthday"
         onClick={() => setPicking(true)}
       >
         {shown}
         <i className="fa-sharp-duotone fa-regular fa-calendar-days ms-2" />
       </button>
-      {age != null && <span className="text-secondary text-nowrap">{age} year{age === 1 ? '' : 's'} old</span>}
+      {age != null && <span className="text-secondary text-nowrap" style={{ fontSize: '0.75rem' }}>{age} year{age === 1 ? '' : 's'} old</span>}
       {picking && (
         <BirthdayDialog
           value={value}
@@ -947,7 +918,7 @@ function LimitSlider({ value, onChange, label, period, maxMins, stepMins }) {
   const steps = maxMins / stepMins // index `steps` is the no-limit stop
   // a value stored under an older, coarser or finer scale may sit between stops
   const index = value == null ? steps : Math.min(steps - 1, Math.round(value / stepMins))
-  const pos = i => `calc(${i / steps} * (100% - 44px) + 22px)`
+  const pos = i => `calc(${i / steps} * (100% - 36px) + 18px)`
   return (
     <div className="dual-slider quota-slider">
       <input
@@ -1048,8 +1019,8 @@ function QuotaRow({ store }) {
   const bonus = activeBonusMins(settings)
 
   return (
-    <div className="mb-4">
-      <div className="d-flex align-items-center gap-3">
+    <div className="settings-row settings-row-stack">
+      <div className="d-flex align-items-center gap-2">
         <span className="settings-label text-nowrap">
           <i className="fa-sharp-duotone fa-regular fa-stopwatch me-2" />
           Quota
@@ -1060,7 +1031,7 @@ function QuotaRow({ store }) {
         <span className="flex-grow-1" />
         <button
           type="button"
-          className="btn btn-sm btn-outline-secondary flex-shrink-0"
+          className="settings-icon-btn flex-shrink-0"
           aria-label="Edit quota"
           onClick={() => setEditing('standing')}
         >
@@ -1150,11 +1121,11 @@ function VideoLengthSlider({ value: [minMins, maxMins], onChange }) {
   const last = LENGTH_STOPS.length - 1
   const lo = lengthIndex(minMins)
   const hi = lengthIndex(maxMins)
-  const pos = i => `calc(${i / last} * (100% - 44px) + 22px)`
+  const pos = i => `calc(${i / last} * (100% - 36px) + 18px)`
 
   const indexAt = clientX => {
     const r = track.current.getBoundingClientRect()
-    const t = (clientX - r.left - 22) / Math.max(1, r.width - 44)
+    const t = (clientX - r.left - 18) / Math.max(1, r.width - 36)
     return Math.round(Math.min(1, Math.max(0, t)) * last)
   }
   const apply = (end, v) => {
@@ -1217,19 +1188,17 @@ function VideoLengthSlider({ value: [minMins, maxMins], onChange }) {
 
 function VideoLengthRow({ value: [minMins, maxMins], onChange }) {
   return (
-    <div className="mb-4">
+    <div className="settings-row settings-row-stack">
       {/* the values live HERE, not inside the thumbs: two thumbs that meet
           used to print their labels on top of each other, and a slider with
           the room to be dragged is worth more than one with words in it */}
-      <div className="d-flex align-items-center gap-3 mb-1">
-        <span
-          className="settings-label text-nowrap"
-          title="Show only videos between these lengths — either end can be “any”"
-        >
-          <i className="fa-duotone fa-solid fa-video-arrow-up-right me-2" />
-          Video Length
-        </span>
-      </div>
+      <span
+        className="settings-label text-nowrap"
+        title="Show only videos between these lengths — either end can be “any”"
+      >
+        <i className="fa-duotone fa-solid fa-video-arrow-up-right me-2" />
+        Video Length
+      </span>
       <VideoLengthSlider value={[minMins, maxMins]} onChange={onChange} />
     </div>
   )
@@ -1241,7 +1210,7 @@ function VideoLengthRow({ value: [minMins, maxMins], onChange }) {
  * would only be tuning the badge into disagreeing with the grid. */
 function HideWatchedRow({ value, onChange }) {
   return (
-    <div className="d-flex align-items-center gap-3 mb-4">
+    <div className="settings-row">
       <span
         className="settings-label text-nowrap"
         title="Watched means more than 90% played. They always sort last; this hides them."
@@ -1249,7 +1218,7 @@ function HideWatchedRow({ value, onChange }) {
         <i className="fa-sharp-duotone fa-regular fa-circle-check me-2" />
         Hide Watched
       </span>
-      <div className="form-check form-switch fs-4 m-0">
+      <div className="form-check form-switch m-0">
         <input
           className="form-check-input"
           type="checkbox"
@@ -1273,7 +1242,7 @@ function PlaybackRow({ value, onChange }) {
     [PLAYBACK_RANDOM, 'Random', 'fa-shuffle'],
   ]
   return (
-    <div className="d-flex align-items-center gap-3 mb-4">
+    <div className="settings-row">
       <span
         className="settings-label text-nowrap"
         title="What plays when a video ends — the next one down the grid, or another one at random. Either way it stays inside whatever the grid was showing."
@@ -1286,11 +1255,11 @@ function PlaybackRow({ value, onChange }) {
           <button
             key={mode}
             type="button"
-            className={`btn ${value === mode ? 'btn-danger' : 'btn-outline-secondary'}`}
+            className={`btn btn-sm ${value === mode ? 'btn-danger' : 'btn-outline-secondary'}`}
             aria-pressed={value === mode}
             onClick={() => onChange(mode)}
           >
-            <i className={`fa-sharp-duotone fa-regular ${icon} me-2`} />
+            <i className={`fa-sharp-duotone fa-regular ${icon} me-1`} />
             {label}
           </button>
         ))}
@@ -1336,30 +1305,29 @@ function ApiKeyRow({ apiKey, onChange }) {
   }, [apiKey])
 
   return (
-    <div className="mb-4">
-      <div className="d-flex align-items-center gap-3">
-        <span
-          className="settings-label text-nowrap"
-          title="Required only for adding new channels"
-        >
-          <i className="fa-sharp-duotone fa-regular fa-key me-2" />
-          <a href={API_CONSOLE_URL} target="_blank" rel="noreferrer">YouTube API Key</a>
-        </span>
-        {/* real <form> + username/current-password hints so the browser's
-            password manager offers to save the key; Save submits it via
-            form="api-key-form" and preventDefault keeps the SPA in place */}
-        <form
-          id="api-key-form"
-          className="d-flex align-items-center gap-3 flex-grow-1"
-          onSubmit={e => e.preventDefault()}
-        >
+    <div className="settings-row">
+      <span
+        className="settings-label text-nowrap"
+        title="Optional. Adding channels no longer needs a key — search and paste go through TinyTube."
+      >
+        <i className="fa-sharp-duotone fa-regular fa-key me-2" />
+        <a href={API_CONSOLE_URL} target="_blank" rel="noreferrer">YouTube API Key</a>
+      </span>
+      {/* real <form> + username/current-password hints so the browser's
+          password manager offers to save the key; Save submits it via
+          form="api-key-form" and preventDefault keeps the SPA in place */}
+      <form
+        id="api-key-form"
+        className="d-flex align-items-center gap-2 flex-grow-1 settings-row-body"
+        onSubmit={e => e.preventDefault()}
+      >
           <input type="text" name="username" value="youtube-api-key" autoComplete="username" readOnly hidden />
           <div className="position-relative flex-grow-1">
             <input
               type="password"
               name="api-key"
               className="form-control"
-              placeholder="AIza… (needed to add channels)"
+              placeholder="AIza… (optional)"
               value={apiKey}
               onChange={e => {
                 setCheck(null)
@@ -1409,12 +1377,11 @@ function ApiKeyRow({ apiKey, onChange }) {
             <i className="fa-sharp-duotone fa-regular fa-trash" />
           </button>
         )}
-      </div>
-      {check && check !== 'busy' && check !== 'ok' && <div className="alert alert-warning mt-2 py-2">{check}</div>}
+      {check && check !== 'busy' && check !== 'ok' && <div className="alert alert-warning mt-2 py-2 mb-0 w-100">{check}</div>}
       {confirming && (
         <ConfirmModal
           title="Delete API key?"
-          body="You won't be able to search for channels until you enter a new key."
+          body="You can still search for channels and paste URLs without a key. This is only a fallback for fetching videos if TinyTube's cache is down."
           onConfirm={() => {
             onChange('')
             setConfirming(false)
@@ -1426,165 +1393,45 @@ function ApiKeyRow({ apiKey, onChange }) {
   )
 }
 
-/* The channel on this page, if it is one AND we already have it approved.
-   A /channel/UC… URL answers locally. A /@handle URL uses the handle recorded
-   when it was approved this session, so the button does not flicker off to
-   the Worker on every navigation. */
-function approvedOnPage(url, settings, handles) {
-  if (!isChannelPage(url)) return null
-  const handle = handleFromUrl(url)
-  const id = channelIdFromUrl(url) ?? (handle ? handles[handle.toLowerCase()] : null)
-  if (!id) return null
-  if (settings.customChannels.some(c => c.channel_id === id)) return { id }
-  return null
-}
-
-/** Parent-mode YouTube, the web copy of ParentActivity: the same 44dp bar
- *  (Kids mode, +, approved list, settings) over m.youtube.com.
- *
- *  The iframe starts at mobile YouTube; there is no address bar and no button
- *  that leaves this app. YouTube sends X-Frame-Options: SAMEORIGIN, so some
- *  browsers show an empty frame — that is YouTube's rule, not a missing
- *  control. The + still follows the URL of the page, which the frame reports
- *  via postMessage when it can (tests send the same message). */
-function BrowserTab({ store, customById = {}, lock, onKidsMode, onApprovedList, onSettings }) {
-  const settings = store.settings
-  const [url, setUrl] = useState(PARENT_START)
-  const [handles, setHandles] = useState({})
-  const [working, setWorking] = useState(false)
-  const [message, setMessage] = useState(null)
-  const [removing, setRemoving] = useState(null)
-  const urlRef = useRef(url)
-  urlRef.current = url
-
-  const onChannel = isChannelPage(url)
-  const approved = approvedOnPage(url, settings, handles)
-  const live = onChannel && !working && !lock
-
-  useEffect(() => {
-    const onMsg = e => {
-      const raw = e?.data?.tinytubeUrl
-      if (typeof raw !== 'string') return
-      const next = parentBrowseUrl(raw)
-      if (!next) return
-      setUrl(next)
-      setMessage(null)
-    }
-    window.addEventListener('message', onMsg)
-    return () => window.removeEventListener('message', onMsg)
-  }, [])
-
-  const titleOf = id => customById[id]?.title ?? id
-
-  const addCurrent = async () => {
-    const here = urlRef.current
-    if (!isChannelPage(here)) return
-    setWorking(true)
-    setMessage('Working out which channel this is…')
-    const resolved = await resolveChannelPage(here)
-    setWorking(false)
-    /* Re-derive rather than just re-enabling: resolving hits the network, and
-       the parent may have navigated somewhere with no channel on it while it
-       ran. */
-    if (urlRef.current !== here) {
-      setMessage(null)
-      return
-    }
-    if (!resolved) {
-      setMessage("Couldn't identify a channel on this page.")
-      return
-    }
-    const handle = handleFromUrl(here)
-    if (handle) setHandles(prev => ({ ...prev, [handle.toLowerCase()]: resolved.channel_id }))
-    const already = store.settings.customChannels.some(c => c.channel_id === resolved.channel_id)
-    if (!already) {
-      cacheResolvedChannel(resolved)
-      store.addCustomChannel({ ...resolved, min_age: AGE_MIN, max_age: AGE_MAX })
-    } else {
-      cacheResolvedChannel(resolved)
-    }
-    setMessage(`Approved “${resolved.channel_title}”`)
-  }
-
-  const removeApproved = ch => {
-    store.removeCustomChannel(ch.id)
-    evictChannelCache(ch.id)
-    setRemoving(null)
-    setMessage(`Removed “${titleOf(ch.id)}”`)
-  }
-
+/** YouTube will not render in an iframe (X-Frame-Options: SAMEORIGIN). This
+ *  tab is the in-app finder: type a name or paste a channel URL / @handle.
+ *  Both go through the Worker — no Google Cloud key. Same header and bottom
+ *  tabs as every other Parents Mode screen. */
+function BrowserTab({ store }) {
   return (
-    <div className="browser-tab">
-      <div className="parent-bar">
-        <button type="button" className="parent-kids" onClick={onKidsMode}>
-          ← Kids mode
-        </button>
-        <span className="parent-bar-gap" />
-        <button
-          type="button"
-          className="parent-icon"
-          aria-label={approved ? 'Remove this channel' : 'Approve this channel'}
-          disabled={!live}
-          style={{ opacity: live ? 1 : 0.35, color: '#7cc4ff' }}
-          onClick={() => {
-            const current = approvedOnPage(urlRef.current, settings, handles)
-            if (current) setRemoving(current)
-            else addCurrent()
-          }}
-        >
-          <i className={`fa-sharp-duotone fa-regular ${approved ? 'fa-circle-minus' : 'fa-circle-plus'} fs-4`} />
-        </button>
-        <button type="button" className="parent-icon" aria-label="Approved channels" onClick={onApprovedList}>
-          <i className="fa-sharp-duotone fa-regular fa-list fs-5" />
-        </button>
-        <button type="button" className="parent-icon" aria-label="Settings" onClick={onSettings}>
-          <i className="fa-sharp-duotone fa-regular fa-gear fs-5" />
-        </button>
-      </div>
-      {message && <div className="parent-message">{message}</div>}
-      {lock && <LockNotice lock={lock} />}
-      <div className="browser-frame" style={lock ? { pointerEvents: 'none' } : undefined}>
-        <iframe
-          title="YouTube"
-          src={PARENT_START}
-          referrerPolicy="no-referrer-when-downgrade"
-          onLoad={e => {
-            try {
-              const href = e.target.contentWindow?.location?.href
-              const next = href ? parentBrowseUrl(href) : null
-              if (next) setUrl(next)
-            } catch {
-              /* cross-origin: the frame does not tell us where it went */
-            }
-          }}
-        />
-      </div>
-
-      {removing && (
-        <ConfirmModal
-          title={titleOf(removing.id)}
-          body={`Remove “${titleOf(removing.id)}”? Its videos will stop appearing.`}
-          confirmLabel="Remove"
-          confirmIcon="fa-circle-minus"
-          onConfirm={() => removeApproved(removing)}
-          onCancel={() => setRemoving(null)}
-        />
-      )}
+    <div className="browser-find">
+      <p className="settings-hint">
+        Search by name, or paste a YouTube channel URL. Adding a channel does not need an API key.
+      </p>
+      <SearchRow store={store} />
     </div>
   )
 }
 
-function SearchRow({ apiKey, store }) {
+async function findChannels(q) {
+  const browse = parentBrowseUrl(q)
+  if (browse && isChannelPage(browse)) {
+    const resolved = await resolveChannelPage(browse)
+    if (!resolved) throw new Error("Couldn't identify that channel")
+    return [resolved]
+  }
+  if (browse) {
+    throw new Error('That is not a channel page. Paste a channel URL or @handle, or search by name.')
+  }
+  return searchChannelsViaWorker(q)
+}
+
+function SearchRow({ store }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  // inline autocomplete: debounced 500ms, min 3 chars (search.list = 100
-  // quota units per fired query, so don't search every keystroke)
+  // inline autocomplete: debounced 500ms, min 3 chars. Name search hits the
+  // Worker (one cached YouTube page), not a parent-held API key.
   useEffect(() => {
     const q = query.trim()
-    if (!apiKey || q.length < 3) {
+    if (q.length < 3) {
       setResults([])
       setError(null)
       return
@@ -1593,7 +1440,7 @@ function SearchRow({ apiKey, store }) {
     const timer = setTimeout(async () => {
       setBusy(true)
       try {
-        const found = looksLikeLink(q) ? [await resolveChannel(apiKey, q)] : await searchChannels(apiKey, q)
+        const found = await findChannels(q)
         if (!stale) {
           setResults(found)
           setError(null)
@@ -1611,38 +1458,36 @@ function SearchRow({ apiKey, store }) {
       stale = true
       clearTimeout(timer)
     }
-  }, [query, apiKey])
+  }, [query])
 
   return (
-    <div className="mb-4">
-      <div className="d-flex align-items-center gap-3">
-        <span className="settings-label text-nowrap">
-          <i className="fa-brands fa-youtube me-2" />
-          Add Channel
-        </span>
-        <div className="position-relative flex-grow-1">
-          <input
-            type="text"
-            className="form-control"
-            placeholder={apiKey ? 'Channel name, @handle, or URL' : 'Enter an API key above first'}
-            disabled={!apiKey}
-            value={query}
-            onChange={e => setQuery(e.target.value)}
+    <div>
+      <div className="position-relative">
+        <input
+          type="text"
+          className="form-control"
+          aria-label="Find a channel"
+          placeholder="Channel name, @handle, or URL"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+        />
+        {busy && (
+          <span
+            className="spinner-border spinner-border-sm position-absolute top-50 end-0 translate-middle-y me-2"
+            role="status"
           />
-          {busy && (
-            <span
-              className="spinner-border spinner-border-sm position-absolute top-50 end-0 translate-middle-y me-2"
-              role="status"
-            />
-          )}
-        </div>
+        )}
       </div>
       {error && <div className="alert alert-warning mt-2 py-2">{error}</div>}
       {results.map(ch => {
         const added = store.settings.customChannels.some(c => c.channel_id === ch.channel_id)
         return (
-          <div key={ch.channel_id} className="d-flex align-items-center gap-3 bg-body-tertiary rounded p-2 mt-2">
-            <img src={ch.thumbnail} alt="" width="36" height="36" className="rounded-circle" />
+          <div key={ch.channel_id} className="d-flex align-items-center gap-2 rounded p-2 mt-2" style={{ background: '#182534' }}>
+            {ch.thumbnail ? (
+              <img src={ch.thumbnail} alt="" width="36" height="36" className="rounded-circle flex-shrink-0" />
+            ) : (
+              <i className="fa-duotone fa-regular fa-tv-retro fs-5 text-secondary flex-shrink-0" />
+            )}
             <span className="fw-semibold text-truncate">{ch.channel_title}</span>
             <TopicBadges ch={ch} />
             <div className="ms-auto">
@@ -1669,7 +1514,8 @@ function SearchRow({ apiKey, store }) {
                   // and avatar; seeding them means the row it becomes is not
                   // a bare id until the Worker has been asked
                   seedChannelMeta(ch)
-                  store.addCustomChannel({ ...ch, min_age: 1, max_age: 15 })
+                  cacheResolvedChannel(ch)
+                  store.addCustomChannel({ ...ch, min_age: AGE_MIN, max_age: AGE_MAX })
                   setQuery('')
                 }}
               >

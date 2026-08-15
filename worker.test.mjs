@@ -30,6 +30,9 @@ import {
   parseChannelId,
   parseChannelTitle,
   parseChannelAvatar,
+  parseChannelSearch,
+  searchQueryFrom,
+  channelSearchUrl,
   channelTargetFromUrl,
   RELEASE_ASSETS,
   contentType,
@@ -407,6 +410,70 @@ test("the rebuilt url is always youtube's own, however odd the input", () => {
     assert.ok(t, `should have accepted: ${url}`);
     assert.equal(t.url, "https://www.youtube.com/@Mrwhosetheboss");
   }
+});
+
+/* ---- channel search (no API key) ----
+ *
+ * Lifted from a live results page (Type=Channel filter) on 2026-08-15: two
+ * channelRenderer objects, one with an https avatar and one protocol-relative.
+ * When YouTube renames this shape, this is what says so. */
+
+const searchEntry = (id, title, avatar) =>
+  `{"channelRenderer":{"channelId":"${id}","title":{"simpleText":"${title}"},` +
+  `"thumbnail":{"thumbnails":[{"url":"${avatar}"}]}}}`;
+
+const searchPage = (...entries) =>
+  `<!doctype html><script>var ytInitialData = {"contents":[${entries.join(",")}]};</script>`;
+
+const COCO = "UCbCmjCuTUZos6Inko4u57UQ";
+const CODY = "UCuekY-Lxc6H9NEFO3EzDNdA";
+const HTTPS_AVATAR =
+  "https://yt3.googleusercontent.com/yiljI_XQcX8X0p_E2S0APGrUs7tHBMukf5_3dhVzhbH-z5uhzpt88tUopQa7ngVwO1nGAAnr6A=s88-c-k-c0x00ffffff-no-rj-mo";
+const REL_AVATAR =
+  "//yt3.ggpht.com/yiljI_XQcX8X0p_E2S0APGrUs7tHBMukf5_3dhVzhbH-z5uhzpt88tUopQa7ngVwO1nGAAnr6A=s88-c-k-c0x00ffffff-no-rj-mo";
+
+test("parses channel search results, including protocol-relative avatars", () => {
+  const found = parseChannelSearch(
+    searchPage(
+      searchEntry(COCO, "Cocomelon - Nursery Rhymes", HTTPS_AVATAR),
+      searchEntry(CODY, "CoComelon - Cody Time", REL_AVATAR),
+    ),
+  );
+  assert.deepEqual(found, [
+    { id: COCO, title: "Cocomelon - Nursery Rhymes", avatarUrl: HTTPS_AVATAR },
+    { id: CODY, title: "CoComelon - Cody Time", avatarUrl: "https:" + REL_AVATAR },
+  ]);
+});
+
+test("a search page that is not channels yields nothing, never a throw", () => {
+  assert.deepEqual(parseChannelSearch(""), []);
+  assert.deepEqual(parseChannelSearch("<html>nothing</html>"), []);
+  assert.deepEqual(
+    parseChannelSearch(`{"videoRenderer":{"videoId":"aaaaaaaaaaa","title":{"simpleText":"Nope"}}}`),
+    [],
+  );
+});
+
+test("a missing title falls back to the id; a hostile avatar is dropped", () => {
+  const noTitle = `{"channelRenderer":{"channelId":"${COCO}","thumbnail":{"thumbnails":[{"url":"${HTTPS_AVATAR}"}]}}}`;
+  assert.equal(parseChannelSearch(noTitle)[0].title, COCO);
+
+  const badAvatar = searchEntry(COCO, "Coco", "https://attacker.example/a.png");
+  assert.equal(parseChannelSearch(searchPage(badAvatar))[0].avatarUrl, null);
+});
+
+test("a search query is rebuilt into a youtube results url, never fetched as-is", () => {
+  assert.equal(searchQueryFrom("  coco  melon "), "coco melon");
+  const url = channelSearchUrl("cocomelon");
+  assert.ok(url.startsWith("https://www.youtube.com/results?"));
+  assert.ok(url.includes("search_query=cocomelon"));
+  assert.ok(url.includes("sp=EgIQAg"));
+  assert.equal(channelSearchUrl("https://evil.example/"), null);
+  assert.equal(channelSearchUrl("http://youtube.com/results?q=x"), null);
+  assert.equal(channelSearchUrl(""), null);
+  assert.equal(channelSearchUrl("x"), null); // too short
+  assert.equal(channelSearchUrl("a".repeat(81)), null);
+  assert.equal(channelSearchUrl("foo<script>"), null);
 });
 
 /* The shape a handle has to have. It is what stands between /channel and a

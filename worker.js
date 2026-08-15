@@ -51,6 +51,10 @@
  *     a host in PAGE_HOSTS and a path of exactly /channel/UC… or /@handle, and
  *     REBUILDS the address from what it extracted. The most a caller can name
  *     is a different YouTube channel, which is the point of the route.
+ *   - /search takes a short query string, not a URL. searchQueryFrom
+ *     rejects empties, control characters and anything with ://, then
+ *     channelSearchUrl REBUILDS a youtube.com/results address with the
+ *     Type=Channel filter. The most a caller can name is a search term.
  *   - So every URL fetched here is BUILT from a validated value. The rule is
  *     not "never accept a URL", it is never fetch() a string a caller supplied.
  *   - The known-id list is capped, and it only ever makes the response
@@ -434,6 +438,88 @@ export function parseChannelAvatar(html) {
   return null;
 }
 
+function avatarIfAllowed(raw) {
+  if (!raw) return null;
+  const href = raw.startsWith("//") ? "https:" + raw : raw;
+  let host;
+  try {
+    const u = new URL(href);
+    if (u.protocol !== "https:") return null;
+    host = u.hostname.toLowerCase();
+    if (AVATAR_HOSTS.has(host) || host.endsWith(".googleusercontent.com")) return u.href;
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
+
+/* ---- channel search (no API key) ----
+ *
+ * A parent typing "cocomelon" should not have to mint a Google Cloud key.
+ * YouTube's own results page already lists channels; we parse that the same
+ * way /uploads parses a playlist page. search.list costs 100 quota units and
+ * the default 10k/day key would serve ~100 searches for the whole install
+ * base — a scrape costs YouTube one cached page.
+ *
+ * `sp=EgIQAg==` is YouTube's "Type: Channel" filter. If they rename it the
+ * page may mix in videos; this parser only reads channelRenderer, so the
+ * worst case is an empty list rather than a wrong channel. */
+
+const SEARCH_MARKER = '{"channelRenderer":';
+const SEARCH_ID = /"channelId"\s*:\s*"(UC[A-Za-z0-9_-]{22})"/;
+const SEARCH_TITLE = /"title"\s*:\s*\{\s*"simpleText"\s*:\s*"((?:[^"\\]|\\.)*)"/;
+const SEARCH_AVATAR = /"url"\s*:\s*"(https?:)?(\/\/yt3\.(?:ggpht|googleusercontent)\.com[^"]+)"/;
+const MAX_SEARCH = 8;
+const SEARCH_WINDOW = 12000;
+
+export function parseChannelSearch(html, limit = MAX_SEARCH) {
+  const out = [];
+  const seen = new Set();
+  if (!html || !html.includes(SEARCH_MARKER)) return out;
+
+  let from = html.indexOf(SEARCH_MARKER);
+  while (from >= 0 && out.length < limit) {
+    const next = html.indexOf(SEARCH_MARKER, from + SEARCH_MARKER.length);
+    const end = Math.min(next >= 0 ? next : html.length, from + SEARCH_WINDOW);
+    const chunk = html.slice(from + SEARCH_MARKER.length, end);
+    const id = (SEARCH_ID.exec(chunk) || [])[1];
+    if (id && CHANNEL_ID.test(id) && !seen.has(id)) {
+      seen.add(id);
+      const tm = SEARCH_TITLE.exec(chunk);
+      const title = tm ? jsonUnescape(tm[1]).trim() : "";
+      const am = SEARCH_AVATAR.exec(chunk);
+      out.push({
+        id,
+        title: title || id,
+        avatarUrl: am ? avatarIfAllowed((am[1] || "https:") + am[2]) : null,
+      });
+    }
+    from = next;
+  }
+  return out;
+}
+
+/* A search term, not a URL. Rejected rather than fetched: control characters,
+ * empties, and anything that looks like an address (://) cannot become the
+ * thing we retrieve. Spaces are folded so "  coco  melon " is one query. */
+export function searchQueryFrom(raw) {
+  const q = String(raw ?? "").trim().replace(/\s+/g, " ");
+  if (q.length < 2 || q.length > 80) return null;
+  if (/[\u0000-\u001f\u007f]/.test(q)) return null;
+  if (/:\/\//i.test(q) || /[<>]/.test(q)) return null;
+  return q;
+}
+
+export function channelSearchUrl(query) {
+  const q = searchQueryFrom(query);
+  if (!q) return null;
+  const url = new URL("https://www.youtube.com/results");
+  url.searchParams.set("search_query", q);
+  url.searchParams.set("sp", "EgIQAg==");
+  url.searchParams.set("hl", "en");
+  return url.toString();
+}
+
 /* A channel URL, taken apart and REBUILT.
  *
  * ⚠️ THIS IS WHAT LETS /channel ACCEPT A URL AT ALL. The caller's string is
@@ -553,6 +639,28 @@ async function channel(request) {
      * not look alike to a caller that REPLACES its stored list with this. */
     videos,
   });
+}
+
+/* Name search for the web app's Browser tab. Same terms as /channel: POST,
+ * `env` is not passed, the caller's string is never fetched — channelSearchUrl
+ * builds a results address from a validated query. An empty list means "could
+ * not tell", the same contract as the other parsers. */
+async function search(request) {
+  let body;
+  try {
+    body = await request.json();
+  } catch (e) {
+    return json({ error: "bad json" }, 400);
+  }
+  const target = channelSearchUrl(typeof body?.query === "string" ? body.query : "");
+  if (!target) return json({ error: "bad query" }, 400);
+
+  const html = await fetchText(target, {
+    "User-Agent": DESKTOP_UA,
+    "Accept-Language": "en-US,en;q=0.9",
+  });
+  if (!html) return json({ error: "could not search" }, 502);
+  return json({ channels: parseChannelSearch(html) });
 }
 
 /* A channel's uploads, as the reply's `videos` array — shared by /uploads and
@@ -1327,6 +1435,15 @@ export default {
       if (request.method === "OPTIONS") return corsPreflight();
       if (request.method !== "POST") return json({ error: "use POST" }, 405);
       return channel(request);
+    }
+
+    /* Name search, so a parent can add a channel without a Google Cloud key.
+       Same terms as /channel: POST, no env, the query is never fetched — see
+       searchQueryFrom / channelSearchUrl. */
+    if (url.pathname === "/search") {
+      if (request.method === "OPTIONS") return corsPreflight();
+      if (request.method !== "POST") return json({ error: "use POST" }, 405);
+      return search(request);
     }
 
     /* The shared per-channel video cache. Same terms as /uploads — the one
