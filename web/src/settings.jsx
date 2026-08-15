@@ -49,6 +49,14 @@ import {
   seedChannelMeta,
   formatCount,
   validateApiKey,
+  PARENT_START,
+  parentBrowseUrl,
+  isChannelPage,
+  channelIdFromUrl,
+  handleFromUrl,
+  urlHost,
+  resolveChannelPage,
+  cacheResolvedChannel,
 } from './youtubeApi.js'
 import { TabButton } from './gallery.jsx'
 
@@ -61,21 +69,22 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
   // button; half-typed values are held locally by their rows (see BirthdayRow)
   // and only committed once they parse
   const settings = store.settings
-  // 'settings' | 'channels' | 'stats' — the bottom bar below switches
+  // 'settings' | 'channels' | 'browser' | 'stats' — the bottom bar below switches
   const [tab, setTab] = useState('settings')
-  const titles = { settings: 'Parents Mode', channels: 'Channels', stats: 'Stats' }
+  const titles = { settings: 'Parents Mode', channels: 'Channels', browser: 'Browser', stats: 'Stats' }
   /* Locked when a child is the one signed in, or when nobody is. Everything
      below is wrapped in a disabled fieldset; the header is NOT, because
      signing in is the only way out of either state and the control that does
      it lives up there. */
   const lock = settingsLock(store.children, sync?.session)
 
+  const browsing = tab === 'browser'
   return (
-    <div className="settings container-xl py-4">
+    <div className={browsing ? 'settings settings-as-browser' : 'settings container-xl py-4'}>
       {/* explicit back button: iOS standalone PWAs have no browser chrome or
           hardware back, so without it a no-change visit would strand you here.
           flex: 1 sides keep the title truly centered */}
-      <div className="d-flex align-items-center gap-3 mb-4">
+      <div className={`d-flex align-items-center gap-3 ${browsing ? 'px-3 pt-2 pb-2' : 'mb-4'}`}>
         <div style={{ flex: 1 }}>
           <button type="button" className="btn btn-outline-secondary" aria-label="Back to gallery" onClick={onDone}>
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
@@ -127,12 +136,14 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
           <ChannelList db={db} customById={customById} store={store} />
         </>
       )}
+      {tab === 'browser' && <BrowserTab store={store} db={db} customById={customById} />}
       {tab === 'stats' && <StatsTab watchStore={watchStore} settings={settings} />}
       </fieldset>
 
       <nav className="bottom-tabs fixed-bottom d-flex border-top">
         <TabButton label="Settings" icon="fa-gear" on={tab === 'settings'} onClick={() => setTab('settings')} />
         <TabButton label="Channels" icon="fa-list" on={tab === 'channels'} onClick={() => setTab('channels')} />
+        <TabButton label="Browser" icon="fa-browser" on={tab === 'browser'} onClick={() => setTab('browser')} />
         <TabButton label="Stats" icon="fa-chart-simple" on={tab === 'stats'} onClick={() => setTab('stats')} />
       </nav>
     </div>
@@ -1393,6 +1404,207 @@ function ApiKeyRow({ apiKey, onChange }) {
             setConfirming(false)
           }}
           onCancel={() => setConfirming(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+/* The channel on this page, if it is one AND we already have it approved.
+   A /channel/UC… URL answers locally. A /@handle URL uses the handle recorded
+   when it was approved this session, so the button does not flicker off to
+   the Worker on every navigation. */
+function approvedOnPage(url, settings, db, handles) {
+  if (!isChannelPage(url)) return null
+  const handle = handleFromUrl(url)
+  const id = channelIdFromUrl(url) ?? (handle ? handles[handle.toLowerCase()] : null)
+  if (!id) return null
+  if (settings.customChannels.some(c => c.channel_id === id)) return { id, kind: 'custom' }
+  const curated = (db?.channels ?? []).find(c => c.channel_id === id)
+  if (curated && !settings.overrides[id]?.hidden) return { id, kind: 'curated', title: curated.channel_title }
+  return null
+}
+
+/** Parent-mode YouTube, the web copy of ParentActivity: an address bar, the
+ *  same +/- that approves or removes the channel on the page, and m.youtube.com
+ *  underneath.
+ *
+ *  YouTube refuses to be framed (X-Frame-Options), so the iframe is best-effort
+ *  and "Open YouTube" is the reliable half — browse there, paste the channel
+ *  URL here, tap +. The Worker /channel route does the resolving, no API key. */
+function BrowserTab({ store, db, customById = {} }) {
+  const settings = store.settings
+  const [url, setUrl] = useState(PARENT_START)
+  const [typed, setTyped] = useState(PARENT_START)
+  const [handles, setHandles] = useState({})
+  const [working, setWorking] = useState(false)
+  const [message, setMessage] = useState(null)
+  const [removing, setRemoving] = useState(null)
+  const [framed, setFramed] = useState(false)
+  const urlRef = useRef(url)
+  urlRef.current = url
+
+  const onChannel = isChannelPage(url)
+  const approved = approvedOnPage(url, settings, db, handles)
+  const live = onChannel && !working
+
+  const go = raw => {
+    const text = String(raw ?? '').trim()
+    if (!text) return
+    const next = parentBrowseUrl(text)
+    if (!next) {
+      const host = urlHost(/^https?:\/\//i.test(text) ? text : `https://${text}`) ?? text.slice(0, 40)
+      setMessage(`Blocked: ${host} is outside parent mode.`)
+      return
+    }
+    setMessage(null)
+    setUrl(next)
+    setTyped(next)
+  }
+
+  const onFrameLoad = e => {
+    try {
+      e.target.contentDocument
+      setFramed(false)
+    } catch {
+      setFramed(true)
+    }
+  }
+
+  const titleOf = id => customById[id]?.title ?? (db?.channels ?? []).find(c => c.channel_id === id)?.channel_title ?? id
+
+  const addCurrent = async () => {
+    const here = urlRef.current
+    if (!isChannelPage(here)) return
+    setWorking(true)
+    setMessage('Working out which channel this is…')
+    const resolved = await resolveChannelPage(here)
+    setWorking(false)
+    /* Re-derive rather than just re-enabling: resolving hits the network, and
+       the parent may have navigated somewhere with no channel on it while it
+       ran. */
+    if (urlRef.current !== here) {
+      setMessage(null)
+      return
+    }
+    if (!resolved) {
+      setMessage("Couldn't identify a channel on this page.")
+      return
+    }
+    const handle = handleFromUrl(here)
+    if (handle) setHandles(prev => ({ ...prev, [handle.toLowerCase()]: resolved.channel_id }))
+    const alreadyCustom = store.settings.customChannels.some(c => c.channel_id === resolved.channel_id)
+    const curated = (db?.channels ?? []).some(c => c.channel_id === resolved.channel_id)
+    if (alreadyCustom) {
+      cacheResolvedChannel(resolved)
+    } else if (curated) {
+      store.setOverride(resolved.channel_id, { hidden: false })
+    } else {
+      cacheResolvedChannel(resolved)
+      store.addCustomChannel({ ...resolved, min_age: AGE_MIN, max_age: AGE_MAX })
+    }
+    setMessage(`Approved “${resolved.channel_title}”`)
+  }
+
+  const removeApproved = ch => {
+    if (ch.kind === 'custom') {
+      store.removeCustomChannel(ch.id)
+      evictChannelCache(ch.id)
+    } else {
+      store.setOverride(ch.id, { hidden: true })
+    }
+    setRemoving(null)
+    setMessage(`Removed “${titleOf(ch.id)}”`)
+  }
+
+  return (
+    <div className="browser-tab">
+      <div className="browser-bar d-flex align-items-center gap-2 px-3">
+        <span className="browser-status text-secondary small text-truncate me-auto">
+          {message}
+        </span>
+        <button
+          type="button"
+          className="btn btn-link p-1"
+          aria-label={approved ? 'Remove channel' : 'Approve this channel'}
+          disabled={!live}
+          style={{ opacity: live ? 1 : 0.35, color: approved ? '#e74c3c' : '#2ecc71' }}
+          onClick={() => {
+            const current = approvedOnPage(urlRef.current, settings, db, handles)
+            if (current) setRemoving(current)
+            else addCurrent()
+          }}
+        >
+          <i className={`fa-sharp-duotone fa-regular ${approved ? 'fa-circle-minus' : 'fa-circle-plus'} fs-3`} />
+        </button>
+      </div>
+
+      <form
+        className="browser-address d-flex align-items-center gap-2 px-3 py-2"
+        onSubmit={e => {
+          e.preventDefault()
+          go(typed)
+        }}
+      >
+        <input
+          type="text"
+          inputMode="url"
+          autoCapitalize="none"
+          autoCorrect="off"
+          className="form-control form-control-sm"
+          aria-label="YouTube address"
+          value={typed}
+          onChange={e => setTyped(e.target.value)}
+          placeholder="https://m.youtube.com/"
+        />
+        <button type="submit" className="btn btn-outline-secondary btn-sm">
+          Go
+        </button>
+        <button
+          type="button"
+          className="btn btn-outline-secondary btn-sm"
+          aria-label="Paste URL"
+          onClick={async () => {
+            try {
+              const text = await navigator.clipboard.readText()
+              if (text) go(text)
+            } catch {
+              /* permission denied: the address field is right there */
+            }
+          }}
+        >
+          <i className="fa-sharp-duotone fa-regular fa-clipboard" />
+        </button>
+      </form>
+
+      <div className="browser-frame">
+        <iframe
+          title="YouTube"
+          src={url}
+          referrerPolicy="no-referrer-when-downgrade"
+          onLoad={onFrameLoad}
+        />
+        {!framed && (
+          <div className="browser-fallback d-flex flex-column align-items-center justify-content-center text-center px-4">
+            <p className="text-secondary mb-3">
+              Browse YouTube, copy a channel’s URL, paste it above, then tap +.
+            </p>
+            <a className="btn btn-danger" href={url} target="tinytube-yt" rel="noreferrer">
+              <i className="fa-brands fa-youtube me-2" />
+              Open YouTube
+            </a>
+          </div>
+        )}
+      </div>
+
+      {removing && (
+        <ConfirmModal
+          title={titleOf(removing.id)}
+          body={`Remove “${titleOf(removing.id)}”? Its videos will stop appearing.`}
+          confirmLabel="Remove"
+          confirmIcon="fa-circle-minus"
+          onConfirm={() => removeApproved(removing)}
+          onCancel={() => setRemoving(null)}
         />
       )}
     </div>

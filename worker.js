@@ -1324,6 +1324,7 @@ export default {
        that string is never fetched: channelTargetFromUrl takes it apart and
        BUILDS the address. See the note above channel(). */
     if (url.pathname === "/channel") {
+      if (request.method === "OPTIONS") return corsPreflight();
       if (request.method !== "POST") return json({ error: "use POST" }, 405);
       return channel(request);
     }

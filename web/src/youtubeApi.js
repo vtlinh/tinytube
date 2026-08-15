@@ -103,6 +103,112 @@ export async function resolveChannel(apiKey, input) {
   return channelFromItem(item)
 }
 
+/* ---- parent-mode YouTube URLs (YouTubeUrls.kt, ported) ----
+ *
+ * What a channel id looks like, whether the parent is standing on a channel
+ * page, and where a Browser tab may go. The same rules the phone WebView
+ * uses: match on the parsed host, never a substring, and a watch page that
+ * merely MENTIONS a channel is not one. */
+
+export const PARENT_START = 'https://m.youtube.com/'
+
+const CHANNEL_ID_EXACT = /^UC[A-Za-z0-9_-]{22}$/
+const CHANNEL_PATH = /^\/channel\/(UC[A-Za-z0-9_-]{22})(?:\/.*)?$/
+const HANDLE_PATH = /^\/@([A-Za-z0-9._-]{3,30})(?:\/.*)?$/
+const PAGE_HOSTS = new Set(['www.youtube.com', 'm.youtube.com', 'youtube.com'])
+const PARENT_HOSTS = new Set([
+  'www.youtube.com',
+  'm.youtube.com',
+  'youtube.com',
+  'www.youtube-nocookie.com',
+  's.ytimg.com',
+  'i.ytimg.com',
+  'yt3.ggpht.com',
+  'yt3.googleusercontent.com',
+  'fonts.gstatic.com',
+])
+const SIGN_IN_HOSTS = new Set(['google.com', 'accounts.youtube.com', 'consent.youtube.com'])
+const AVATAR_HOSTS_STRICT = new Set(['yt3.ggpht.com', 'yt3.googleusercontent.com'])
+
+/** Host of an http(s) URL, userinfo and port stripped. Null for anything else
+ *  — including `https://www.youtube.com@attacker.example/`, whose host is
+ *  attacker.example. Hand-rolled so lookalikes cannot hide in a substring. */
+export function urlHost(url) {
+  const m = /^(https?):\/\/([^/?#]+)/i.exec(String(url).trim())
+  if (!m) return null
+  let host = m[2].toLowerCase()
+  const at = host.lastIndexOf('@')
+  if (at >= 0) host = host.slice(at + 1)
+  const colon = host.indexOf(':')
+  if (colon >= 0) host = host.slice(0, colon)
+  return host || null
+}
+
+export function urlPath(url) {
+  const m = /^https?:\/\/[^/?#]+([^?#]*)/i.exec(String(url).trim())
+  if (!m) return null
+  return m[1] || '/'
+}
+
+export function isValidChannelId(id) {
+  return CHANNEL_ID_EXACT.test(id)
+}
+
+export function channelIdFromUrl(url) {
+  if (!urlHost(url)) return null
+  const path = urlPath(url)
+  if (!path) return null
+  const m = CHANNEL_PATH.exec(path)
+  return m && isValidChannelId(m[1]) ? m[1] : null
+}
+
+export function handleFromUrl(url) {
+  if (!urlHost(url)) return null
+  const path = urlPath(url)
+  if (!path) return null
+  return HANDLE_PATH.exec(path)?.[1] ?? null
+}
+
+/** Is the parent standing on a channel, such that "approve" means something
+ *  unambiguous? Anchored at the start of the path on purpose. */
+export function isChannelPage(url) {
+  const host = urlHost(url)
+  if (!host || !PAGE_HOSTS.has(host)) return false
+  const path = urlPath(url)
+  if (!path) return false
+  return CHANNEL_PATH.test(path) || HANDLE_PATH.test(path)
+}
+
+export function isParentBrowsable(url) {
+  const host = urlHost(url)
+  if (!host) return false
+  if (PARENT_HOSTS.has(host) || SIGN_IN_HOSTS.has(host)) return true
+  return (
+    host.endsWith('.google.com') ||
+    host.endsWith('.googlevideo.com') ||
+    host.endsWith('.googleusercontent.com') ||
+    host.endsWith('.gstatic.com')
+  )
+}
+
+export function isAllowedAvatar(url) {
+  const host = urlHost(url)
+  if (!host) return false
+  return AVATAR_HOSTS_STRICT.has(host) || host.endsWith('.googleusercontent.com')
+}
+
+/** What a parent typed into the address bar, as a URL we may load. Bare
+ *  @handles and UC… ids become m.youtube.com pages; anything off YouTube is
+ *  null — the Browser tab is not a general browser. */
+export function parentBrowseUrl(input) {
+  const text = String(input ?? '').trim()
+  if (!text) return null
+  if (isValidChannelId(text)) return `https://m.youtube.com/channel/${text}`
+  if (/^@[A-Za-z0-9._-]{3,30}$/.test(text)) return `https://m.youtube.com/${text}`
+  const url = /^https?:\/\//i.test(text) ? text : `https://${text}`
+  return isParentBrowsable(url) ? url : null
+}
+
 /** PT1H2M3S -> seconds; null when unparsable (e.g. P0D live placeholders). */
 export function parseDuration(iso) {
   const m = iso?.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
@@ -237,6 +343,57 @@ export function seedChannelMeta(ch) {
     ...entry,
     title: ch.channel_title ?? entry?.title ?? null,
     thumbnail: safeAvatar(ch.thumbnail) ?? entry?.thumbnail ?? null,
+  }
+  writeCache(cache)
+}
+
+/** The phone's ChannelResolver, for the Browser tab: POST the URL to the
+ *  Worker's /channel, re-validate the id and avatar on arrival. No API key.
+ *  Null when this page is not a channel we can identify. */
+export async function resolveChannelPage(url) {
+  if (!isParentBrowsable(url)) return null
+  const direct = channelIdFromUrl(url)
+  let json = null
+  try {
+    const resp = await fetch(`${WORKER_URL}/channel`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url }),
+    })
+    json = resp.ok ? await resp.json() : null
+  } catch {
+    json = null
+  }
+  /* Worker unreachable: a /channel/UC… URL still names the id, just without
+     a title or videos. The daily refresh will fill them in. */
+  if (!json) {
+    return direct ? { channel_id: direct, channel_title: direct, thumbnail: null, videos: [] } : null
+  }
+  const id = typeof json.id === 'string' && isValidChannelId(json.id) ? json.id : null
+  if (!id) return null
+  const title = typeof json.title === 'string' && json.title.trim() ? json.title.trim() : id
+  const thumbnail = isAllowedAvatar(json.avatarUrl ?? '') ? json.avatarUrl : null
+  return { channel_id: id, channel_title: title, thumbnail, videos: json.videos }
+}
+
+/** Write the Worker's /channel reply into the local cache so the grid is full
+ *  before the parent has closed Parents Mode. An empty/missing videos list
+ *  is "could not tell" — fetchedAt stays 0 so a later refresh still asks. */
+export function cacheResolvedChannel(ch) {
+  if (!isValidChannelId(ch?.channel_id)) return
+  const rec = normalizeRecord({
+    title: ch.channel_title,
+    thumbnail: ch.thumbnail,
+    videos: Array.isArray(ch.videos) ? ch.videos : [],
+  })
+  const cache = readCache()
+  const prev = cache[ch.channel_id]
+  cache[ch.channel_id] = {
+    ...prev,
+    ...rec,
+    fetchedAt: rec.videos.length ? Date.now() : 0,
+    title: rec.title ?? prev?.title ?? null,
+    thumbnail: rec.thumbnail ?? prev?.thumbnail ?? null,
   }
   writeCache(cache)
 }
