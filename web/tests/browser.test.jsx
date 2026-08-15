@@ -1,7 +1,7 @@
-/** The Parents Mode Browser tab: YouTube in a webview, with the same +/- the
- *  phone uses to approve the channel on the page. */
+/** The Parents Mode Browser tab: YouTube in a webview, with the same bar the
+ *  phone uses (Kids mode, +, approved list, settings). */
 
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import Settings from '../src/settings.jsx'
 import { useSettings, useWatchStore } from '../src/lib.js'
@@ -68,6 +68,10 @@ function openBrowser() {
   fireEvent.click(screen.getByText('Browser'))
 }
 
+function standOn(url) {
+  act(() => window.postMessage({ tinytubeUrl: url }, '*'))
+}
+
 describe('the Browser tab', () => {
   it('is on the parent-mode bottom bar', () => {
     render(<Harness />)
@@ -77,65 +81,60 @@ describe('the Browser tab', () => {
     expect(screen.getByText('Stats')).toBeTruthy()
   })
 
-  it('opens on mobile youtube with the approve button dimmed', () => {
+  it('opens mobile youtube under the Android parent bar, with + dimmed', () => {
     openBrowser()
-    expect(screen.getByLabelText('YouTube address').value).toBe('https://m.youtube.com/')
+    expect(screen.getByText('← Kids mode')).toBeTruthy()
     expect(screen.getByLabelText('Approve this channel').disabled).toBe(true)
-    expect(screen.getByText('Open YouTube')).toBeTruthy()
+    expect(screen.getByLabelText('Approved channels')).toBeTruthy()
+    expect(screen.getByLabelText('Settings')).toBeTruthy()
+    expect(screen.getByTitle('YouTube').getAttribute('src')).toBe('https://m.youtube.com/')
+    expect(screen.queryByLabelText('YouTube address')).toBeNull()
+    expect(screen.queryByText('Open YouTube')).toBeNull()
+    expect(screen.queryByText('Browser')).toBeNull() // the tab label is gone; this IS the screen
   })
 
-  it('opens youtube in a named window, so a second tap reuses it', () => {
+  it('the list and gear open the same screens the phone bar does', () => {
     openBrowser()
-    const link = screen.getByRole('link', { name: /Open YouTube/ })
-    expect(link.getAttribute('href')).toBe('https://m.youtube.com/')
-    expect(link.getAttribute('target')).toBe('tinytube-yt')
+    fireEvent.click(screen.getByLabelText('Approved channels'))
+    expect(screen.getByText('Add Channel')).toBeTruthy() // Channels tab
+
+    fireEvent.click(screen.getByText('Browser'))
+    fireEvent.click(screen.getByLabelText('Settings'))
+    expect(screen.getByText('Parents Mode')).toBeTruthy()
   })
 
-  it('enables approve on a channel page, not on a watch page', () => {
+  it('enables approve on a channel page, not on a watch page', async () => {
     openBrowser()
-    const address = screen.getByLabelText('YouTube address')
-    fireEvent.change(address, { target: { value: `https://m.youtube.com/channel/${UC}` } })
-    fireEvent.click(screen.getByText('Go'))
-    expect(screen.getByLabelText('Approve this channel').disabled).toBe(false)
+    standOn(`https://m.youtube.com/channel/${UC}`)
+    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(false))
 
-    fireEvent.change(address, { target: { value: 'https://m.youtube.com/watch?v=aaaaaaaaaaa' } })
-    fireEvent.click(screen.getByText('Go'))
-    expect(screen.getByLabelText('Approve this channel').disabled).toBe(true)
+    standOn('https://m.youtube.com/watch?v=aaaaaaaaaaa')
+    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(true))
   })
 
-  it('turns a bare handle into a channel page', () => {
+  it('treats a handle page as a channel', async () => {
     openBrowser()
-    fireEvent.change(screen.getByLabelText('YouTube address'), { target: { value: '@SomeChannel' } })
-    fireEvent.click(screen.getByText('Go'))
-    expect(screen.getByLabelText('YouTube address').value).toBe('https://m.youtube.com/@SomeChannel')
-    expect(screen.getByLabelText('Approve this channel').disabled).toBe(false)
-    expect(screen.getByRole('link', { name: /Open YouTube/ }).getAttribute('href')).toBe(
-      'https://m.youtube.com/@SomeChannel',
-    )
+    standOn('https://m.youtube.com/@SomeChannel')
+    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(false))
   })
 
-  it('refuses a site that is not youtube', () => {
+  it('ignores a site that is not youtube', async () => {
     openBrowser()
-    fireEvent.change(screen.getByLabelText('YouTube address'), { target: { value: 'https://example.com/' } })
-    fireEvent.click(screen.getByText('Go'))
-    expect(screen.getByText(/Blocked: example.com/)).toBeTruthy()
-    expect(screen.getByLabelText('YouTube address').value).toBe('https://example.com/')
-    // still standing on youtube — we did not navigate
-    expect(screen.getByLabelText('Approve this channel').disabled).toBe(true)
+    standOn('https://example.com/')
+    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(true))
+    expect(screen.queryByText(/Blocked/)).toBeNull()
   })
 
   it('approves via the Worker, with no API key, then the button becomes remove', async () => {
     openBrowser()
-    fireEvent.change(screen.getByLabelText('YouTube address'), {
-      target: { value: `https://m.youtube.com/channel/${UC}` },
-    })
-    fireEvent.click(screen.getByText('Go'))
+    standOn(`https://m.youtube.com/channel/${UC}`)
+    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(false))
     fireEvent.click(screen.getByLabelText('Approve this channel'))
 
     expect(await screen.findByText(/Approved “Cocomelon”/)).toBeTruthy()
     const call = fetch.mock.calls.find(([u]) => String(u).includes('/channel'))
     expect(JSON.parse(call[1].body)).toEqual({ url: `https://m.youtube.com/channel/${UC}` })
-    expect(screen.getByLabelText('Remove channel')).toBeTruthy()
+    expect(screen.getByLabelText('Remove this channel')).toBeTruthy()
 
     const stored = JSON.parse(localStorage.getItem('tinytube:settings:v1'))
     expect(stored.children[0].customChannels).toEqual([{ channel_id: UC, min_age: 1, max_age: 15 }])
@@ -143,14 +142,12 @@ describe('the Browser tab', () => {
 
   it('confirms before removing', async () => {
     openBrowser()
-    fireEvent.change(screen.getByLabelText('YouTube address'), {
-      target: { value: `https://m.youtube.com/channel/${UC}` },
-    })
-    fireEvent.click(screen.getByText('Go'))
+    standOn(`https://m.youtube.com/channel/${UC}`)
+    await waitFor(() => expect(screen.getByLabelText('Approve this channel').disabled).toBe(false))
     fireEvent.click(screen.getByLabelText('Approve this channel'))
-    await screen.findByLabelText('Remove channel')
+    await screen.findByLabelText('Remove this channel')
 
-    fireEvent.click(screen.getByLabelText('Remove channel'))
+    fireEvent.click(screen.getByLabelText('Remove this channel'))
     expect(screen.getByText(/Its videos will stop appearing/)).toBeTruthy()
     fireEvent.click(screen.getByText('Remove'))
     await waitFor(() => {

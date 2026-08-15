@@ -53,7 +53,6 @@ import {
   isChannelPage,
   channelIdFromUrl,
   handleFromUrl,
-  urlHost,
   resolveChannelPage,
   cacheResolvedChannel,
 } from './youtubeApi.js'
@@ -78,12 +77,31 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
   const lock = settingsLock(store.children, sync?.session)
 
   const browsing = tab === 'browser'
+  /* The Browser tab is ParentActivity, not a settings page: a 44dp bar over
+     YouTube, the same order as Android (Kids mode, +, approved list, settings).
+     The other tabs keep the form header and the bottom bar, which is how you
+     get back to Browser from them. */
+  if (browsing) {
+    return (
+      <div className="settings settings-as-browser">
+        <BrowserTab
+          store={store}
+          customById={customById}
+          lock={lock}
+          onKidsMode={onDone}
+          onApprovedList={() => setTab('channels')}
+          onSettings={() => setTab('settings')}
+        />
+      </div>
+    )
+  }
+
   return (
-    <div className={browsing ? 'settings settings-as-browser' : 'settings container-xl py-4'}>
+    <div className="settings container-xl py-4">
       {/* explicit back button: iOS standalone PWAs have no browser chrome or
           hardware back, so without it a no-change visit would strand you here.
           flex: 1 sides keep the title truly centered */}
-      <div className={`d-flex align-items-center gap-3 ${browsing ? 'px-3 pt-2 pb-2' : 'mb-4'}`}>
+      <div className="d-flex align-items-center gap-3 mb-4">
         <div style={{ flex: 1 }}>
           <button type="button" className="btn btn-outline-secondary" aria-label="Back to gallery" onClick={onDone}>
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
@@ -135,7 +153,6 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
           <ChannelList customById={customById} store={store} />
         </>
       )}
-      {tab === 'browser' && <BrowserTab store={store} customById={customById} />}
       {tab === 'stats' && <StatsTab watchStore={watchStore} settings={settings} />}
       </fieldset>
 
@@ -1422,51 +1439,40 @@ function approvedOnPage(url, settings, handles) {
   return null
 }
 
-/** Parent-mode YouTube, the web copy of ParentActivity: an address bar, the
- *  same +/- that approves or removes the channel on the page, and m.youtube.com
- *  underneath.
+/** Parent-mode YouTube, the web copy of ParentActivity: the same 44dp bar
+ *  (Kids mode, +, approved list, settings) over m.youtube.com.
  *
- *  YouTube refuses to be framed (X-Frame-Options), so the iframe is best-effort
- *  and "Open YouTube" is the reliable half — browse there, paste the channel
- *  URL here, tap +. The Worker /channel route does the resolving, no API key. */
-function BrowserTab({ store, customById = {} }) {
+ *  The iframe starts at mobile YouTube; there is no address bar and no button
+ *  that leaves this app. YouTube sends X-Frame-Options: SAMEORIGIN, so some
+ *  browsers show an empty frame — that is YouTube's rule, not a missing
+ *  control. The + still follows the URL of the page, which the frame reports
+ *  via postMessage when it can (tests send the same message). */
+function BrowserTab({ store, customById = {}, lock, onKidsMode, onApprovedList, onSettings }) {
   const settings = store.settings
   const [url, setUrl] = useState(PARENT_START)
-  const [typed, setTyped] = useState(PARENT_START)
   const [handles, setHandles] = useState({})
   const [working, setWorking] = useState(false)
   const [message, setMessage] = useState(null)
   const [removing, setRemoving] = useState(null)
-  const [framed, setFramed] = useState(false)
   const urlRef = useRef(url)
   urlRef.current = url
 
   const onChannel = isChannelPage(url)
   const approved = approvedOnPage(url, settings, handles)
-  const live = onChannel && !working
+  const live = onChannel && !working && !lock
 
-  const go = raw => {
-    const text = String(raw ?? '').trim()
-    if (!text) return
-    const next = parentBrowseUrl(text)
-    if (!next) {
-      const host = urlHost(/^https?:\/\//i.test(text) ? text : `https://${text}`) ?? text.slice(0, 40)
-      setMessage(`Blocked: ${host} is outside parent mode.`)
-      return
+  useEffect(() => {
+    const onMsg = e => {
+      const raw = e?.data?.tinytubeUrl
+      if (typeof raw !== 'string') return
+      const next = parentBrowseUrl(raw)
+      if (!next) return
+      setUrl(next)
+      setMessage(null)
     }
-    setMessage(null)
-    setUrl(next)
-    setTyped(next)
-  }
-
-  const onFrameLoad = e => {
-    try {
-      e.target.contentDocument
-      setFramed(false)
-    } catch {
-      setFramed(true)
-    }
-  }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
 
   const titleOf = id => customById[id]?.title ?? id
 
@@ -1509,82 +1515,49 @@ function BrowserTab({ store, customById = {} }) {
 
   return (
     <div className="browser-tab">
-      <div className="browser-bar d-flex align-items-center gap-2 px-3">
-        <span className="browser-status text-secondary small text-truncate me-auto">
-          {message}
-        </span>
+      <div className="parent-bar">
+        <button type="button" className="parent-kids" onClick={onKidsMode}>
+          ← Kids mode
+        </button>
+        <span className="parent-bar-gap" />
         <button
           type="button"
-          className="btn btn-link p-1"
-          aria-label={approved ? 'Remove channel' : 'Approve this channel'}
+          className="parent-icon"
+          aria-label={approved ? 'Remove this channel' : 'Approve this channel'}
           disabled={!live}
-          style={{ opacity: live ? 1 : 0.35, color: approved ? '#e74c3c' : '#2ecc71' }}
+          style={{ opacity: live ? 1 : 0.35, color: '#7cc4ff' }}
           onClick={() => {
             const current = approvedOnPage(urlRef.current, settings, handles)
             if (current) setRemoving(current)
             else addCurrent()
           }}
         >
-          <i className={`fa-sharp-duotone fa-regular ${approved ? 'fa-circle-minus' : 'fa-circle-plus'} fs-3`} />
+          <i className={`fa-sharp-duotone fa-regular ${approved ? 'fa-circle-minus' : 'fa-circle-plus'} fs-4`} />
+        </button>
+        <button type="button" className="parent-icon" aria-label="Approved channels" onClick={onApprovedList}>
+          <i className="fa-sharp-duotone fa-regular fa-list fs-5" />
+        </button>
+        <button type="button" className="parent-icon" aria-label="Settings" onClick={onSettings}>
+          <i className="fa-sharp-duotone fa-regular fa-gear fs-5" />
         </button>
       </div>
-
-      <form
-        className="browser-address d-flex align-items-center gap-2 px-3 py-2"
-        onSubmit={e => {
-          e.preventDefault()
-          go(typed)
-        }}
-      >
-        <input
-          type="text"
-          inputMode="url"
-          autoCapitalize="none"
-          autoCorrect="off"
-          className="form-control form-control-sm"
-          aria-label="YouTube address"
-          value={typed}
-          onChange={e => setTyped(e.target.value)}
-          placeholder="https://m.youtube.com/"
-        />
-        <button type="submit" className="btn btn-outline-secondary btn-sm">
-          Go
-        </button>
-        <button
-          type="button"
-          className="btn btn-outline-secondary btn-sm"
-          aria-label="Paste URL"
-          onClick={async () => {
-            try {
-              const text = await navigator.clipboard.readText()
-              if (text) go(text)
-            } catch {
-              /* permission denied: the address field is right there */
-            }
-          }}
-        >
-          <i className="fa-sharp-duotone fa-regular fa-clipboard" />
-        </button>
-      </form>
-
-      <div className="browser-frame">
+      {message && <div className="parent-message">{message}</div>}
+      {lock && <LockNotice lock={lock} />}
+      <div className="browser-frame" style={lock ? { pointerEvents: 'none' } : undefined}>
         <iframe
           title="YouTube"
-          src={url}
+          src={PARENT_START}
           referrerPolicy="no-referrer-when-downgrade"
-          onLoad={onFrameLoad}
+          onLoad={e => {
+            try {
+              const href = e.target.contentWindow?.location?.href
+              const next = href ? parentBrowseUrl(href) : null
+              if (next) setUrl(next)
+            } catch {
+              /* cross-origin: the frame does not tell us where it went */
+            }
+          }}
         />
-        {!framed && (
-          <div className="browser-fallback d-flex flex-column align-items-center justify-content-center text-center px-4">
-            <p className="text-secondary mb-3">
-              Browse YouTube, copy a channel’s URL, paste it above, then tap +.
-            </p>
-            <a className="btn btn-danger" href={url} target="tinytube-yt" rel="noreferrer">
-              <i className="fa-brands fa-youtube me-2" />
-              Open YouTube
-            </a>
-          </div>
-        )}
       </div>
 
       {removing && (
