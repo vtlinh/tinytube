@@ -23,7 +23,7 @@ const settings = {
   childName: 'Ann',
   // the stored shape: the parent's decision, no channel metadata
   customChannels: [{ channel_id: UC, min_age: 3, max_age: 6 }],
-  overrides: { [UC2]: { min_age: 4, hidden: true } },
+  overrides: { [UC2]: { min_age: 4 } },
   groups: [{ id: 'g1', name: 'Cartoons' }],
   groupOf: { [UC]: 'g1', [UC2]: 'g1' },
 }
@@ -117,7 +117,7 @@ describe('re-validating what comes back in', () => {
     expect(customChannels[2]).toMatchObject({ min_age: AGE_MIN, max_age: AGE_MAX })
   })
 
-  it('keeps only the override keys this app knows, and only when true', () => {
+  it('keeps only age edits on overrides; hidden/disabled are catalog leftovers', () => {
     const { overrides } = parseChannelImport(
       file({
         overrides: {
@@ -128,7 +128,7 @@ describe('re-validating what comes back in', () => {
         },
       }),
     )
-    expect(overrides[UC]).toEqual({ min_age: 5, hidden: true }) // evil and the non-true disabled gone
+    expect(overrides[UC]).toEqual({ min_age: 5 }) // hidden, disabled, evil gone
     expect(overrides[UC2]).toEqual({ min_age: 3, max_age: 9 }) // swapped
     expect(overrides['not-an-id']).toBeUndefined()
     expect(overrides[UC3]).toBeUndefined() // nothing worth keeping
@@ -174,7 +174,7 @@ describe('applying a file to a child that already has channels', () => {
   }
 
   it('reports exactly what the two lists disagree about', () => {
-    expect(importConflicts(current, incoming).sort()).toEqual([UC, UC3].sort())
+    expect(importConflicts(current, incoming)).toEqual([UC])
     expect(importConflicts(current, { customChannels: [], overrides: {} })).toEqual([])
   })
 

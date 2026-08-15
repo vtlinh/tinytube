@@ -152,9 +152,9 @@ ios/TinyTubeCore/                the shared logic in Swift, mirroring the pure
 .github/workflows/pages.yml      build web/ and publish it to GitHub Pages —
                                  dispatched by auto-merge for merges touching
                                  web/** (GITHUB_TOKEN merges fire no push
-                                 events), plus hand-pushes to main, weekly (to
-                                 refresh videos.json) and on dispatch; never on
-                                 pull requests, so it cannot hold auto-merge
+                                 events), plus hand-pushes to main and on
+                                 dispatch; never on pull requests, so it
+                                 cannot hold auto-merge
 android/                         the app
   signing.p12                    NOT in the repo — a secret, and gitignored
                                  here; CI writes it out. See README for why

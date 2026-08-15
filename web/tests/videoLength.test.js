@@ -64,23 +64,23 @@ describe('clampLengthRange', () => {
 })
 
 describe('filtering the grid by length', () => {
-  const db = {
-    channels: [
-      {
-        channel_id: 'UCa',
-        channel_title: 'Chan',
-        min_age: 1,
-        max_age: 15,
-        videos: [
-          { id: 'short', duration: 5 * 60 },
-          { id: 'mid', duration: 30 * 60 },
-          { id: 'long', duration: 180 * 60 },
-          { id: 'unknown' }, // no duration at all
-        ],
-      },
-    ],
+  const records = {
+    UCa: {
+      title: 'Chan',
+      videos: [
+        { id: 'short', duration: 5 * 60 },
+        { id: 'mid', duration: 30 * 60 },
+        { id: 'long', duration: 180 * 60 },
+        { id: 'unknown' }, // no duration at all
+      ],
+    },
   }
-  const ids = settings => mergeChannels(db, {}, { ...DEFAULTS, ...settings })[0].videos.map(v => v.id)
+  const ids = extra =>
+    mergeChannels(records, {
+      ...DEFAULTS,
+      customChannels: [{ channel_id: 'UCa', min_age: 1, max_age: 15 }],
+      ...extra,
+    })[0].videos.map(v => v.id)
 
   it('shows everything when both ends say any', () => {
     expect(ids({})).toEqual(['short', 'mid', 'long', 'unknown'])

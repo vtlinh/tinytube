@@ -23,18 +23,26 @@ vi.mock('react-youtube', () => ({
   },
 }))
 
-const db = {
-  schema_version: 2,
-  generated_at: 'x',
-  channels: [
-    {
-      channel_id: 'UCa',
-      channel_title: 'Chan',
-      min_age: 1,
-      max_age: 15,
-      videos: [{ id: 'v1', title: 'Vid', duration: 10, thumbnail: 't.jpg' }],
-    },
-  ],
+const UC = 'UC' + 'a'.repeat(22)
+const UC_OTHER = 'UC' + 'b'.repeat(22)
+const V1 = 'v1aaaaaaaaa'
+const V2 = 'v2aaaaaaaaa'
+const V3 = 'v3aaaaaaaaa'
+const V9 = 'v9aaaaaaaaa'
+const APPROVED = [{ channel_id: UC, min_age: 1, max_age: 15 }]
+const VIDEOS_BODY = {
+  channels: { [UC]: { title: 'Chan', videos: [{ id: V1, title: 'Vid', duration: 10 }] } },
+}
+
+function mockFetch(videosBody = VIDEOS_BODY, syncBody = { settings: null, watched: [], usage: { days: {}, hours: {} } }) {
+  return vi.fn(async url => {
+    if (String(url).includes('/videos')) return { ok: true, json: async () => videosBody }
+    return { ok: true, status: 200, json: async () => syncBody }
+  })
+}
+
+function saveSettings(extra = {}) {
+  localStorage.setItem('tinytube:settings:v1', JSON.stringify({ customChannels: APPROVED, ...extra }))
 }
 
 // Node 22+'s broken experimental localStorage shadows jsdom's — use a real fake
@@ -50,7 +58,8 @@ function fakeStorage() {
 
 beforeEach(() => {
   vi.stubGlobal('localStorage', fakeStorage())
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => db })))
+  saveSettings()
+  vi.stubGlobal('fetch', mockFetch())
   verify.mockClear()
 })
 
@@ -67,7 +76,7 @@ describe('first-run enrollment', () => {
 
   it('skips the enroll screen when already enrolled', async () => {
     isBiometricAvailable.mockResolvedValueOnce(true)
-    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ passkeyId: 'abc' }))
+    saveSettings({ passkeyId: 'abc' })
     render(<App />)
     expect(await screen.findByLabelText('Parents')).toBeTruthy()
     expect(screen.queryByText('Enter')).toBeNull()
@@ -83,7 +92,7 @@ describe('parent gate', () => {
   })
 
   it('goes straight to the biometric and into settings when enrolled', async () => {
-    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ passkeyId: 'abc' }))
+    saveSettings({ passkeyId: 'abc' })
     render(<App />)
     fireEvent.click(await screen.findByLabelText('Parents'))
     expect(await screen.findByText(/Parents Mode/)).toBeTruthy()
@@ -92,7 +101,7 @@ describe('parent gate', () => {
   })
 
   it('stays on the gallery when the biometric is cancelled', async () => {
-    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ passkeyId: 'abc' }))
+    saveSettings({ passkeyId: 'abc' })
     verify.mockResolvedValueOnce(false)
     render(<App />)
     fireEvent.click(await screen.findByLabelText('Parents'))
@@ -107,7 +116,7 @@ describe('watch quota gate', () => {
   const today = new Date()
   const dayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
   const spendQuota = (mins = 15) => {
-    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ quotaMins: mins }))
+    saveSettings({ quotaMins: mins })
     localStorage.setItem(
       'tinytube:v1',
       JSON.stringify({ watched: {}, usage: { window: { start: Date.now(), secs: 0 }, days: { [dayKey]: mins * 60 }, hours: {} } }),
@@ -129,7 +138,7 @@ describe('watch quota gate', () => {
   })
 
   it('always blocks when the quota is 0 (no off state)', async () => {
-    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ quotaMins: 0 }))
+    saveSettings({ quotaMins: 0 })
     render(<App />)
     fireEvent.click(await screen.findByText('Vid'))
     expect(await screen.findByText(/Watch Quota Exceeded/)).toBeTruthy()
@@ -147,7 +156,7 @@ describe('watch quota gate', () => {
 
   it('sends a parent through the biometric into settings', async () => {
     spendQuota()
-    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ quotaMins: 15, passkeyId: 'abc' }))
+    saveSettings({ quotaMins: 15, passkeyId: 'abc' })
     render(<App />)
     fireEvent.click(await screen.findByText('Vid'))
     fireEvent.click(await screen.findByText(/Parents/))
@@ -183,7 +192,7 @@ describe('pulling from the DB on playback', () => {
 
   // signed in, with 15 of 15 daily minutes already spent
   const spentAndSignedIn = () => {
-    localStorage.setItem('tinytube:settings:v1', JSON.stringify({ quotaMins: 15 }))
+    saveSettings({ quotaMins: 15 })
     localStorage.setItem(
       'tinytube:v1',
       JSON.stringify({ watched: {}, usage: { window: { start: Date.now(), secs: 0 }, days: { [dayKey]: 15 * 60 }, hours: {} } }),
@@ -196,11 +205,14 @@ describe('pulling from the DB on playback', () => {
 
   const syncStub = (settings = null) => {
     const calls = []
-    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
-      if (String(url).includes('videos.json')) return { ok: true, json: async () => db }
-      calls.push(String(url))
-      return { ok: true, status: 200, json: async () => ({ settings, watched: [], usage: { days: {}, hours: {} } }) }
-    }))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async url => {
+        if (String(url).includes('/videos')) return { ok: true, json: async () => VIDEOS_BODY }
+        calls.push(String(url))
+        return { ok: true, status: 200, json: async () => ({ settings, watched: [], usage: { days: {}, hours: {} } }) }
+      }),
+    )
     return calls
   }
 
@@ -223,8 +235,13 @@ describe('pulling from the DB on playback', () => {
     syncStub({
       updatedAt: Date.now() + 10_000, // newer than anything local
       data: {
-        children: [{ id: 'default', name: 'Child 1', quota: { per6h: null, perDay: 15, perWeek: null, perMonth: null },
-          day: { until: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).getTime(), bonusMins: 30 } }],
+        children: [{
+          id: 'default',
+          name: 'Child 1',
+          customChannels: APPROVED,
+          quota: { per6h: null, perDay: 15, perWeek: null, perMonth: null },
+          day: { until: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).getTime(), bonusMins: 30 },
+        }],
         activeChildId: 'default',
       },
     })
@@ -249,26 +266,21 @@ describe('pulling from the DB on playback', () => {
  * the whole point of carrying that list into the player. What "the next one"
  * means is the parent's Play Next setting. */
 describe('what plays next', () => {
-  const three = {
-    schema_version: 2,
-    generated_at: 'x',
-    channels: [
-      {
-        channel_id: 'UCa',
-        channel_title: 'Chan',
-        min_age: 1,
-        max_age: 15,
+  const threeBody = {
+    channels: {
+      [UC]: {
+        title: 'Chan',
         videos: [
-          { id: 'v1', title: 'One', duration: 10, thumbnail: 't.jpg' },
-          { id: 'v2', title: 'Two', duration: 10, thumbnail: 't.jpg' },
-          { id: 'v3', title: 'Three', duration: 10, thumbnail: 't.jpg' },
+          { id: V1, title: 'One', duration: 10 },
+          { id: V2, title: 'Two', duration: 10 },
+          { id: V3, title: 'Three', duration: 10 },
         ],
       },
-    ],
+    },
   }
-  const withVideos = (settings = {}) => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => three })))
-    localStorage.setItem('tinytube:settings:v1', JSON.stringify(settings))
+  const withVideos = (extra = {}) => {
+    vi.stubGlobal('fetch', mockFetch(threeBody))
+    saveSettings(extra)
   }
   const end = () => act(() => yt.onStateChange({ data: 0 })) // ENDED
 
@@ -276,18 +288,18 @@ describe('what plays next', () => {
     withVideos()
     render(<App />)
     fireEvent.click(await screen.findByText('One'))
-    expect(yt.videoId).toBe('v1')
+    expect(yt.videoId).toBe(V1)
     end()
-    expect(yt.videoId).toBe('v2')
+    expect(yt.videoId).toBe(V2)
     end()
-    expect(yt.videoId).toBe('v3')
+    expect(yt.videoId).toBe(V3)
   })
 
   it('stops at the end of the list rather than wrapping', async () => {
     withVideos()
     render(<App />)
     fireEvent.click(await screen.findByText('Three'))
-    expect(yt.videoId).toBe('v3')
+    expect(yt.videoId).toBe(V3)
     end()
     expect(await screen.findByLabelText('Parents')).toBeTruthy() // back on the grid
   })
@@ -300,7 +312,7 @@ describe('what plays next', () => {
       const was = yt.videoId
       end()
       expect(yt.videoId).not.toBe(was)
-      expect(['v1', 'v2', 'v3']).toContain(yt.videoId)
+      expect([V1, V2, V3]).toContain(yt.videoId)
     }
   })
 
@@ -308,54 +320,53 @@ describe('what plays next', () => {
      being handed repeats. It skips what the grid would badge as watched. */
   it('picks an unwatched video in random mode, not one already seen', async () => {
     withVideos({ playback: 'RANDOM' })
-    // v1 and v3 finished; only v2 is left unseen
+    // V1 and V3 finished; only V2 is left unseen
     localStorage.setItem(
       'tinytube:v1',
       JSON.stringify({
         watched: {
-          v1: { pos: 10, dur: 10, completed: true, updatedAt: 1 },
-          v3: { pos: 10, dur: 10, completed: true, updatedAt: 1 },
+          [V1]: { pos: 10, dur: 10, completed: true, updatedAt: 1 },
+          [V3]: { pos: 10, dur: 10, completed: true, updatedAt: 1 },
         },
         usage: { window: { start: null, secs: 0 }, days: {}, hours: {} },
       }),
     )
     render(<App />)
     fireEvent.click(await screen.findByText('One'))
-    expect(yt.videoId).toBe('v1')
+    expect(yt.videoId).toBe(V1)
 
-    // v2 is the only one not already seen, so random has exactly one answer
+    // V2 is the only one not already seen, so random has exactly one answer
     end()
-    expect(yt.videoId).toBe('v2')
+    expect(yt.videoId).toBe(V2)
 
     /* And now everything has been seen. A preference is not a restriction:
        it falls back to the rest rather than ending playback. */
     end()
-    expect(['v1', 'v3']).toContain(yt.videoId)
+    expect([V1, V3]).toContain(yt.videoId)
   })
 
   it('stays inside the channel the child stepped into', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        ...three,
-        channels: [
-          three.channels[0],
-          {
-            channel_id: 'UCb',
-            channel_title: 'Other',
-            min_age: 1,
-            max_age: 15,
-            videos: [{ id: 'v9', title: 'Elsewhere', duration: 10, thumbnail: 't.jpg' }],
-          },
-        ],
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({
+        channels: {
+          [UC]: threeBody.channels[UC],
+          [UC_OTHER]: { title: 'Other', videos: [{ id: V9, title: 'Elsewhere', duration: 10 }] },
+        },
       }),
-    })))
+    )
+    saveSettings({
+      customChannels: [
+        { channel_id: UC, min_age: 1, max_age: 15 },
+        { channel_id: UC_OTHER, min_age: 1, max_age: 15 },
+      ],
+    })
     render(<App />)
     fireEvent.click(await screen.findByText('Channels'))
     fireEvent.click(await screen.findByText('Chan'))
     fireEvent.click(await screen.findByText('One'))
     end()
     end()
-    expect(yt.videoId).toBe('v3') // never v9, and there is no rule in the player saying so
+    expect(yt.videoId).toBe(V3) // never V9, and there is no rule in the player saying so
   })
 })

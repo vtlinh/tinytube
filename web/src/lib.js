@@ -165,9 +165,10 @@ export function grabEnd(v, lo, hi) {
   return v - lo <= hi - v ? 'lo' : 'hi'
 }
 
-/** A stored decision + the Worker's record = a channel row shaped like a
- * curated one. Falling back to the id keeps a channel whose record has not
- * arrived on the screen that manages it, rather than vanishing from it. */
+/** A stored decision + the Worker's record = a channel row the gallery and
+ * the parent's list can both render. Falling back to the id keeps a channel
+ * whose record has not arrived on the screen that manages it, rather than
+ * vanishing from it. */
 export function hydrateChannel(ch, record = {}) {
   const { videos, title, ...meta } = record ?? {}
   return {
@@ -229,39 +230,22 @@ export function clampLengthRange([lo, hi], end, v) {
 }
 
 /**
- * Curated channels from videos.json with the parent's per-channel edits
- * applied — overrides[channel_id] may adjust min_age/max_age or set hidden.
+ * The gallery's channel list: parent-approved channels that overlap the age
+ * range, with names, avatars and videos from the Worker's shared cache.
+ * Falling back to the id means a channel whose record has never arrived is
+ * still listed and still removable.
  */
-export function curatedChannels(db, overrides = {}) {
-  return (db?.channels ?? []).map(ch => ({ ...ch, ...overrides[ch.channel_id] }))
-}
-
-/**
- * The gallery's channel list: curated channels (edits applied) that aren't
- * hidden or toggled off and overlap the age range, plus parent-added
- * channels — shaped exactly like curated ones ({channel_title, videos}) so
- * gallerySort works unchanged. Curated wins if a parent adds an
- * already-curated channel.
- */
-export function mergeChannels(db, customVideosById, settings) {
-  const { customChannels, overrides, minVideoMins = 0, maxVideoMins = null } = settings
+export function mergeChannels(customVideosById, settings) {
+  const { customChannels, minVideoMins = 0, maxVideoMins = null } = settings
   const ageRange = effectiveAgeRange(settings)
-  const curated = curatedChannels(db, overrides).filter(
-    ch => !ch.hidden && overlaps(ageRange, ch.min_age, ch.max_age),
-  )
-  const curatedIds = new Set((db?.channels ?? []).map(ch => ch.channel_id))
-  /* The parent's row carries ids and ages; the NAME and AVATAR come from the
-     Worker's shared record. Falling back to the id means a channel whose
-     record has never arrived is still listed and still removable, rather than
-     disappearing from the screen that manages it. */
   const custom = customChannels
-    .filter(ch => !curatedIds.has(ch.channel_id) && overlaps(ageRange, ch.min_age, ch.max_age))
+    .filter(ch => overlaps(ageRange, ch.min_age, ch.max_age))
     .map(ch => hydrateChannel(ch, customVideosById[ch.channel_id]))
   /* Unknown durations count as too short: don't let un-probed videos slip past
      the floor. They pass the ceiling for the same reason — a video we could
      not measure is treated as a very short one, consistently at both ends. */
   const ceiling = maxVideoMins == null || !Number.isFinite(maxVideoMins) ? Infinity : maxVideoMins * 60
-  return [...curated, ...custom].map(ch => ({
+  return custom.map(ch => ({
     ...ch,
     videos: (ch.videos ?? []).filter(v => {
       const secs = v.duration ?? 0
@@ -495,7 +479,6 @@ export function parseChannelImport(text) {
     if (kept.min_age != null && kept.max_age != null && kept.min_age > kept.max_age) {
       ;[kept.min_age, kept.max_age] = [kept.max_age, kept.min_age]
     }
-    if (patch.hidden === true) kept.hidden = true
     if (Object.keys(kept).length) overrides[id] = kept
   }
 
@@ -517,14 +500,11 @@ export function parseChannelImport(text) {
   return { customChannels, overrides, ...tidyGroups({ groups, groupOf }) }
 }
 
-/** The ids a file would land on top of: channels the child already has, and
- * curated channels whose age the parent has already edited. Empty means the
- * import cannot take anything away by merging. */
+/** The ids a file would land on top of: channels the child already has.
+ * Empty means the import cannot take anything away by merging. */
 export function importConflicts(settings, imported) {
   const mine = new Set(settings.customChannels.map(c => c.channel_id))
-  const clashes = imported.customChannels.filter(c => mine.has(c.channel_id)).map(c => c.channel_id)
-  const overrideClashes = Object.keys(imported.overrides ?? {}).filter(id => settings.overrides[id])
-  return [...new Set([...clashes, ...overrideClashes])]
+  return imported.customChannels.filter(c => mine.has(c.channel_id)).map(c => c.channel_id)
 }
 
 /**
@@ -680,11 +660,11 @@ export const CHILD_DEFAULTS = {
   hideWatched: false,
   playback: PLAYBACK_IN_ORDER, // what plays next: 'IN_ORDER' | 'RANDOM'
   /* parent-added channels, as the PARENT'S DECISION only:
-     [{channel_id, min_age, max_age, disabled?}]. The name, avatar and videos
-     are facts about the channel, so they live in the Worker's shared cache
-     and are asked for — never stored here and never uploaded. */
+     [{channel_id, min_age, max_age}]. The name, avatar and videos are facts
+     about the channel, so they live in the Worker's shared cache and are
+     asked for — never stored here and never uploaded. */
   customChannels: [],
-  overrides: {}, // per curated channel_id: {min_age?, max_age?, hidden?, disabled?} edited in the table
+  overrides: {}, // leftover from when a built-in catalog had per-row edits; unused
   groups: [], // channel groups [{id, name}] — see the channelGroups section
   groupOf: {}, // channel_id -> group id membership
 }
@@ -746,12 +726,14 @@ export function decisionOnly(ch) {
 export function normalizeSettings(parsed = {}) {
   // fold pre-refactor fields into the unified overrides map
   const overrides = { ...parsed.ageOverrides, ...parsed.overrides }
-  for (const id of parsed.hiddenChannels ?? []) overrides[id] = { ...overrides[id], hidden: true }
   /* The enable checkbox is gone and every approved channel is on. A stored
-     `disabled` would otherwise be a state with no control to leave it. */
+     `disabled` would otherwise be a state with no control to leave it.
+     `hidden` was how a built-in channel was "deleted"; those channels are
+     gone, so a leftover flag is just noise. `hiddenChannels` was the same
+     flag as a list, and is ignored. */
   for (const [id, patch] of Object.entries(overrides)) {
-    if (patch?.disabled !== undefined) {
-      const { disabled, ...rest } = patch
+    if (patch?.disabled !== undefined || patch?.hidden !== undefined) {
+      const { disabled, hidden, ...rest } = patch
       if (Object.keys(rest).length) overrides[id] = rest
       else delete overrides[id]
     }
@@ -883,16 +865,6 @@ export function storeApi(settings, update, updateChild = update) {
         customChannels: settings.customChannels.filter(c => c.channel_id !== id),
         // its group membership goes with it, and the tidy may dissolve the group
         ...tidyGroups({ groups: settings.groups, groupOf: withoutIds(settings.groupOf, [id]) }),
-      }),
-    setOverride: (id, patch) =>
-      updateChild({ overrides: { ...settings.overrides, [id]: { ...settings.overrides[id], ...patch } } }),
-    restoreHidden: () =>
-      updateChild({
-        overrides: Object.fromEntries(
-          Object.entries(settings.overrides)
-            .map(([id, { hidden, ...rest }]) => [id, rest])
-            .filter(([, rest]) => Object.keys(rest).length > 0),
-        ),
       }),
     /* Put the selected channels in a (possibly existing — `absorbing`) group,
        or dissolve their membership. Both run `tidy` after, like the Android
@@ -1409,24 +1381,12 @@ export function gallerySort(channels, watched, { hideWatched = false } = {}) {
 // useVideos
 
 /**
- * Gallery data: curated channels from videos.json filtered by the parent's
- * settings (age range, hidden), merged with parent-added channels whose
- * videos are fetched via the Data API (cache-first).
+ * Gallery data: parent-approved channels, with titles, avatars and videos
+ * from the Worker's shared cache. There is no built-in catalog — an empty
+ * approved list is an empty grid.
  */
 export function useVideos(settings) {
-  const [db, setDb] = useState(null)
-  const [error, setError] = useState(null)
   const [customVideosById, setCustomVideosById] = useState({})
-
-  useEffect(() => {
-    fetch(import.meta.env.BASE_URL + 'videos.json')
-      .then(r => {
-        if (!r.ok) throw new Error(`videos.json: HTTP ${r.status}`)
-        return r.json()
-      })
-      .then(setDb)
-      .catch(setError)
-  }, [])
 
   /* ONE request for every approved channel, and what comes back is the title
      and avatar as well as the videos: this app stores the parent's decision
@@ -1450,12 +1410,12 @@ export function useVideos(settings) {
   }, [apiKey, customIds])
 
   const channels = useMemo(
-    () => (db ? mergeChannels(db, customVideosById, settings) : null),
-    [db, customVideosById, settings],
+    () => mergeChannels(customVideosById, settings),
+    [customVideosById, settings],
   )
 
-  // customById is what the parent's channel table hydrates its rows from
-  return { db, channels, error, customById: customVideosById }
+  // customById is what the parent's channel list hydrates its rows from
+  return { channels, customById: customVideosById }
 }
 
 // ---------------------------------------------------------------------------

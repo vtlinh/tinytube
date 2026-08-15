@@ -357,7 +357,7 @@ jobs:
           # with that token fire no workflow events — GitHub's recursion guard,
           # and the same reason the app publishes are dispatched by hand rather
           # than trusted to their own push triggers. Without this line a merged
-          # web change sits undeployed until the weekly cron notices it. No
+          # web change sits undeployed until someone dispatches pages.yml. No
           # run id to offer: pages.yml has no reuse input, it just rebuilds.
           if [ "$PUB_PAGES" = "yes" ]; then
             echo "Dispatching the pages deploy on main"

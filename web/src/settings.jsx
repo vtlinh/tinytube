@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  curatedChannels,
   overlaps,
   fmtMins,
   usageStats,
@@ -49,6 +48,14 @@ import {
   seedChannelMeta,
   formatCount,
   validateApiKey,
+  PARENT_START,
+  parentBrowseUrl,
+  isChannelPage,
+  channelIdFromUrl,
+  handleFromUrl,
+  urlHost,
+  resolveChannelPage,
+  cacheResolvedChannel,
 } from './youtubeApi.js'
 import { TabButton } from './gallery.jsx'
 
@@ -56,26 +63,27 @@ const API_CONSOLE_URL = 'https://console.cloud.google.com/apis/library/youtube.g
 const looksLikeLink = s => /^@|^UC[0-9A-Za-z_-]{22}$|youtube\.com/.test(s.trim())
 const channelUrl = ch => ch.source_url ?? `https://www.youtube.com/channel/${ch.channel_id}`
 
-export default function Settings({ db, customById = {}, store, watchStore, sync, onDone }) {
+export default function Settings({ customById = {}, store, watchStore, sync, onDone }) {
   // every valid change persists the moment it is made — no draft, no Save
   // button; half-typed values are held locally by their rows (see BirthdayRow)
   // and only committed once they parse
   const settings = store.settings
-  // 'settings' | 'channels' | 'stats' — the bottom bar below switches
+  // 'settings' | 'channels' | 'browser' | 'stats' — the bottom bar below switches
   const [tab, setTab] = useState('settings')
-  const titles = { settings: 'Parents Mode', channels: 'Channels', stats: 'Stats' }
+  const titles = { settings: 'Parents Mode', channels: 'Channels', browser: 'Browser', stats: 'Stats' }
   /* Locked when a child is the one signed in, or when nobody is. Everything
      below is wrapped in a disabled fieldset; the header is NOT, because
      signing in is the only way out of either state and the control that does
      it lives up there. */
   const lock = settingsLock(store.children, sync?.session)
 
+  const browsing = tab === 'browser'
   return (
-    <div className="settings container-xl py-4">
+    <div className={browsing ? 'settings settings-as-browser' : 'settings container-xl py-4'}>
       {/* explicit back button: iOS standalone PWAs have no browser chrome or
           hardware back, so without it a no-change visit would strand you here.
           flex: 1 sides keep the title truly centered */}
-      <div className="d-flex align-items-center gap-3 mb-4">
+      <div className={`d-flex align-items-center gap-3 ${browsing ? 'px-3 pt-2 pb-2' : 'mb-4'}`}>
         <div style={{ flex: 1 }}>
           <button type="button" className="btn btn-outline-secondary" aria-label="Back to gallery" onClick={onDone}>
             <i className="fa-sharp-duotone fa-regular fa-arrow-left" />
@@ -123,16 +131,18 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
       )}
       {tab === 'channels' && (
         <>
-          <SearchRow apiKey={settings.apiKey} store={store} db={db} />
-          <ChannelList db={db} customById={customById} store={store} />
+          <SearchRow apiKey={settings.apiKey} store={store} />
+          <ChannelList customById={customById} store={store} />
         </>
       )}
+      {tab === 'browser' && <BrowserTab store={store} customById={customById} />}
       {tab === 'stats' && <StatsTab watchStore={watchStore} settings={settings} />}
       </fieldset>
 
       <nav className="bottom-tabs fixed-bottom d-flex border-top">
         <TabButton label="Settings" icon="fa-gear" on={tab === 'settings'} onClick={() => setTab('settings')} />
         <TabButton label="Channels" icon="fa-list" on={tab === 'channels'} onClick={() => setTab('channels')} />
+        <TabButton label="Browser" icon="fa-browser" on={tab === 'browser'} onClick={() => setTab('browser')} />
         <TabButton label="Stats" icon="fa-chart-simple" on={tab === 'stats'} onClick={() => setTab('stats')} />
       </nav>
     </div>
@@ -1387,7 +1397,7 @@ function ApiKeyRow({ apiKey, onChange }) {
       {confirming && (
         <ConfirmModal
           title="Delete API key?"
-          body="You won't be able to search for or add channels until you enter a new key."
+          body="You won't be able to search for channels until you enter a new key."
           onConfirm={() => {
             onChange('')
             setConfirming(false)
@@ -1399,7 +1409,199 @@ function ApiKeyRow({ apiKey, onChange }) {
   )
 }
 
-function SearchRow({ apiKey, store, db }) {
+/* The channel on this page, if it is one AND we already have it approved.
+   A /channel/UC… URL answers locally. A /@handle URL uses the handle recorded
+   when it was approved this session, so the button does not flicker off to
+   the Worker on every navigation. */
+function approvedOnPage(url, settings, handles) {
+  if (!isChannelPage(url)) return null
+  const handle = handleFromUrl(url)
+  const id = channelIdFromUrl(url) ?? (handle ? handles[handle.toLowerCase()] : null)
+  if (!id) return null
+  if (settings.customChannels.some(c => c.channel_id === id)) return { id }
+  return null
+}
+
+/** Parent-mode YouTube, the web copy of ParentActivity: an address bar, the
+ *  same +/- that approves or removes the channel on the page, and m.youtube.com
+ *  underneath.
+ *
+ *  YouTube refuses to be framed (X-Frame-Options), so the iframe is best-effort
+ *  and "Open YouTube" is the reliable half — browse there, paste the channel
+ *  URL here, tap +. The Worker /channel route does the resolving, no API key. */
+function BrowserTab({ store, customById = {} }) {
+  const settings = store.settings
+  const [url, setUrl] = useState(PARENT_START)
+  const [typed, setTyped] = useState(PARENT_START)
+  const [handles, setHandles] = useState({})
+  const [working, setWorking] = useState(false)
+  const [message, setMessage] = useState(null)
+  const [removing, setRemoving] = useState(null)
+  const [framed, setFramed] = useState(false)
+  const urlRef = useRef(url)
+  urlRef.current = url
+
+  const onChannel = isChannelPage(url)
+  const approved = approvedOnPage(url, settings, handles)
+  const live = onChannel && !working
+
+  const go = raw => {
+    const text = String(raw ?? '').trim()
+    if (!text) return
+    const next = parentBrowseUrl(text)
+    if (!next) {
+      const host = urlHost(/^https?:\/\//i.test(text) ? text : `https://${text}`) ?? text.slice(0, 40)
+      setMessage(`Blocked: ${host} is outside parent mode.`)
+      return
+    }
+    setMessage(null)
+    setUrl(next)
+    setTyped(next)
+  }
+
+  const onFrameLoad = e => {
+    try {
+      e.target.contentDocument
+      setFramed(false)
+    } catch {
+      setFramed(true)
+    }
+  }
+
+  const titleOf = id => customById[id]?.title ?? id
+
+  const addCurrent = async () => {
+    const here = urlRef.current
+    if (!isChannelPage(here)) return
+    setWorking(true)
+    setMessage('Working out which channel this is…')
+    const resolved = await resolveChannelPage(here)
+    setWorking(false)
+    /* Re-derive rather than just re-enabling: resolving hits the network, and
+       the parent may have navigated somewhere with no channel on it while it
+       ran. */
+    if (urlRef.current !== here) {
+      setMessage(null)
+      return
+    }
+    if (!resolved) {
+      setMessage("Couldn't identify a channel on this page.")
+      return
+    }
+    const handle = handleFromUrl(here)
+    if (handle) setHandles(prev => ({ ...prev, [handle.toLowerCase()]: resolved.channel_id }))
+    const already = store.settings.customChannels.some(c => c.channel_id === resolved.channel_id)
+    if (!already) {
+      cacheResolvedChannel(resolved)
+      store.addCustomChannel({ ...resolved, min_age: AGE_MIN, max_age: AGE_MAX })
+    } else {
+      cacheResolvedChannel(resolved)
+    }
+    setMessage(`Approved “${resolved.channel_title}”`)
+  }
+
+  const removeApproved = ch => {
+    store.removeCustomChannel(ch.id)
+    evictChannelCache(ch.id)
+    setRemoving(null)
+    setMessage(`Removed “${titleOf(ch.id)}”`)
+  }
+
+  return (
+    <div className="browser-tab">
+      <div className="browser-bar d-flex align-items-center gap-2 px-3">
+        <span className="browser-status text-secondary small text-truncate me-auto">
+          {message}
+        </span>
+        <button
+          type="button"
+          className="btn btn-link p-1"
+          aria-label={approved ? 'Remove channel' : 'Approve this channel'}
+          disabled={!live}
+          style={{ opacity: live ? 1 : 0.35, color: approved ? '#e74c3c' : '#2ecc71' }}
+          onClick={() => {
+            const current = approvedOnPage(urlRef.current, settings, handles)
+            if (current) setRemoving(current)
+            else addCurrent()
+          }}
+        >
+          <i className={`fa-sharp-duotone fa-regular ${approved ? 'fa-circle-minus' : 'fa-circle-plus'} fs-3`} />
+        </button>
+      </div>
+
+      <form
+        className="browser-address d-flex align-items-center gap-2 px-3 py-2"
+        onSubmit={e => {
+          e.preventDefault()
+          go(typed)
+        }}
+      >
+        <input
+          type="text"
+          inputMode="url"
+          autoCapitalize="none"
+          autoCorrect="off"
+          className="form-control form-control-sm"
+          aria-label="YouTube address"
+          value={typed}
+          onChange={e => setTyped(e.target.value)}
+          placeholder="https://m.youtube.com/"
+        />
+        <button type="submit" className="btn btn-outline-secondary btn-sm">
+          Go
+        </button>
+        <button
+          type="button"
+          className="btn btn-outline-secondary btn-sm"
+          aria-label="Paste URL"
+          onClick={async () => {
+            try {
+              const text = await navigator.clipboard.readText()
+              if (text) go(text)
+            } catch {
+              /* permission denied: the address field is right there */
+            }
+          }}
+        >
+          <i className="fa-sharp-duotone fa-regular fa-clipboard" />
+        </button>
+      </form>
+
+      <div className="browser-frame">
+        <iframe
+          title="YouTube"
+          src={url}
+          referrerPolicy="no-referrer-when-downgrade"
+          onLoad={onFrameLoad}
+        />
+        {!framed && (
+          <div className="browser-fallback d-flex flex-column align-items-center justify-content-center text-center px-4">
+            <p className="text-secondary mb-3">
+              Browse YouTube, copy a channel’s URL, paste it above, then tap +.
+            </p>
+            <a className="btn btn-danger" href={url} target="tinytube-yt" rel="noreferrer">
+              <i className="fa-brands fa-youtube me-2" />
+              Open YouTube
+            </a>
+          </div>
+        )}
+      </div>
+
+      {removing && (
+        <ConfirmModal
+          title={titleOf(removing.id)}
+          body={`Remove “${titleOf(removing.id)}”? Its videos will stop appearing.`}
+          confirmLabel="Remove"
+          confirmIcon="fa-circle-minus"
+          onConfirm={() => removeApproved(removing)}
+          onCancel={() => setRemoving(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function SearchRow({ apiKey, store }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [busy, setBusy] = useState(false)
@@ -1464,11 +1666,7 @@ function SearchRow({ apiKey, store, db }) {
       </div>
       {error && <div className="alert alert-warning mt-2 py-2">{error}</div>}
       {results.map(ch => {
-        const isCustom = store.settings.customChannels.some(c => c.channel_id === ch.channel_id)
-        const isCurated = (db?.channels ?? []).some(c => c.channel_id === ch.channel_id)
-        // a deleted (hidden) curated channel counts as not added: Add un-hides
-        // it, since adding it as custom would be a no-op (curated wins on merge)
-        const added = isCustom || (isCurated && !store.settings.overrides[ch.channel_id]?.hidden)
+        const added = store.settings.customChannels.some(c => c.channel_id === ch.channel_id)
         return (
           <div key={ch.channel_id} className="d-flex align-items-center gap-3 bg-body-tertiary rounded p-2 mt-2">
             <img src={ch.thumbnail} alt="" width="36" height="36" className="rounded-circle" />
@@ -1478,17 +1676,12 @@ function SearchRow({ apiKey, store, db }) {
               <StatsCell ch={ch} />
             </div>
             {added ? (
-              // same semantics as the table's delete: drop custom, hide curated
               <button
                 type="button"
                 className="btn btn-outline-danger btn-sm"
                 onClick={() => {
-                  if (isCustom) {
-                    store.removeCustomChannel(ch.channel_id)
-                    evictChannelCache(ch.channel_id)
-                  } else {
-                    store.setOverride(ch.channel_id, { hidden: true })
-                  }
+                  store.removeCustomChannel(ch.channel_id)
+                  evictChannelCache(ch.channel_id)
                 }}
               >
                 <i className="fa-sharp-duotone fa-regular fa-trash me-1" />
@@ -1499,14 +1692,11 @@ function SearchRow({ apiKey, store, db }) {
                 type="button"
                 className="btn btn-danger btn-sm"
                 onClick={() => {
-                  if (isCurated) store.setOverride(ch.channel_id, { hidden: false })
-                  else {
-                    // the search already showed the parent this channel's name
-                    // and avatar; seeding them means the row it becomes is not
-                    // a bare id until the Worker has been asked
-                    seedChannelMeta(ch)
-                    store.addCustomChannel({ ...ch, min_age: 1, max_age: 15 })
-                  }
+                  // the search already showed the parent this channel's name
+                  // and avatar; seeding them means the row it becomes is not
+                  // a bare id until the Worker has been asked
+                  seedChannelMeta(ch)
+                  store.addCustomChannel({ ...ch, min_age: 1, max_age: 15 })
                   setQuery('')
                 }}
               >
@@ -1558,12 +1748,7 @@ function StatsCell({ ch }) {
   )
 }
 
-// per-channel edits land on the custom channel object itself or in the
-// curated channel's override, depending on where the row came from
-const channelPatcher = (ch, store) =>
-  ch.custom
-    ? patch => store.updateCustomChannel(ch.channel_id, patch)
-    : patch => store.setOverride(ch.channel_id, patch)
+const channelPatcher = (ch, store) => patch => store.updateCustomChannel(ch.channel_id, patch)
 
 /** "1.2M subs · 340 videos · 89M views", or nothing at all. Under the name
  * rather than in a column of its own, and unlabelled: a row of numbers with
@@ -1683,23 +1868,17 @@ function AgeDialog({ ch, store, onClose }) {
  * What is left fits a phone without scrolling sideways, which a six-column
  * table with a dual slider in it never could.
  */
-function ChannelList({ db, customById = {}, store }) {
-  const { customChannels, overrides, groups, groupOf } = store.settings
+function ChannelList({ customById = {}, store }) {
+  const { customChannels, groups, groupOf } = store.settings
   const ageRange = effectiveAgeRange(store.settings)
   const [selected, setSelected] = useState(new Set())
   const [naming, setNaming] = useState(false)
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
-  const hiddenCount = Object.values(overrides).filter(o => o.hidden).length
 
   const all = useMemo(
-    () => [
-      // stored rows are the decision only; the name, avatar and stats come
-      // from the Worker's record for that id
-      ...customChannels.map(ch => ({ ...hydrateChannel(ch, customById[ch.channel_id]), custom: true })),
-      ...curatedChannels(db, overrides).filter(ch => !ch.hidden),
-    ],
-    [db, customChannels, overrides, customById],
+    () => customChannels.map(ch => hydrateChannel(ch, customById[ch.channel_id])),
+    [customChannels, customById],
   )
 
   // the same arrangement the child's Channels tab uses, so the two cannot
@@ -1730,12 +1909,8 @@ function ChannelList({ db, customById = {}, store }) {
     })
 
   const remove = ch => {
-    if (ch.custom) {
-      store.removeCustomChannel(ch.channel_id)
-      evictChannelCache(ch.channel_id)
-    } else {
-      store.setOverride(ch.channel_id, { hidden: true })
-    }
+    store.removeCustomChannel(ch.channel_id)
+    evictChannelCache(ch.channel_id)
     setDeleting(null)
   }
 
@@ -1810,12 +1985,6 @@ function ChannelList({ db, customById = {}, store }) {
         ),
       )}
 
-      {hiddenCount > 0 && (
-        <button type="button" className="btn btn-link btn-sm text-secondary" onClick={() => store.restoreHidden()}>
-          restore {hiddenCount} deleted built-in channel{hiddenCount > 1 ? 's' : ''}
-        </button>
-      )}
-
       {editing && (
         <AgeDialog
           ch={all.find(c => c.channel_id === editing.channel_id) ?? editing}
@@ -1826,11 +1995,7 @@ function ChannelList({ db, customById = {}, store }) {
       {deleting && (
         <ConfirmModal
           title={`Remove ${deleting.channel_title}?`}
-          body={
-            deleting.custom
-              ? 'This channel goes from this child’s list. You can add it again from the search above.'
-              : 'This built-in channel is hidden from this child. You can restore it at the bottom of this page.'
-          }
+          body="This channel goes from this child’s list. You can add it again from search or the Browser tab."
           onConfirm={() => remove(deleting)}
           onCancel={() => setDeleting(null)}
         />

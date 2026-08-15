@@ -20,7 +20,6 @@ function fakeStorage() {
   }
 }
 
-const db = { schema_version: 2, generated_at: 'x', channels: [] }
 const CLIENT = 'client-id'
 
 beforeEach(() => {
@@ -74,7 +73,7 @@ describe('settingsLock', () => {
 function Harness({ sync }) {
   const store = useSettings()
   const watchStore = useWatchStore(store.settings.childId)
-  return <Settings db={db} store={store} watchStore={watchStore} sync={sync} onDone={() => {}} />
+  return <Settings store={store} watchStore={watchStore} sync={sync} onDone={() => {}} />
 }
 
 describe('a locked Parents Mode', () => {

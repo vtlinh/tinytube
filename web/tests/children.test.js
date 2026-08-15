@@ -57,9 +57,15 @@ describe('normalizeSettings', () => {
     expect(s.children[0].apiKey).toBeUndefined()
   })
 
-  it('still folds the legacy hiddenChannels/ageOverrides fields into the child', () => {
-    const s = normalizeSettings({ hiddenChannels: ['UCx'], ageOverrides: { UCy: { min_age: 3 } } })
-    expect(s.children[0].overrides).toEqual({ UCx: { hidden: true }, UCy: { min_age: 3 } })
+  it('folds legacy ageOverrides and strips catalog leftover flags', () => {
+    const s = normalizeSettings({
+      hiddenChannels: ['UCx'],
+      ageOverrides: { UCy: { min_age: 3 } },
+      overrides: { UCz: { hidden: true, min_age: 4 } },
+    })
+    // hiddenChannels named built-in ids that no longer exist; a leftover
+    // `hidden` on an otherwise-empty override is dropped; an age edit stays
+    expect(s.children[0].overrides).toEqual({ UCy: { min_age: 3 }, UCz: { min_age: 4 } })
   })
 
   it('is idempotent and repairs a dangling activeChildId', () => {

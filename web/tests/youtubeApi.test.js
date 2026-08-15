@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   searchChannels,
   resolveChannel,
+  resolveChannelPage,
+  cacheResolvedChannel,
   parseDuration,
   fetchChannelVideos,
   getChannelsCached,
@@ -104,6 +106,73 @@ describe('resolveChannel', () => {
       /Paste a channel/,
     )
     expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('resolveChannelPage', () => {
+  const page = `https://m.youtube.com/channel/${UC}`
+
+  it('asks the Worker with the URL as-is and re-validates the reply', async () => {
+    const fetch = vi.fn(async (url, init) => {
+      expect(String(url)).toMatch(/\/channel$/)
+      expect(JSON.parse(init.body)).toEqual({ url: page })
+      return {
+        ok: true,
+        json: async () => ({
+          id: UC,
+          title: 'Cocomelon',
+          avatarUrl: 'https://yt3.ggpht.com/a.jpg',
+          videos: [{ id: 'dQw4w9WgXcQ', title: 'Hello' }],
+        }),
+      }
+    })
+    vi.stubGlobal('fetch', fetch)
+    const ch = await resolveChannelPage(page)
+    expect(ch).toEqual({
+      channel_id: UC,
+      channel_title: 'Cocomelon',
+      thumbnail: 'https://yt3.ggpht.com/a.jpg',
+      videos: [{ id: 'dQw4w9WgXcQ', title: 'Hello' }],
+    })
+  })
+
+  it('drops an avatar off a YouTube host, even though the Worker sent it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ id: UC, title: 'X', avatarUrl: 'https://evil.example/x.jpg', videos: [] }),
+    })))
+    const ch = await resolveChannelPage(page)
+    expect(ch.thumbnail).toBeNull()
+  })
+
+  it('falls back to the id in the URL when the Worker is unreachable', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
+    const ch = await resolveChannelPage(page)
+    expect(ch).toEqual({ channel_id: UC, channel_title: UC, thumbnail: null, videos: [] })
+    expect(await resolveChannelPage('https://m.youtube.com/@Someone')).toBeNull()
+  })
+
+  it('refuses a page that is not a channel we may browse', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    expect(await resolveChannelPage('https://example.com/@x')).toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('writes videos into the local cache so the grid is full immediately', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(5_000_000)
+    cacheResolvedChannel({
+      channel_id: UC,
+      channel_title: 'Cocomelon',
+      thumbnail: 'https://yt3.ggpht.com/a.jpg',
+      videos: [{ id: 'dQw4w9WgXcQ', title: 'Hello' }],
+    })
+    const cached = JSON.parse(localStorage.getItem('tinytube:videocache:v1'))[UC]
+    expect(cached.fetchedAt).toBe(5_000_000)
+    expect(cached.videos[0]).toMatchObject({ id: 'dQw4w9WgXcQ', title: 'Hello' })
+    cacheResolvedChannel({ channel_id: UC, channel_title: 'Cocomelon', videos: null })
+    expect(JSON.parse(localStorage.getItem('tinytube:videocache:v1'))[UC].fetchedAt).toBe(0)
   })
 })
 
