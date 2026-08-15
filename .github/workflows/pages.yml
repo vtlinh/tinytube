@@ -12,12 +12,9 @@
 # android/** and ios/** on push, auto-merge's publish filter names the same
 # two directories, and web/** appears in neither.
 #
-# One-time repository setup, both in Settings:
-#   - Pages -> Source = "GitHub Actions" (configure-pages below tries to do
-#     this itself via `enablement`; if the token is not allowed to, flip the
-#     toggle by hand once and re-run)
-#   - a YOUTUBE_API_KEY Actions secret for the downloader — without it the
-#     Download step fails fast with setup instructions
+# One-time repository setup: Settings → Pages → Source = "GitHub Actions"
+# (configure-pages below tries to do this itself via `enablement`; if the
+# token is not allowed to, flip the toggle by hand once and re-run).
 name: pages
 
 on:
@@ -36,8 +33,6 @@ on:
     paths:
       - "web/**"
       - ".github/workflows/pages.yml"
-  schedule:
-    - cron: "0 6 * * 0" # weekly (Sun): refresh videos.json from the approved channels
   workflow_dispatch:
 
 permissions:
@@ -62,13 +57,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Seed with currently deployed data (stale fallback for broken channels)
-        run: curl -fsSL "https://vtlinh.github.io/tinytube/videos.json" -o /tmp/seed.json || true
       - run: npm ci
-      - name: Download
-        run: npm run download -- --seed /tmp/seed.json
-        env:
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       - run: npm test
       # The same version-advancement the Android app uses (android.yml's
       # "Compute version name"): <year-2025>.<iso week>.<patch>, patch
@@ -93,9 +82,9 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          # Hardcoded rather than read off the event: the schedule trigger's
-          # payload carries no repository object, so the upstream expression
-          # would build cron refreshes against a "//" base.
+          # Hardcoded rather than read off the event: workflow_dispatch and
+          # push both have a repository, but keep the constant anyway so a
+          # future trigger cannot build against a "//" base.
           BASE_PATH: /tinytube/
       # What the NEXT deploy's patch increment reads; `run` is the tiebreaker
       # for a person asking which build is serving.

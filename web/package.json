@@ -4,13 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "download": "node --env-file-if-exists=.env src/youtubeApi.js",
-    "predev": "test -s public/videos.json || npm run download",
     "dev": "concurrently -k -n vite,test -c cyan,magenta \"vite --host\" \"vitest --watch\"",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "prod": "npm run download && npm run test && npm run build"
+    "prod": "npm test && npm run build"
   },
   "dependencies": {
     "bootstrap": "^5.3.3",

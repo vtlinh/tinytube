@@ -9,7 +9,6 @@ import { useSettings, useWatchStore } from '../src/lib.js'
 vi.mock('react-youtube', () => ({ default: () => null }))
 
 const UC = 'UC' + 'a'.repeat(22)
-const db = { schema_version: 2, generated_at: 'x', channels: [] }
 
 function fakeStorage() {
   let store = {}
@@ -56,7 +55,6 @@ function Harness() {
   const watchStore = useWatchStore(store.settings.childId)
   return (
     <Settings
-      db={db}
       store={store}
       watchStore={watchStore}
       sync={{ session: { email: 'parent@example.com' }, pull: vi.fn(), pulling: false }}

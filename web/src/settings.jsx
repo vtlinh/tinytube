@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  curatedChannels,
   overlaps,
   fmtMins,
   usageStats,
@@ -64,7 +63,7 @@ const API_CONSOLE_URL = 'https://console.cloud.google.com/apis/library/youtube.g
 const looksLikeLink = s => /^@|^UC[0-9A-Za-z_-]{22}$|youtube\.com/.test(s.trim())
 const channelUrl = ch => ch.source_url ?? `https://www.youtube.com/channel/${ch.channel_id}`
 
-export default function Settings({ db, customById = {}, store, watchStore, sync, onDone }) {
+export default function Settings({ customById = {}, store, watchStore, sync, onDone }) {
   // every valid change persists the moment it is made — no draft, no Save
   // button; half-typed values are held locally by their rows (see BirthdayRow)
   // and only committed once they parse
@@ -132,11 +131,11 @@ export default function Settings({ db, customById = {}, store, watchStore, sync,
       )}
       {tab === 'channels' && (
         <>
-          <SearchRow apiKey={settings.apiKey} store={store} db={db} />
-          <ChannelList db={db} customById={customById} store={store} />
+          <SearchRow apiKey={settings.apiKey} store={store} />
+          <ChannelList customById={customById} store={store} />
         </>
       )}
-      {tab === 'browser' && <BrowserTab store={store} db={db} customById={customById} />}
+      {tab === 'browser' && <BrowserTab store={store} customById={customById} />}
       {tab === 'stats' && <StatsTab watchStore={watchStore} settings={settings} />}
       </fieldset>
 
@@ -1398,7 +1397,7 @@ function ApiKeyRow({ apiKey, onChange }) {
       {confirming && (
         <ConfirmModal
           title="Delete API key?"
-          body="You won't be able to search for or add channels until you enter a new key."
+          body="You won't be able to search for channels until you enter a new key."
           onConfirm={() => {
             onChange('')
             setConfirming(false)
@@ -1414,14 +1413,12 @@ function ApiKeyRow({ apiKey, onChange }) {
    A /channel/UC… URL answers locally. A /@handle URL uses the handle recorded
    when it was approved this session, so the button does not flicker off to
    the Worker on every navigation. */
-function approvedOnPage(url, settings, db, handles) {
+function approvedOnPage(url, settings, handles) {
   if (!isChannelPage(url)) return null
   const handle = handleFromUrl(url)
   const id = channelIdFromUrl(url) ?? (handle ? handles[handle.toLowerCase()] : null)
   if (!id) return null
-  if (settings.customChannels.some(c => c.channel_id === id)) return { id, kind: 'custom' }
-  const curated = (db?.channels ?? []).find(c => c.channel_id === id)
-  if (curated && !settings.overrides[id]?.hidden) return { id, kind: 'curated', title: curated.channel_title }
+  if (settings.customChannels.some(c => c.channel_id === id)) return { id }
   return null
 }
 
@@ -1432,7 +1429,7 @@ function approvedOnPage(url, settings, db, handles) {
  *  YouTube refuses to be framed (X-Frame-Options), so the iframe is best-effort
  *  and "Open YouTube" is the reliable half — browse there, paste the channel
  *  URL here, tap +. The Worker /channel route does the resolving, no API key. */
-function BrowserTab({ store, db, customById = {} }) {
+function BrowserTab({ store, customById = {} }) {
   const settings = store.settings
   const [url, setUrl] = useState(PARENT_START)
   const [typed, setTyped] = useState(PARENT_START)
@@ -1445,7 +1442,7 @@ function BrowserTab({ store, db, customById = {} }) {
   urlRef.current = url
 
   const onChannel = isChannelPage(url)
-  const approved = approvedOnPage(url, settings, db, handles)
+  const approved = approvedOnPage(url, settings, handles)
   const live = onChannel && !working
 
   const go = raw => {
@@ -1471,7 +1468,7 @@ function BrowserTab({ store, db, customById = {} }) {
     }
   }
 
-  const titleOf = id => customById[id]?.title ?? (db?.channels ?? []).find(c => c.channel_id === id)?.channel_title ?? id
+  const titleOf = id => customById[id]?.title ?? id
 
   const addCurrent = async () => {
     const here = urlRef.current
@@ -1493,26 +1490,19 @@ function BrowserTab({ store, db, customById = {} }) {
     }
     const handle = handleFromUrl(here)
     if (handle) setHandles(prev => ({ ...prev, [handle.toLowerCase()]: resolved.channel_id }))
-    const alreadyCustom = store.settings.customChannels.some(c => c.channel_id === resolved.channel_id)
-    const curated = (db?.channels ?? []).some(c => c.channel_id === resolved.channel_id)
-    if (alreadyCustom) {
-      cacheResolvedChannel(resolved)
-    } else if (curated) {
-      store.setOverride(resolved.channel_id, { hidden: false })
-    } else {
+    const already = store.settings.customChannels.some(c => c.channel_id === resolved.channel_id)
+    if (!already) {
       cacheResolvedChannel(resolved)
       store.addCustomChannel({ ...resolved, min_age: AGE_MIN, max_age: AGE_MAX })
+    } else {
+      cacheResolvedChannel(resolved)
     }
     setMessage(`Approved “${resolved.channel_title}”`)
   }
 
   const removeApproved = ch => {
-    if (ch.kind === 'custom') {
-      store.removeCustomChannel(ch.id)
-      evictChannelCache(ch.id)
-    } else {
-      store.setOverride(ch.id, { hidden: true })
-    }
+    store.removeCustomChannel(ch.id)
+    evictChannelCache(ch.id)
     setRemoving(null)
     setMessage(`Removed “${titleOf(ch.id)}”`)
   }
@@ -1530,7 +1520,7 @@ function BrowserTab({ store, db, customById = {} }) {
           disabled={!live}
           style={{ opacity: live ? 1 : 0.35, color: approved ? '#e74c3c' : '#2ecc71' }}
           onClick={() => {
-            const current = approvedOnPage(urlRef.current, settings, db, handles)
+            const current = approvedOnPage(urlRef.current, settings, handles)
             if (current) setRemoving(current)
             else addCurrent()
           }}
@@ -1611,7 +1601,7 @@ function BrowserTab({ store, db, customById = {} }) {
   )
 }
 
-function SearchRow({ apiKey, store, db }) {
+function SearchRow({ apiKey, store }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [busy, setBusy] = useState(false)
@@ -1676,11 +1666,7 @@ function SearchRow({ apiKey, store, db }) {
       </div>
       {error && <div className="alert alert-warning mt-2 py-2">{error}</div>}
       {results.map(ch => {
-        const isCustom = store.settings.customChannels.some(c => c.channel_id === ch.channel_id)
-        const isCurated = (db?.channels ?? []).some(c => c.channel_id === ch.channel_id)
-        // a deleted (hidden) curated channel counts as not added: Add un-hides
-        // it, since adding it as custom would be a no-op (curated wins on merge)
-        const added = isCustom || (isCurated && !store.settings.overrides[ch.channel_id]?.hidden)
+        const added = store.settings.customChannels.some(c => c.channel_id === ch.channel_id)
         return (
           <div key={ch.channel_id} className="d-flex align-items-center gap-3 bg-body-tertiary rounded p-2 mt-2">
             <img src={ch.thumbnail} alt="" width="36" height="36" className="rounded-circle" />
@@ -1690,17 +1676,12 @@ function SearchRow({ apiKey, store, db }) {
               <StatsCell ch={ch} />
             </div>
             {added ? (
-              // same semantics as the table's delete: drop custom, hide curated
               <button
                 type="button"
                 className="btn btn-outline-danger btn-sm"
                 onClick={() => {
-                  if (isCustom) {
-                    store.removeCustomChannel(ch.channel_id)
-                    evictChannelCache(ch.channel_id)
-                  } else {
-                    store.setOverride(ch.channel_id, { hidden: true })
-                  }
+                  store.removeCustomChannel(ch.channel_id)
+                  evictChannelCache(ch.channel_id)
                 }}
               >
                 <i className="fa-sharp-duotone fa-regular fa-trash me-1" />
@@ -1711,14 +1692,11 @@ function SearchRow({ apiKey, store, db }) {
                 type="button"
                 className="btn btn-danger btn-sm"
                 onClick={() => {
-                  if (isCurated) store.setOverride(ch.channel_id, { hidden: false })
-                  else {
-                    // the search already showed the parent this channel's name
-                    // and avatar; seeding them means the row it becomes is not
-                    // a bare id until the Worker has been asked
-                    seedChannelMeta(ch)
-                    store.addCustomChannel({ ...ch, min_age: 1, max_age: 15 })
-                  }
+                  // the search already showed the parent this channel's name
+                  // and avatar; seeding them means the row it becomes is not
+                  // a bare id until the Worker has been asked
+                  seedChannelMeta(ch)
+                  store.addCustomChannel({ ...ch, min_age: 1, max_age: 15 })
                   setQuery('')
                 }}
               >
@@ -1770,12 +1748,7 @@ function StatsCell({ ch }) {
   )
 }
 
-// per-channel edits land on the custom channel object itself or in the
-// curated channel's override, depending on where the row came from
-const channelPatcher = (ch, store) =>
-  ch.custom
-    ? patch => store.updateCustomChannel(ch.channel_id, patch)
-    : patch => store.setOverride(ch.channel_id, patch)
+const channelPatcher = (ch, store) => patch => store.updateCustomChannel(ch.channel_id, patch)
 
 /** "1.2M subs · 340 videos · 89M views", or nothing at all. Under the name
  * rather than in a column of its own, and unlabelled: a row of numbers with
@@ -1895,23 +1868,17 @@ function AgeDialog({ ch, store, onClose }) {
  * What is left fits a phone without scrolling sideways, which a six-column
  * table with a dual slider in it never could.
  */
-function ChannelList({ db, customById = {}, store }) {
-  const { customChannels, overrides, groups, groupOf } = store.settings
+function ChannelList({ customById = {}, store }) {
+  const { customChannels, groups, groupOf } = store.settings
   const ageRange = effectiveAgeRange(store.settings)
   const [selected, setSelected] = useState(new Set())
   const [naming, setNaming] = useState(false)
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
-  const hiddenCount = Object.values(overrides).filter(o => o.hidden).length
 
   const all = useMemo(
-    () => [
-      // stored rows are the decision only; the name, avatar and stats come
-      // from the Worker's record for that id
-      ...customChannels.map(ch => ({ ...hydrateChannel(ch, customById[ch.channel_id]), custom: true })),
-      ...curatedChannels(db, overrides).filter(ch => !ch.hidden),
-    ],
-    [db, customChannels, overrides, customById],
+    () => customChannels.map(ch => hydrateChannel(ch, customById[ch.channel_id])),
+    [customChannels, customById],
   )
 
   // the same arrangement the child's Channels tab uses, so the two cannot
@@ -1942,12 +1909,8 @@ function ChannelList({ db, customById = {}, store }) {
     })
 
   const remove = ch => {
-    if (ch.custom) {
-      store.removeCustomChannel(ch.channel_id)
-      evictChannelCache(ch.channel_id)
-    } else {
-      store.setOverride(ch.channel_id, { hidden: true })
-    }
+    store.removeCustomChannel(ch.channel_id)
+    evictChannelCache(ch.channel_id)
     setDeleting(null)
   }
 
@@ -2022,12 +1985,6 @@ function ChannelList({ db, customById = {}, store }) {
         ),
       )}
 
-      {hiddenCount > 0 && (
-        <button type="button" className="btn btn-link btn-sm text-secondary" onClick={() => store.restoreHidden()}>
-          restore {hiddenCount} deleted built-in channel{hiddenCount > 1 ? 's' : ''}
-        </button>
-      )}
-
       {editing && (
         <AgeDialog
           ch={all.find(c => c.channel_id === editing.channel_id) ?? editing}
@@ -2038,11 +1995,7 @@ function ChannelList({ db, customById = {}, store }) {
       {deleting && (
         <ConfirmModal
           title={`Remove ${deleting.channel_title}?`}
-          body={
-            deleting.custom
-              ? 'This channel goes from this child’s list. You can add it again from the search above.'
-              : 'This built-in channel is hidden from this child. You can restore it at the bottom of this page.'
-          }
+          body="This channel goes from this child’s list. You can add it again from search or the Browser tab."
           onConfirm={() => remove(deleting)}
           onCancel={() => setDeleting(null)}
         />
