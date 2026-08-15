@@ -26,10 +26,13 @@ import {
   PLAYBACK_RANDOM,
   hydrateChannel,
   arrangeChannels,
-  AGE_MIN,
-  AGE_MAX,
-  ageAtFraction,
   grabEnd,
+  ageAtFraction,
+  ageIndex,
+  ageFromIndex,
+  ageLabel,
+  AGE_LAST,
+  clampAgeRange,
   canGroup,
   canUngroup,
   groupMembers,
@@ -690,30 +693,34 @@ function VersionLink() {
  * this CSS and are untouched, which is why the thumbs keep their own pointer
  * handling rather than having it taken away globally.
  */
-function DualAgeSlider({ value: [lo, hi], onChange }) {
+function DualAgeSlider({ value: [minAge, maxAge], onChange }) {
   const track = useRef(null)
   const grabbed = useRef(null)
-  const pos = v => `calc(${(v - AGE_MIN) / (AGE_MAX - AGE_MIN)} * (100% - 32px) + 16px)`
+  const last = AGE_LAST
+  const lo = ageIndex(minAge, 'lo')
+  const hi = ageIndex(maxAge, 'hi')
+  const pos = i => `calc(${i / last} * (100% - 36px) + 18px)`
 
-  // the thumb's CENTRE travels between 16px and width-16px, matching pos()
-  const ageAt = clientX => {
+  const indexAt = clientX => {
     const r = track.current.getBoundingClientRect()
-    return ageAtFraction((clientX - r.left - 16) / Math.max(1, r.width - 32))
+    const t = (clientX - r.left - 18) / Math.max(1, r.width - 36)
+    return ageAtFraction(t)
   }
-  const apply = (end, v) => (end === 'lo' ? onChange([Math.min(v, hi), hi]) : onChange([lo, Math.max(v, lo)]))
+  const apply = (end, v) => {
+    const [nextLo, nextHi] = clampAgeRange([lo, hi], end, v)
+    onChange([ageFromIndex(nextLo), ageFromIndex(nextHi)])
+  }
 
   const onPointerDown = e => {
-    const v = ageAt(e.clientX)
+    const v = indexAt(e.clientX)
     grabbed.current = grabEnd(v, lo, hi)
-    // capture, so a drag that leaves the row keeps steering the slider
     e.currentTarget.setPointerCapture(e.pointerId)
     if (grabbed.current !== 'pending') apply(grabbed.current, v)
   }
 
   const onPointerMove = e => {
     if (!grabbed.current) return
-    const v = ageAt(e.clientX)
-    // two ends on one value: the first move that goes anywhere says which
+    const v = indexAt(e.clientX)
     if (grabbed.current === 'pending') {
       if (v === lo) return
       grabbed.current = v > hi ? 'hi' : 'lo'
@@ -721,35 +728,30 @@ function DualAgeSlider({ value: [lo, hi], onChange }) {
     apply(grabbed.current, v)
   }
 
-  // capture releases itself on pointerup/cancel; only the grab needs clearing
   const release = () => {
     grabbed.current = null
   }
 
   return (
-    <div className="dual-slider flex-grow-1" ref={track}>
+    <div className="dual-slider quota-slider flex-grow-1" ref={track}>
       <input
         type="range"
-        min={AGE_MIN}
-        max={AGE_MAX}
+        min="0"
+        max={last}
         value={lo}
         aria-label="Youngest age"
-        onChange={e => onChange([Math.min(+e.target.value, hi), hi])}
+        onChange={e => apply('lo', +e.target.value)}
       />
       <input
         type="range"
-        min={AGE_MIN}
-        max={AGE_MAX}
+        min="0"
+        max={last}
         value={hi}
         aria-label="Oldest age"
-        onChange={e => onChange([lo, Math.max(+e.target.value, lo)])}
+        onChange={e => apply('hi', +e.target.value)}
       />
-      {/* the ages themselves, in the thumbs. They went missing when the
-          labels moved out of the thumbs and back: the edit that returned them
-          anchored on the wrong component and the dialog shipped two blank
-          circles, which say nothing about what they are setting. */}
-      <span className="thumb-label" style={{ left: pos(lo) }}>{lo}</span>
-      <span className="thumb-label" style={{ left: pos(hi) }}>{hi}</span>
+      <span className="thumb-label" style={{ left: pos(lo) }}>{ageLabel(ageFromIndex(lo))}</span>
+      <span className="thumb-label" style={{ left: pos(hi) }}>{ageLabel(ageFromIndex(hi))}</span>
       <div
         className="slider-surface"
         onPointerDown={onPointerDown}
@@ -1512,7 +1514,7 @@ function SearchRow({ store }) {
                     onClick={() => {
                       seedChannelMeta(ch)
                       cacheResolvedChannel(ch)
-                      store.addCustomChannel({ ...ch, min_age: AGE_MIN, max_age: AGE_MAX })
+                      store.addCustomChannel({ ...ch, min_age: null, max_age: null })
                       setQuery('')
                     }}
                   >
@@ -1612,7 +1614,7 @@ function ChannelRow({ ch, store, selected, onToggle, onEdit, onDelete }) {
         aria-label={`Ages for ${ch.channel_title}`}
         onClick={onEdit}
       >
-        {ch.min_age}–{ch.max_age}
+        {ageLabel(ch.min_age)}–{ageLabel(ch.max_age)}
         <i className="fa-sharp-duotone fa-regular fa-pencil ms-2" />
       </button>
       <button
@@ -1627,8 +1629,8 @@ function ChannelRow({ ch, store, selected, onToggle, onEdit, onDelete }) {
   )
 }
 
-/** The ages for one channel, in a dialog rather than in the row: a 1-15 dual
- * slider needs more width than a phone has left over beside a name. */
+/** The ages for one channel, in a dialog rather than in the row: any|1…14|any
+ * needs more width than a phone has left over beside a name. */
 function AgeDialog({ ch, store, onClose }) {
   const save = channelPatcher(ch, store)
   return (

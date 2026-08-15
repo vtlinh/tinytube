@@ -22,10 +22,10 @@ describe('ageFromBirthday', () => {
 })
 
 describe('effectiveAgeRange', () => {
-  it('uses the computed age as a single-point range, clamped to the ratings scale', () => {
+  it('uses the computed age as a single-point range, floored at 1 but not capped', () => {
     expect(effectiveAgeRange({ birthday: '2022-08', ageRange: [1, 15] }, NOW)).toEqual([4, 4])
     expect(effectiveAgeRange({ birthday: '2026-08', ageRange: [1, 15] }, NOW)).toEqual([1, 1]) // a baby is 1 on the scale
-    expect(effectiveAgeRange({ birthday: '2005-01', ageRange: [1, 15] }, NOW)).toEqual([15, 15])
+    expect(effectiveAgeRange({ birthday: '2005-01', ageRange: [1, 15] }, NOW)).toEqual([21, 21])
   })
 
   it('falls back to the manual range without a birthday', () => {

@@ -124,7 +124,7 @@ describe('the Browser tab', () => {
     fireEvent.click(await screen.findByText('Add'))
     await waitFor(() => {
       expect(JSON.parse(localStorage.getItem('tinytube:settings:v1')).children[0].customChannels).toEqual([
-        { channel_id: UC, min_age: 1, max_age: 15 },
+        { channel_id: UC, min_age: null, max_age: null },
       ])
     })
   })
@@ -139,7 +139,7 @@ describe('the Browser tab', () => {
     fireEvent.click(screen.getByText('Add'))
     await waitFor(() => {
       expect(JSON.parse(localStorage.getItem('tinytube:settings:v1')).children[0].customChannels).toEqual([
-        { channel_id: UC, min_age: 1, max_age: 15 },
+        { channel_id: UC, min_age: null, max_age: null },
       ])
     })
   })
