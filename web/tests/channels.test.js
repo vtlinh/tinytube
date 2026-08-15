@@ -21,6 +21,12 @@ describe('overlaps', () => {
     expect(overlaps([4, 4], 3, 7)).toBe(true)
     expect(overlaps([4, 4], 5, 10)).toBe(false)
   })
+
+  it('treats a null bound as unbounded', () => {
+    expect(overlaps([15, 15], 1, 14)).toBe(false)
+    expect(overlaps([15, 15], 1, null)).toBe(true)
+    expect(overlaps([4, 4], null, null)).toBe(true)
+  })
 })
 
 describe('mergeChannels', () => {

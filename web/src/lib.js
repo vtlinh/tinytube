@@ -101,9 +101,12 @@ export function makeChallenge(rand = Math.random) {
 // ---------------------------------------------------------------------------
 // channels
 
-/** Inclusive range overlap: does [min_age, max_age] intersect the parent's [lo, hi]? */
+/** Inclusive range overlap: does [min_age, max_age] intersect the parent's [lo, hi]?
+ *  null on a channel bound is “any”: no floor, or no ceiling. */
 export function overlaps([lo, hi], minAge, maxAge) {
-  return minAge <= hi && lo <= maxAge
+  const min = minAge == null ? -Infinity : minAge
+  const max = maxAge == null ? Infinity : maxAge
+  return min <= hi && lo <= max
 }
 
 // ---------------------------------------------------------------------------
@@ -122,12 +125,13 @@ export function ageFromBirthday(birthday, now = Date.now()) {
 }
 
 /** What the channel filter compares against: the single age computed from the
- * birthday when one is set (clamped to the 1-15 the ratings use), else the
- * legacy manual range. */
+ * birthday when one is set. Floor at 1 (a baby is 1 on the scale) but do NOT
+ * cap at 14: a 15-year-old must miss a 1–14 channel and still match `any`.
+ * No birthday falls back to the legacy manual range. */
 export function effectiveAgeRange(settings, now = Date.now()) {
   const age = ageFromBirthday(settings.birthday, now)
   if (age == null) return settings.ageRange
-  const a = Math.max(1, Math.min(15, age))
+  const a = Math.max(1, age)
   return [a, a]
 }
 
@@ -140,13 +144,52 @@ export function parseBirthdayInput(text) {
 
 // ---------------------------------------------------------------------------
 // the age slider's arithmetic, pure so it can be tested without a layout
+//
+// Stops are any | 1 … 14 | any. Finite ages are 1–14; null is “any” at that
+// end. Unlike video length the thumbs MAY meet on a finite age (exactly 7
+// is a real choice) — they just cannot both sit on an “any”.
 
 export const AGE_MIN = 1
-export const AGE_MAX = 15
+export const AGE_MAX = 14
+/** Index of the right-hand “any”. 0 is the left-hand “any”; 1–14 are ages. */
+export const AGE_LAST = 15
 
-/** 0..1 along the track -> an age on the 1-15 scale, clamped at both ends. */
+/** 0..1 along the track -> a stop index on any|1…14|any, clamped at both ends. */
 export function ageAtFraction(t) {
-  return Math.round(AGE_MIN + Math.min(1, Math.max(0, t)) * (AGE_MAX - AGE_MIN))
+  return Math.round(Math.min(1, Math.max(0, t)) * AGE_LAST)
+}
+
+/** Stored bound -> stop index. null (and the old 15 ceiling) is “any”. */
+export function ageIndex(age, end) {
+  if (age == null || age > AGE_MAX) return end === 'hi' ? AGE_LAST : 0
+  if (!Number.isInteger(age) || age < AGE_MIN) return 0
+  return age
+}
+
+/** Stop index -> stored bound: 0 and 15 are null, 1–14 are themselves. */
+export function ageFromIndex(i) {
+  if (i <= 0 || i >= AGE_LAST) return null
+  return i
+}
+
+export function ageLabel(age) {
+  return age == null ? 'any' : String(age)
+}
+
+/**
+ * Move one end of the age range, in stop indexes.
+ *
+ * The ends may meet on 1–14. They may not occupy the same “any”: stacking
+ * both on the left or both on the right would look like a single thumb and
+ * store the same any–any the opposite-ends pair already means.
+ */
+export function clampAgeRange([lo, hi], end, v) {
+  if (end === 'lo') {
+    const cap = Math.min(hi, AGE_LAST - 1)
+    return [Math.max(0, Math.min(v, cap)), hi]
+  }
+  const floor = Math.max(lo, 1)
+  return [lo, Math.min(AGE_LAST, Math.max(v, floor))]
 }
 
 /**
@@ -419,7 +462,11 @@ const CHANNEL_ID_RE = /^UC[A-Za-z0-9_-]{22}$/
 // the hosts YouTube serves avatars and posters from; anything else is dropped
 const MAX_IMPORT_CHANNELS = 500
 
-const validAge = n => Number.isInteger(n) && n >= AGE_MIN && n <= AGE_MAX
+/** A finite age on the 1–14 scale, or null for “any” / garbage / the old 15 ceiling. */
+export function boundAge(n) {
+  if (n == null || !Number.isInteger(n) || n < AGE_MIN || n > AGE_MAX) return null
+  return n
+}
 
 /** The active child's channel setup, as the object written to the file. */
 export function exportChannels(settings) {
@@ -462,20 +509,18 @@ export function parseChannelImport(text) {
     if (!ch || !CHANNEL_ID_RE.test(ch.channel_id ?? '') || seen.has(ch.channel_id)) continue
     if (customChannels.length >= MAX_IMPORT_CHANNELS) break
     seen.add(ch.channel_id)
-    // an inverted pair is a typo in someone's file, not a reason to refuse it
-    const lo = validAge(ch.min_age) ? ch.min_age : AGE_MIN
-    const hi = validAge(ch.max_age) ? ch.max_age : AGE_MAX
     // the decision only, exactly as it is stored: a file that carries a name
-    // or an avatar carries a copy of something the Worker owns
-    customChannels.push({ channel_id: ch.channel_id, min_age: Math.min(lo, hi), max_age: Math.max(lo, hi) })
+    // or an avatar carries a copy of something the Worker owns. Garbage ages
+    // become any–any; an inverted pair is a typo, not a reason to refuse it.
+    customChannels.push(decisionOnly({ channel_id: ch.channel_id, min_age: ch.min_age, max_age: ch.max_age }))
   }
 
   const overrides = {}
   for (const [id, patch] of Object.entries(data.overrides ?? {})) {
     if (!CHANNEL_ID_RE.test(id) || !patch || typeof patch !== 'object') continue
     const kept = {}
-    if (validAge(patch.min_age)) kept.min_age = patch.min_age
-    if (validAge(patch.max_age)) kept.max_age = patch.max_age
+    if ('min_age' in patch) kept.min_age = boundAge(patch.min_age)
+    if ('max_age' in patch) kept.max_age = boundAge(patch.max_age)
     if (kept.min_age != null && kept.max_age != null && kept.min_age > kept.max_age) {
       ;[kept.min_age, kept.max_age] = [kept.max_age, kept.min_age]
     }
@@ -712,14 +757,21 @@ export function settingsLock(children, session, clientId = GOOGLE_CLIENT_ID) {
 }
 
 /** A parent-added channel, reduced to the decision: which channel, for what
- * ages, on or off. Everything else about a channel is the channel's own and
- * comes from the Worker's shared cache. */
+ * ages. Everything else about a channel is the channel's own and comes from
+ * the Worker's shared cache.
+ *
+ * null is “any”. The old 1–15 default meant everyone, which is now any–any;
+ * a leftover 15 as a ceiling (5–15) becomes 5–any. */
 export function decisionOnly(ch) {
-  return {
-    channel_id: ch.channel_id,
-    min_age: ch.min_age ?? AGE_MIN,
-    max_age: ch.max_age ?? AGE_MAX,
+  if (ch.min_age === 1 && ch.max_age === 15) {
+    return { channel_id: ch.channel_id, min_age: null, max_age: null }
   }
+  let min_age = boundAge(ch.min_age)
+  let max_age = boundAge(ch.max_age)
+  if (min_age != null && max_age != null && min_age > max_age) {
+    ;[min_age, max_age] = [max_age, min_age]
+  }
+  return { channel_id: ch.channel_id, min_age, max_age }
 }
 
 /** Stored shape -> stored shape, with legacy blobs folded in. Idempotent. */

@@ -10,8 +10,6 @@ import {
   applyImport,
   EXPORT_KIND,
   EXPORT_VERSION,
-  AGE_MIN,
-  AGE_MAX,
 } from '../src/lib.js'
 
 const UC = 'UCoookXUzPciGrEZEXmh4Jjg'
@@ -102,7 +100,7 @@ describe('re-validating what comes back in', () => {
     expect(customChannels).toEqual([{ channel_id: UC, min_age: 3, max_age: 6 }])
   })
 
-  it('repairs ages: out of range becomes the full span, inverted pairs swap', () => {
+  it('repairs ages: out of range becomes any–any, inverted pairs swap', () => {
     const { customChannels } = parseChannelImport(
       file({
         customChannels: [
@@ -112,9 +110,9 @@ describe('re-validating what comes back in', () => {
         ],
       }),
     )
-    expect(customChannels[0]).toMatchObject({ min_age: AGE_MIN, max_age: AGE_MAX })
+    expect(customChannels[0]).toMatchObject({ min_age: null, max_age: null })
     expect(customChannels[1]).toMatchObject({ min_age: 4, max_age: 9 })
-    expect(customChannels[2]).toMatchObject({ min_age: AGE_MIN, max_age: AGE_MAX })
+    expect(customChannels[2]).toMatchObject({ min_age: null, max_age: null })
   })
 
   it('keeps only age edits on overrides; hidden/disabled are catalog leftovers', () => {
