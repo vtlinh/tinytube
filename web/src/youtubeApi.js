@@ -106,7 +106,7 @@ export async function resolveChannel(apiKey, input) {
 /* ---- parent-mode YouTube URLs (YouTubeUrls.kt, ported) ----
  *
  * What a channel id looks like, whether the parent is standing on a channel
- * page, and where a Browser tab may go. The same rules the phone WebView
+ * page, and what a pasted URL may name. The same rules the phone WebView
  * uses: match on the parsed host, never a substring, and a watch page that
  * merely MENTIONS a channel is not one. */
 
@@ -197,9 +197,9 @@ export function isAllowedAvatar(url) {
   return AVATAR_HOSTS_STRICT.has(host) || host.endsWith('.googleusercontent.com')
 }
 
-/** What a parent typed into the address bar, as a URL we may load. Bare
+/** What a parent typed into search, as a URL we may resolve. Bare
  *  @handles and UC… ids become m.youtube.com pages; anything off YouTube is
- *  null — the Browser tab is not a general browser. */
+ *  null — this is not a general browser. */
 export function parentBrowseUrl(input) {
   const text = String(input ?? '').trim()
   if (!text) return null
@@ -347,7 +347,7 @@ export function seedChannelMeta(ch) {
   writeCache(cache)
 }
 
-/** The phone's ChannelResolver, for the Browser tab: POST the URL to the
+/** The phone's ChannelResolver, for channel search: POST the URL to the
  *  Worker's /channel, re-validate the id and avatar on arrival. No API key.
  *  Null when this page is not a channel we can identify. */
 export async function resolveChannelPage(url) {

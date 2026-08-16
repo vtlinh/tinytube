@@ -66,9 +66,9 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
   // button; half-typed values are held locally by their rows (see BirthdayRow)
   // and only committed once they parse
   const settings = store.settings
-  // 'settings' | 'channels' | 'browser' | 'stats' — the bottom bar below switches
+  // 'settings' | 'channels' | 'stats' — the bottom bar below switches
   const [tab, setTab] = useState('settings')
-  const titles = { settings: 'Parents Mode', channels: 'Channels', browser: 'Browser', stats: 'Stats' }
+  const titles = { settings: 'Parents Mode', channels: 'Channels', stats: 'Stats' }
   /* Locked when a child is the one signed in, or when nobody is. Everything
      below is wrapped in a disabled fieldset; the header is NOT, because
      signing in is the only way out of either state and the control that does
@@ -128,7 +128,6 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
         </div>
       )}
       {tab === 'channels' && <ChannelList customById={customById} store={store} />}
-      {tab === 'browser' && <BrowserTab store={store} />}
       {tab === 'stats' && <StatsTab watchStore={watchStore} settings={settings} />}
       </fieldset>
       </div>
@@ -136,7 +135,6 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
       <nav className="bottom-tabs d-flex border-top">
         <TabButton label="Settings" icon="fa-gear" on={tab === 'settings'} onClick={() => setTab('settings')} />
         <TabButton label="Channels" icon="fa-list" on={tab === 'channels'} onClick={() => setTab('channels')} />
-        <TabButton label="Browser" icon="fa-browser" on={tab === 'browser'} onClick={() => setTab('browser')} />
         <TabButton label="Stats" icon="fa-chart-simple" on={tab === 'stats'} onClick={() => setTab('stats')} />
       </nav>
     </div>
@@ -1399,21 +1397,6 @@ function ApiKeyRow({ apiKey, onChange }) {
   )
 }
 
-/** YouTube will not render in an iframe (X-Frame-Options: SAMEORIGIN). This
- *  tab is the in-app finder: type a name or paste a channel URL / @handle.
- *  Both go through the Worker — no Google Cloud key. Same header and bottom
- *  tabs as every other Parents Mode screen. */
-function BrowserTab({ store }) {
-  return (
-    <div className="browser-find">
-      <p className="settings-hint">
-        Search by name, or paste a YouTube channel URL. Adding a channel does not need an API key.
-      </p>
-      <SearchRow store={store} />
-    </div>
-  )
-}
-
 async function findChannels(q) {
   const browse = parentBrowseUrl(q)
   if (browse && isChannelPage(browse)) {
@@ -1734,7 +1717,8 @@ function ChannelList({ customById = {}, store }) {
 
   return (
     <>
-      <div className="d-flex align-items-center gap-2 mb-2 flex-wrap">
+      <SearchRow store={store} />
+      <div className="d-flex align-items-center gap-2 mb-2 mt-3 flex-wrap">
         <span className="text-secondary">
           {inRange}/{all.length} shown to {store.settings.childName}
         </span>
@@ -1801,7 +1785,7 @@ function ChannelList({ customById = {}, store }) {
       {deleting && (
         <ConfirmModal
           title={`Remove ${deleting.channel_title}?`}
-          body="This channel goes from this child’s list. You can add it again from search or the Browser tab."
+          body="This channel goes from this child’s list. You can add it again from search."
           onConfirm={() => remove(deleting)}
           onCancel={() => setDeleting(null)}
         />

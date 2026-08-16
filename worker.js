@@ -641,7 +641,7 @@ async function channel(request) {
   });
 }
 
-/* Name search for the web app's Browser tab. Same terms as /channel: POST,
+/* Name search for the web app's Channels tab. Same terms as /channel: POST,
  * `env` is not passed, the caller's string is never fetched — channelSearchUrl
  * builds a results address from a validated query. An empty list means "could
  * not tell", the same contract as the other parsers. */
