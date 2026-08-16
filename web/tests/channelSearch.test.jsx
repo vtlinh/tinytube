@@ -1,6 +1,5 @@
-/** The Parents Mode Browser tab: find a channel by name or URL, through the
- *  Worker, with no parent API key. Same header and bottom tabs as the other
- *  parent screens — YouTube cannot be iframed. */
+/** Channel search on the Parents Mode Channels tab: find a channel by name
+ *  or URL, through the Worker, with no parent API key. */
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -77,20 +76,20 @@ function Harness() {
   )
 }
 
-function openBrowser() {
+function openChannels() {
   render(<Harness />)
-  fireEvent.click(screen.getByText('Browser'))
+  fireEvent.click(screen.getByText('Channels'))
 }
 
-describe('the Browser tab', () => {
-  it('uses the same header and bottom tabs as the other parent screens', () => {
-    openBrowser()
-    expect(screen.getByRole('heading', { name: 'Browser' })).toBeTruthy()
+describe('the Channels tab', () => {
+  it('has no Browser tab, and search lives with the approved list', () => {
+    openChannels()
+    expect(screen.getByRole('heading', { name: 'Channels' })).toBeTruthy()
     expect(screen.getByLabelText('Back to gallery')).toBeTruthy()
     expect(screen.getByLabelText('More options')).toBeTruthy()
     expect(screen.getByText('Settings')).toBeTruthy()
-    expect(screen.getByText('Channels')).toBeTruthy()
     expect(screen.getByText('Stats')).toBeTruthy()
+    expect(screen.queryByText('Browser')).toBeNull()
     expect(screen.getByLabelText('Find a channel')).toBeTruthy()
     expect(screen.queryByTitle('YouTube')).toBeNull()
     expect(screen.queryByText('← Kids mode')).toBeNull()
@@ -100,8 +99,7 @@ describe('the Browser tab', () => {
   })
 
   it('keeps the last channel above the tab bar', () => {
-    render(<Harness />)
-    fireEvent.click(screen.getByText('Channels'))
+    openChannels()
     const nav = document.querySelector('.bottom-tabs')
     const body = document.querySelector('.settings-body')
     expect(nav.classList.contains('fixed-bottom')).toBe(false)
@@ -110,7 +108,7 @@ describe('the Browser tab', () => {
   })
 
   it('searches by name through the Worker, with no API key', async () => {
-    openBrowser()
+    openChannels()
     fireEvent.change(screen.getByLabelText('Find a channel'), { target: { value: 'cocomelon' } })
     expect(await screen.findByText('Cocomelon')).toBeTruthy()
     const call = fetch.mock.calls.find(([u]) => String(u).includes('/search'))
@@ -119,7 +117,7 @@ describe('the Browser tab', () => {
   })
 
   it('adds a search hit to the approved list', async () => {
-    openBrowser()
+    openChannels()
     fireEvent.change(screen.getByLabelText('Find a channel'), { target: { value: 'cocomelon' } })
     fireEvent.click(await screen.findByText('Add'))
     await waitFor(() => {
@@ -130,7 +128,7 @@ describe('the Browser tab', () => {
   })
 
   it('approves a pasted channel URL via the Worker, with no API key', async () => {
-    openBrowser()
+    openChannels()
     const page = `https://m.youtube.com/channel/${UC}`
     fireEvent.change(screen.getByLabelText('Find a channel'), { target: { value: page } })
     expect(await screen.findByText('Cocomelon')).toBeTruthy()

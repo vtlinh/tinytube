@@ -224,18 +224,6 @@ html, body, #root {
   border-top: 1px solid #2a3b4d;
 }
 
-.settings-hint {
-  color: #8b9bb4;
-  font-size: 0.8rem;
-  margin-bottom: 0.75rem;
-}
-
-.browser-find {
-  max-width: 40rem;
-  margin: 0 auto;
-  min-width: 0;
-}
-
 /* Search hits used to be one horizontal row (avatar, tags, nowrap stats,
    Add). That was wider than a phone, so the page scrolled sideways and the
    right edge looked cut off. Stack like an approved-channel row instead. */
