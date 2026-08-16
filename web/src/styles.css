@@ -206,6 +206,12 @@ html, body, #root {
   border-top: 1px solid #2a3b4d;
 }
 
+/* Name and Email are real <label>s so iOS will not invent a placeholder
+   from the aria-label. Bootstrap's label margin would make those rows taller. */
+.settings label {
+  margin-bottom: 0;
+}
+
 .settings-row:first-child {
   border-top: 0;
 }
@@ -396,17 +402,42 @@ html, body, #root {
 }
 
 .settings .form-control {
+  flex: 1 1 auto;
   font-size: 0.8125rem;
   padding: 0.3rem 0.55rem;
   background-color: #0e1621;
   border-color: #2a3b4d;
   color: inherit;
+  -webkit-text-fill-color: inherit;
 }
 
 .settings .form-control:focus {
   background-color: #0e1621;
   border-color: #7cc4ff;
   box-shadow: 0 0 0 0.15rem rgba(124, 196, 255, 0.15);
+}
+
+/* Kid-proofing turns selection off on the whole app so a child cannot
+   highlight the gallery. Inputs have to opt back in: iOS Safari otherwise
+   paints the placeholder (or the aria-label, used as one) on top of a
+   filled value, and the caret will not land. */
+.settings input,
+.settings textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.settings .form-control:-webkit-autofill,
+.settings .form-control:-webkit-autofill:focus {
+  -webkit-text-fill-color: #e9f1f8;
+  caret-color: #e9f1f8;
+  box-shadow: 0 0 0 1000px #0e1621 inset;
+}
+
+/* Never leave a hint sitting on a value. iOS will, if we let it. */
+.settings .form-control:not(:placeholder-shown)::placeholder {
+  opacity: 0;
+  color: transparent;
 }
 
 .quota-slider input[type='range']::-webkit-slider-thumb {

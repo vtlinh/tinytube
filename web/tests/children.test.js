@@ -75,6 +75,14 @@ describe('normalizeSettings', () => {
     expect(dangling.activeChildId).toBe(once.children[0].id)
   })
 
+  it('drops a leftover video-length filter so it cannot keep hiding videos', () => {
+    const s = normalizeSettings({
+      children: [{ id: FIRST_CHILD_ID, name: 'Ann', minVideoMins: 15, maxVideoMins: 60 }],
+    })
+    expect(s.children[0].minVideoMins).toBeUndefined()
+    expect(s.children[0].maxVideoMins).toBeUndefined()
+  })
+
   it('gives a fresh install one child with the defaults', () => {
     const s = normalizeSettings({})
     expect(s.children).toEqual([{ ...CHILD_DEFAULTS, id: FIRST_CHILD_ID, name: 'Child 1' }])

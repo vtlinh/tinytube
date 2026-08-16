@@ -230,55 +230,6 @@ export function hydrateChannel(ch, record = {}) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// video length — a RANGE: a floor and a ceiling, 15 minutes apart at the very
-// least, in 15-minute steps up to two hours. Both ends can say "any": the
-// floor at 0 (nothing is too short) and the ceiling at the far end (nothing is
-// too long), which is why the ceiling's last stop is Infinity rather than 2h.
-
-export const LENGTH_STEP_MINS = 15
-export const LENGTH_MAX_MINS = 120
-
-/** The stops both thumbs move between: 0, 15, … 120, then no ceiling at all. */
-export const LENGTH_STOPS = [
-  ...Array.from({ length: LENGTH_MAX_MINS / LENGTH_STEP_MINS + 1 }, (_, i) => i * LENGTH_STEP_MINS),
-  Infinity,
-]
-
-/** minutes -> the stop index that holds them; Infinity and null are the last. */
-export function lengthIndex(mins) {
-  if (mins == null || !Number.isFinite(mins)) return LENGTH_STOPS.length - 1
-  const i = LENGTH_STOPS.indexOf(mins)
-  return i >= 0 ? i : Math.max(0, Math.min(LENGTH_STOPS.length - 1, Math.round(mins / LENGTH_STEP_MINS)))
-}
-
-/** What a thumb says: bare minutes, and "any" at the ends that stop
- * filtering. No "1h 15m" — two wide labels collided whenever the two thumbs
- * came close, and a number is three characters at its worst. */
-export function minuteLabel(mins) {
-  return !mins || !Number.isFinite(mins) ? 'any' : String(mins)
-}
-
-/** The same value in words, for prose rather than for a thumb. */
-export function lengthLabel(mins) {
-  return !mins || !Number.isFinite(mins) ? 'any' : fmtMins(mins)
-}
-
-/**
- * Move one end of the length range, in stop indexes.
- *
- * THE ENDS MAY NOT MEET. A floor equal to its ceiling would hide every video
- * but the ones exactly that long, which is never what a parent dragging a
- * slider means — so they stay a step (15 minutes) apart, and pushing one into
- * the other moves it as far as it may go instead of past.
- */
-export function clampLengthRange([lo, hi], end, v) {
-  const last = LENGTH_STOPS.length - 1
-  return end === 'lo'
-    ? [Math.max(0, Math.min(v, hi - 1)), hi]
-    : [lo, Math.min(last, Math.max(v, lo + 1))]
-}
-
 /**
  * The gallery's channel list: parent-approved channels that overlap the age
  * range, with names, avatars and videos from the Worker's shared cache.
@@ -286,22 +237,11 @@ export function clampLengthRange([lo, hi], end, v) {
  * still listed and still removable.
  */
 export function mergeChannels(customVideosById, settings) {
-  const { customChannels, minVideoMins = 0, maxVideoMins = null } = settings
+  const { customChannels } = settings
   const ageRange = effectiveAgeRange(settings)
-  const custom = customChannels
+  return customChannels
     .filter(ch => overlaps(ageRange, ch.min_age, ch.max_age))
     .map(ch => hydrateChannel(ch, customVideosById[ch.channel_id]))
-  /* Unknown durations count as too short: don't let un-probed videos slip past
-     the floor. They pass the ceiling for the same reason — a video we could
-     not measure is treated as a very short one, consistently at both ends. */
-  const ceiling = maxVideoMins == null || !Number.isFinite(maxVideoMins) ? Infinity : maxVideoMins * 60
-  return custom.map(ch => ({
-    ...ch,
-    videos: (ch.videos ?? []).filter(v => {
-      const secs = v.duration ?? 0
-      return secs >= minVideoMins * 60 && secs <= ceiling
-    }),
-  }))
 }
 
 // ---------------------------------------------------------------------------
@@ -704,8 +644,6 @@ export const CHILD_DEFAULTS = {
      watching at all, which is still deliberately reachable. */
   quota: { per6h: null, perDay: 180, perWeek: null, perMonth: null },
   day: null, // {until, limits?, bonusMins?} — today's override, see above
-  minVideoMins: 0, // the floor: hide videos shorter than this; 0 = no floor
-  maxVideoMins: null, // the ceiling: hide videos longer than this; null = none
   /* Watched videos always sink to the bottom of the grid; this takes them off
      it entirely. Off by default — sinking is enough for most, and a child
      re-watching a favourite is not a problem to solve. */
@@ -781,6 +719,13 @@ export function decisionOnly(ch) {
   return { channel_id: ch.channel_id, min_age, max_age }
 }
 
+/** Video length used to be a parent setting. A leftover pair would keep
+ * hiding videos with no control left to turn it off, so it is dropped. */
+function dropVideoLength(child) {
+  const { minVideoMins, maxVideoMins, ...rest } = child
+  return rest
+}
+
 /** Stored shape -> stored shape, with legacy blobs folded in. Idempotent. */
 export function normalizeSettings(parsed = {}) {
   // fold pre-refactor fields into the unified overrides map
@@ -798,7 +743,7 @@ export function normalizeSettings(parsed = {}) {
     }
   }
 
-  const children =
+  const children = (
     Array.isArray(parsed.children) && parsed.children.length
       ? parsed.children.map((c, i) => ({
           ...CHILD_DEFAULTS,
@@ -832,6 +777,7 @@ export function normalizeSettings(parsed = {}) {
             name: parsed.children?.[0]?.name ?? 'Child 1',
           },
         ]
+  ).map(dropVideoLength)
   const activeChildId = children.some(c => c.id === parsed.activeChildId) ? parsed.activeChildId : children[0].id
   return {
     ...ACCOUNT_DEFAULTS,
@@ -898,7 +844,6 @@ export function storeApi(settings, update, updateChild = update) {
         },
       }),
     clearDayOverride: () => updateChild({ day: null }),
-    setVideoLength: ([minVideoMins, maxVideoMins]) => updateChild({ minVideoMins, maxVideoMins }),
     setHideWatched: hideWatched => updateChild({ hideWatched: !!hideWatched }),
     setPlayback: mode => updateChild({ playback: playbackMode(mode) }),
     setChildEmail: email => updateChild({ email: normEmail(email) }),
