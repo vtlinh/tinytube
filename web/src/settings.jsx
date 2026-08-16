@@ -1032,6 +1032,15 @@ function QuotaRow({ store }) {
         {/* no summary of the limits here: they are set in the dialog and read
             there, and spelling all four out inline took three lines to repeat
             what the pencil opens */}
+        {!today && (
+          <button
+            type="button"
+            className="btn btn-link btn-sm text-secondary text-nowrap p-0"
+            onClick={() => setEditing('today')}
+          >
+            override for today only
+          </button>
+        )}
         <span className="flex-grow-1" />
         <button
           type="button"
@@ -1060,16 +1069,6 @@ function QuotaRow({ store }) {
             <i className="fa-sharp-duotone fa-regular fa-pencil" />
           </button>
         </div>
-      )}
-
-      {!today && (
-        <button
-          type="button"
-          className="btn btn-link btn-sm text-secondary ps-0"
-          onClick={() => setEditing('today')}
-        >
-          override for today only
-        </button>
       )}
 
       {editing === 'standing' && (
@@ -1309,24 +1308,25 @@ function ApiKeyRow({ apiKey, onChange }) {
   }, [apiKey])
 
   return (
-    <div className="settings-row">
-      <span
-        className="settings-label text-nowrap"
-        title="Optional. Adding channels no longer needs a key — search and paste go through TinyTube."
-      >
-        <i className="fa-sharp-duotone fa-regular fa-key me-2" />
-        <a href={API_CONSOLE_URL} target="_blank" rel="noreferrer">YouTube API Key</a>
-      </span>
-      {/* real <form> + username/current-password hints so the browser's
-          password manager offers to save the key; Save submits it via
-          form="api-key-form" and preventDefault keeps the SPA in place */}
-      <form
-        id="api-key-form"
-        className="d-flex align-items-center gap-2 flex-grow-1 settings-row-body"
-        onSubmit={e => e.preventDefault()}
-      >
+    <div className="settings-row settings-row-stack">
+      <div className="d-flex align-items-center gap-2">
+        <span
+          className="settings-label text-nowrap"
+          title="Optional. Adding channels no longer needs a key — search and paste go through TinyTube."
+        >
+          <i className="fa-sharp-duotone fa-regular fa-key me-2" />
+          <a href={API_CONSOLE_URL} target="_blank" rel="noreferrer">YouTube API Key</a>
+        </span>
+        {/* real <form> + username/current-password hints so the browser's
+            password manager offers to save the key; Save submits it via
+            form="api-key-form" and preventDefault keeps the SPA in place */}
+        <form
+          id="api-key-form"
+          className="d-flex align-items-center gap-2 flex-grow-1 settings-row-body"
+          onSubmit={e => e.preventDefault()}
+        >
           <input type="text" name="username" value="youtube-api-key" autoComplete="username" readOnly hidden />
-          <div className="position-relative flex-grow-1">
+          <div className="position-relative flex-grow-1 settings-api-key-field">
             <input
               type="password"
               name="api-key"
@@ -1351,8 +1351,8 @@ function ApiKeyRow({ apiKey, onChange }) {
             />
             {masked && (
               <span
-                className="position-absolute top-50 translate-middle-y pe-none font-monospace"
-                style={{ left: '0.75rem' }}
+                className="position-absolute top-50 translate-middle-y pe-none font-monospace text-truncate"
+                style={{ left: '0.75rem', right: check ? '2rem' : '0.75rem' }}
               >
                 {maskKey(apiKey)}
               </span>
@@ -1370,18 +1370,19 @@ function ApiKeyRow({ apiKey, onChange }) {
               />
             )}
           </div>
+          {apiKey && (
+            <button
+              type="button"
+              className="btn btn-outline-danger btn-sm flex-shrink-0"
+              aria-label="Delete API key"
+              onClick={() => setConfirming(true)}
+            >
+              <i className="fa-sharp-duotone fa-regular fa-trash" />
+            </button>
+          )}
         </form>
-        {apiKey && (
-          <button
-            type="button"
-            className="btn btn-outline-danger btn-sm"
-            aria-label="Delete API key"
-            onClick={() => setConfirming(true)}
-          >
-            <i className="fa-sharp-duotone fa-regular fa-trash" />
-          </button>
-        )}
-      {check && check !== 'busy' && check !== 'ok' && <div className="alert alert-warning mt-2 py-2 mb-0 w-100">{check}</div>}
+      </div>
+      {check && check !== 'busy' && check !== 'ok' && <div className="alert alert-warning py-2 mb-0">{check}</div>}
       {confirming && (
         <ConfirmModal
           title="Delete API key?"
