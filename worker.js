@@ -216,6 +216,15 @@ const PAGE_TITLES = [
   /"title":\{"runs":\[\{"text":"((?:[^"\\]|\\.)*)"/,
   /"title":\{[^{}]*"simpleText":"((?:[^"\\]|\\.)*)"/,
 ];
+/* The clock on the thumbnail — "0:36", "10:32", "1:02:15". Two shapes,
+ * because YouTube renamed this the same way it renamed the entry. A badge
+ * that is not a clock (LIVE, NEW) is ignored rather than treated as a
+ * length: the regex only matches M:SS / H:MM:SS. */
+const PAGE_CLOCKS = [
+  /"thumbnailBadgeViewModel":\{"text":"(\d{1,3}:[0-5]\d(?::[0-5]\d)?)"/,
+  /"lengthText":\{[^{}]*"simpleText":"(\d{1,3}:[0-5]\d(?::[0-5]\d)?)"/,
+];
+const PAGE_SECONDS = /"lengthSeconds":"(\d+)"/;
 
 /* Each entry ends where the next begins, and that bound comes first: without
  * it an entry missing its own title would take the NEXT entry's, which is the
@@ -242,11 +251,29 @@ export function parseUploadsPage(html, limit = MAX_VIDEOS) {
         const m = re.exec(chunk);
         if (m) { title = jsonUnescape(m[1]).trim(); break; }
       }
-      out.push({ id, title: title || id });
+      let duration = null;
+      for (const re of PAGE_CLOCKS) {
+        const m = re.exec(chunk);
+        if (m) { duration = parseClockDuration(m[1]); break; }
+      }
+      if (duration == null) {
+        const s = PAGE_SECONDS.exec(chunk);
+        if (s) duration = Number(s[1]);
+      }
+      out.push({ id, title: title || id, duration });
     }
     from = next;
   }
   return out;
+}
+
+/** "0:36" / "10:32" / "1:02:15" -> seconds. Null for LIVE, PREMIERE, junk. */
+export function parseClockDuration(text) {
+  const m = typeof text === "string" ? text.trim().match(/^(\d{1,3}):([0-5]\d)(?::([0-5]\d))?$/) : null;
+  if (!m) return null;
+  return m[3] != null
+    ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+    : Number(m[1]) * 60 + Number(m[2]);
 }
 
 /* JSON's string escapes, which is what a title inside the page's state wears.
@@ -283,9 +310,11 @@ export function parseFeed(xml) {
     const at = (/<published>\s*([^<\s]+)\s*<\/published>/.exec(entry) || [])[1];
     const title = (/<title[^>]*>([\s\S]*?)<\/title>/.exec(entry) || [])[1];
     const seconds = at ? Math.floor(Date.parse(at) / 1000) : NaN;
+    const length = (/<yt:duration[^>]*\sseconds="(\d+)"/.exec(entry) || [])[1];
     out.set(id, {
       published: Number.isFinite(seconds) ? seconds : null,
       title: title ? xmlUnescape(title).trim() : null,
+      duration: length != null ? Number(length) : null,
     });
   }
   return out;
@@ -325,7 +354,8 @@ export function datePositions(ordered, dated, now) {
     const known = dated.get(v.id)?.published ?? null;
     const at = known !== null && known <= previous ? known : previous - 1;
     previous = at;
-    return { ...v, published: at };
+    const length = Number.isFinite(v.duration) ? v.duration : (dated.get(v.id)?.duration ?? null);
+    return { ...v, published: at, duration: Number.isFinite(length) ? length : null };
   });
 }
 
@@ -685,14 +715,24 @@ async function uploadsFor(channelId, known) {
    * at fifteen videos rather than none — and being a UULF feed, still with no
    * Shorts in it. */
   if (ordered.length === 0) {
-    ordered = [...dated.entries()].map(([id, d]) => ({ id, title: d.title || id }));
+    ordered = [...dated.entries()].map(([id, d]) => ({
+      id,
+      title: d.title || id,
+      duration: Number.isFinite(d.duration) ? d.duration : null,
+    }));
   }
   if (ordered.length === 0) return null;
 
   return datePositions(ordered, dated, Math.floor(Date.now() / 1000)).map(v =>
     known.has(v.id)
       ? v.id
-      : { id: v.id, title: v.title, published: v.published, thumb: thumbnailUrl(v.id) },
+      : {
+          id: v.id,
+          title: v.title,
+          published: v.published,
+          thumb: thumbnailUrl(v.id),
+          duration: Number.isFinite(v.duration) ? v.duration : null,
+        },
   );
 }
 
@@ -1136,10 +1176,11 @@ async function syncPush(request, db) {
  *
  * The Data API path (set the YOUTUBE_API_KEY wrangler secret to enable it)
  * answers with real durations and drops 18+ age-restricted videos; without a
- * key it falls back to the same page+feed scrape /uploads uses, which has
- * neither. An answer that parses to NOTHING is never cached — a stale answer
- * beats an empty one, and caching a failure would serve it to every user for
- * a day.
+ * key it falls back to the same page+feed scrape /uploads uses, whose
+ * thumbnail-badge clock (and the feed's yt:duration) is the length a parent
+ * filter reads. An answer that parses to NOTHING is never cached — a stale
+ * answer beats an empty one, and caching a failure would serve it to every
+ * user for a day.
  * ------------------------------------------------------------------------- */
 
 /* NOTHING IS REFETCHED INSIDE 23 HOURS — not by a browser asking, not by the
@@ -1271,11 +1312,23 @@ async function fetchChannelRecord(channelId, ytKey) {
     const scraped = await uploadsFor(channelId, EMPTY).catch(() => null);
     videos = (scraped ?? [])
       .filter((v) => typeof v === "object" && VIDEO_ID.test(v?.id ?? ""))
-      .map((v) => ({ id: v.id, title: v.title, duration: null, thumbnail: thumbnailUrl(v.id) }));
+      .map((v) => ({
+        id: v.id,
+        title: v.title,
+        duration: Number.isFinite(v.duration) ? v.duration : null,
+        thumbnail: thumbnailUrl(v.id),
+      }));
   }
   if (!videos.length) return null; // stale beats empty; never cached
   if (!meta) meta = await scrapedChannelMeta(channelId).catch(() => null);
-  return { channel_id: channelId, ...(meta ?? {}), title: meta?.title ?? null, thumbnail: meta?.thumbnail ?? null, videos };
+  return {
+    channel_id: channelId,
+    ...(meta ?? {}),
+    title: meta?.title ?? null,
+    thumbnail: meta?.thumbnail ?? null,
+    videos,
+    lengths: true, // this scrape (or API path) looked for durations; see usableRecord
+  };
 }
 
 async function writeChannelRecord(db, record) {
@@ -1295,7 +1348,15 @@ async function writeChannelRecord(db, record) {
  * belongs. Treating those as stale costs one refetch each, once.
  */
 export function usableRecord(cached) {
-  return !!cached && "title" in cached;
+  if (!cached || !("title" in cached)) return false;
+  /* The first scrape stored videos with duration: null. Serving those inside
+     their day emptied a grid whose parent had set a length floor. A row that
+     already carries a length, or one written after we started looking, is
+     fine; an older one is stale and costs one refetch. */
+  if ("lengths" in cached) return true;
+  const videos = cached.videos ?? [];
+  if (!videos.length) return true;
+  return videos.some((v) => Number.isFinite(v.duration));
 }
 
 /** The cached record for one channel, refreshing it first when it is stale. */

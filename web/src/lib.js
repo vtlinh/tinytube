@@ -291,15 +291,16 @@ export function mergeChannels(customVideosById, settings) {
   const custom = customChannels
     .filter(ch => overlaps(ageRange, ch.min_age, ch.max_age))
     .map(ch => hydrateChannel(ch, customVideosById[ch.channel_id]))
-  /* Unknown duration is kept. The Worker scrape that usually fills the grid
-     has no lengths, and treating those as zero hid every video the moment a
-     parent set a floor. A known length still has to clear both ends. */
+  /* Unknown durations count as too short: don't let un-probed videos slip past
+     the floor. They pass the ceiling for the same reason — a video we could
+     not measure is treated as a very short one, consistently at both ends.
+     The Worker scrape reads the thumbnail badge clock, so a floor is a real
+     filter rather than an empty grid. */
   const ceiling = maxVideoMins == null || !Number.isFinite(maxVideoMins) ? Infinity : maxVideoMins * 60
   return custom.map(ch => ({
     ...ch,
     videos: (ch.videos ?? []).filter(v => {
-      const secs = v.duration
-      if (secs == null || !Number.isFinite(secs)) return true
+      const secs = v.duration ?? 0
       return secs >= minVideoMins * 60 && secs <= ceiling
     }),
   }))

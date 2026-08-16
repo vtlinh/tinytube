@@ -367,6 +367,24 @@ describe('getChannelsCached', () => {
     expect(fetch.mock.calls).toHaveLength(2)
   })
 
+  it('refetches a cached row that has no lengths', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_500_000)
+    localStorage.setItem(
+      'tinytube:videocache:v1',
+      JSON.stringify({
+        [UC]: { fetchedAt: 1_500_000, title: 'Chan', videos: [{ id: 'dQw4w9WgXcQ', title: 'Vid' }] },
+      }),
+    )
+    const fetch = routedFetch(body => ({
+      channels: Object.fromEntries(body.channels.map(id => [id, record(id)])),
+    }))
+    vi.stubGlobal('fetch', fetch)
+    const byId = await getChannelsCached('', [UC])
+    expect(fetch.mock.calls).toHaveLength(1)
+    expect(byId[UC].videos[0].duration).toBe(212)
+  })
+
   it('re-validates what the Worker sends, even though it is our own server', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(2_000_000)

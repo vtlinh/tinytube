@@ -837,7 +837,8 @@ stops, green publishes.
   which channels an account approved stays per-user in `sync_settings`. The
   cache is written ONLY by the Worker's own fetches (Data API when the
   `YOUTUBE_API_KEY` wrangler secret is set — durations, 18+ dropped — else the
-  same page+feed scrape /uploads uses): a browser-writable shared cache would
+  same page+feed scrape /uploads uses, whose thumbnail-badge clock is the
+  length a parent filter reads): a browser-writable shared cache would
   let one account put its own "videos" under a channel every other child then
   sees.
 

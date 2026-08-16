@@ -22,6 +22,7 @@ import {
   HANDLE,
   longFormPlaylistId,
   parseUploadsPage,
+  parseClockDuration,
   parseFeed,
   jsonUnescape,
   xmlUnescape,
@@ -41,13 +42,19 @@ import {
 const OK_CHANNEL = "UC" + "a".repeat(22);
 
 /* The shapes YouTube serves, in the nesting the real page uses. */
-const lockup = (id, title) => `{"lockupViewModel":{"contentId":"${id}",
+const lockup = (id, title, clock) => `{"lockupViewModel":{"contentId":"${id}",
   "rendererContext":{"commandContext":{"onTap":{"innertubeCommand":{"watchEndpoint":
   {"videoId":"${id}"}}}}},
-  "metadata":{"lockupMetadataViewModel":{"title":{"content":"${title}"}}}}}`;
+  "metadata":{"lockupMetadataViewModel":{"title":{"content":"${title}"}}}` +
+  (clock
+    ? `,"contentImage":{"thumbnailViewModel":{"overlays":[{"thumbnailBottomOverlayViewModel":{"badges":[{"thumbnailBadgeViewModel":{"text":"${clock}","badgeStyle":"THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT"}}]}}]}}`
+    : "") +
+  `}}`;
 
-const renderer = (id, title) =>
-  `{"playlistVideoRenderer":{"videoId":"${id}","title":{"runs":[{"text":"${title}"}]}}}`;
+const renderer = (id, title, clock) =>
+  `{"playlistVideoRenderer":{"videoId":"${id}","title":{"runs":[{"text":"${title}"}]}` +
+  (clock ? `,"lengthText":{"simpleText":"${clock}"}` : "") +
+  `}}`;
 
 const page = (...entries) =>
   `<!doctype html><script>var ytInitialData = {"contents":[${entries.join(",")}]};</script>`;
@@ -55,9 +62,10 @@ const page = (...entries) =>
 const feed = (...entries) =>
   `<?xml version="1.0"?><feed>${entries.join("")}</feed>`;
 
-const feedEntry = (id, title, published) =>
+const feedEntry = (id, title, published, seconds) =>
   `<entry><yt:videoId>${id}</yt:videoId><title>${title}</title>` +
   (published ? `<published>${published}</published>` : "") +
+  (seconds != null ? `<yt:duration seconds="${seconds}"/>` : "") +
   `</entry>`;
 
 /* ---- the playlist id ---- */
@@ -89,10 +97,31 @@ test("reads the current page shape, in page order", () => {
   assert.deepEqual(v.map(x => x.title), ["First", "Second"]);
 });
 
+test("reads the clock on the thumbnail badge", () => {
+  const v = parseUploadsPage(page(
+    lockup("aaaaaaaaaaa", "Short", "0:36"),
+    lockup("bbbbbbbbbbb", "Long", "1:02:15"),
+  ));
+  assert.deepEqual(v.map(x => x.duration), [36, 3735]);
+});
+
 test("reads the older page shape", () => {
   const v = parseUploadsPage(page(renderer("aaaaaaaaaaa", "First")));
   assert.deepEqual(v.map(x => x.id), ["aaaaaaaaaaa"]);
   assert.equal(v[0].title, "First");
+});
+
+test("reads the older lengthText clock", () => {
+  const v = parseUploadsPage(page(renderer("aaaaaaaaaaa", "First", "10:32")));
+  assert.equal(v[0].duration, 632);
+});
+
+test("a missing clock is null, and is not borrowed from the next entry", () => {
+  const v = parseUploadsPage(page(
+    lockup("aaaaaaaaaaa", "No clock"),
+    lockup("bbbbbbbbbbb", "Has one", "3:00"),
+  ));
+  assert.deepEqual(v.map(x => x.duration), [null, 180]);
 });
 
 /* The page is not trusted. An id goes into a URL and, on the phone, into a JS
@@ -131,6 +160,16 @@ test("unescapes json escapes in titles", () => {
   assert.equal(title('\\"Quoted\\"'), '"Quoted"');
   assert.equal(title("a\\/b"), "a/b");
   assert.equal(title("caf\\u00e9"), "café");
+});
+
+test("parseClockDuration reads M:SS and H:MM:SS, and refuses the rest", () => {
+  assert.equal(parseClockDuration("0:36"), 36);
+  assert.equal(parseClockDuration("10:32"), 632);
+  assert.equal(parseClockDuration("1:02:15"), 3735);
+  assert.equal(parseClockDuration("LIVE"), null);
+  assert.equal(parseClockDuration("NEW"), null);
+  assert.equal(parseClockDuration(""), null);
+  assert.equal(parseClockDuration(undefined), null);
 });
 
 test("leaves an unknown escape alone", () => {
@@ -179,6 +218,13 @@ test("an entry with no usable date still parses", () => {
   assert.equal(d.get("aaaaaaaaaaa").published, null);
 });
 
+test("reads yt:duration seconds from the feed", () => {
+  const d = parseFeed(feed(feedEntry("aaaaaaaaaaa", "x", "2026-07-29T15:58:06+00:00", 212)));
+  assert.equal(d.get("aaaaaaaaaaa").duration, 212);
+  const none = parseFeed(feed(feedEntry("aaaaaaaaaaa", "x", "2026-07-29T15:58:06+00:00")));
+  assert.equal(none.get("aaaaaaaaaaa").duration, null);
+});
+
 test("junk in place of a feed is an empty map, not a throw", () => {
   for (const junk of ["", "not xml", "<feed></feed>", "<feed><entry></entry></feed>"]) {
     assert.equal(parseFeed(junk).size, 0);
@@ -219,6 +265,15 @@ test("dated videos keep the date the feed gave them", () => {
     1000,
   );
   assert.deepEqual(out.map(v => v.published), [500, 400]);
+});
+
+test("a page with no clock takes the feed's duration", () => {
+  const out = datePositions(
+    [{ id: "aaaaaaaaaaa" }, { id: "bbbbbbbbbbb", duration: 36 }],
+    new Map([["aaaaaaaaaaa", { published: 500, duration: 212 }]]),
+    1000,
+  );
+  assert.deepEqual(out.map(v => v.duration), [212, 36]);
 });
 
 test("undated videos are placed below the last dated one, in page order", () => {
@@ -269,6 +324,7 @@ test("reads a real uploads page", () => {
   /* The ampersand in this one arrives as & — the escape that makes
      jsonUnescape necessary. */
   assert.ok(v[2].title.startsWith("@Fredagainagain"));
+  assert.deepEqual(v.map(x => x.duration), [36, 14, 15]);
   for (const video of v) assert.ok(VIDEO_ID.test(video.id));
 });
 
@@ -715,6 +771,12 @@ test("a cached row without a title is not a usable record", () => {
   assert.equal(usableRecord({ channel_id: "UC", title: "Chan", videos: [] }), true);
   assert.equal(usableRecord({ channel_id: "UC", title: null, videos: [] }), true, "known-to-be-nameless is an answer");
   assert.equal(usableRecord(null), false);
+});
+
+test("a scrape that stored no lengths is stale, once", () => {
+  assert.equal(usableRecord({ title: "Chan", videos: [{ id: "x", duration: null }] }), false);
+  assert.equal(usableRecord({ title: "Chan", videos: [{ id: "x", duration: 36 }] }), true);
+  assert.equal(usableRecord({ title: "Chan", videos: [{ id: "x", duration: null }], lengths: true }), true);
 });
 
 /* The refresh floor: 23 hours, and 23 rather than 24 on purpose — a daily

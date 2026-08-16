@@ -269,6 +269,14 @@ function writeCache(cache) {
     console.warn('video cache persist failed', e)
   }
 }
+
+/* Past the TTL, or a row written before the Worker sent lengths — those
+   emptied the grid under a floor, so they are asked for again once. */
+function cacheNeedsRefresh(entry, now) {
+  if (!entry || now - entry.fetchedAt >= CACHE_TTL_MS) return true
+  const videos = entry.videos ?? []
+  return videos.length > 0 && videos.every(v => !Number.isFinite(v.duration))
+}
 const WORKER_URL = 'https://tinytube.vtlinh87.workers.dev'
 
 /**
@@ -432,7 +440,7 @@ export async function getChannelsCached(apiKey, ids) {
   const cache = readCache()
   const now = Date.now()
   const wanted = [...new Set(ids)].filter(id => UC_ID.test(id))
-  const stale = wanted.filter(id => !(cache[id] && now - cache[id].fetchedAt < CACHE_TTL_MS))
+  const stale = wanted.filter(id => cacheNeedsRefresh(cache[id], now))
 
   if (stale.length) {
     let fetched = {}

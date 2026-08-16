@@ -70,7 +70,7 @@ describe('mergeChannels', () => {
     expect(merged.find(c => c.channel_id === 'UCy')).toBeUndefined()
   })
 
-  it('drops videos shorter than minVideoMins, but keeps ones we could not measure', () => {
+  it('drops videos shorter than minVideoMins, counting unknown durations as too short', () => {
     const withDurations = {
       UCa: {
         title: 'Mixed',
@@ -78,7 +78,7 @@ describe('mergeChannels', () => {
       },
     }
     const merged = mergeChannels(withDurations, settings({ minVideoMins: 5 }))
-    expect(merged[0].videos.map(v => v.id)).toEqual(['long', 'unknown'])
+    expect(merged[0].videos.map(v => v.id)).toEqual(['long'])
   })
 
   it('minVideoMins of 0 keeps videos with unknown durations', () => {
