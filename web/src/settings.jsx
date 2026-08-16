@@ -1270,17 +1270,9 @@ function PlaybackRow({ value, onChange }) {
   )
 }
 
-// enough of a stored key to recognize it without exposing the whole thing;
-// one dot per hidden character so the preview keeps the key's real length
-const maskKey = k => `${k.slice(0, 6)}${'•'.repeat(k.length - 10)}${k.slice(-4)}`
-
 function ApiKeyRow({ apiKey, onChange }) {
   const [confirming, setConfirming] = useState(false)
-  const [focused, setFocused] = useState(false)
   const [check, setCheck] = useState(null) // null | 'busy' | 'ok' | error message
-  // masked preview only when idle; while editing the password dots take over.
-  // short strings are left unmasked — slices would overlap and it's not a key
-  const masked = !focused && apiKey.length > 12
 
   // validate as soon as a key lands in the field (keys are usually pasted, so
   // the 500ms debounce mostly guards slow typists; i18nLanguages = 1 quota
@@ -1341,21 +1333,8 @@ function ApiKeyRow({ apiKey, onChange }) {
               onKeyDown={e => {
                 if (e.key === 'Enter') e.preventDefault()
               }}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              // dots hidden under the masked preview; still a password input
-              // so the browser's save-key prompt keeps working
-              style={masked ? { color: 'transparent' } : undefined}
               autoComplete="current-password"
             />
-            {masked && (
-              <span
-                className="position-absolute top-50 translate-middle-y pe-none font-monospace text-truncate"
-                style={{ left: '0.75rem', right: check ? '2rem' : '0.75rem' }}
-              >
-                {maskKey(apiKey)}
-              </span>
-            )}
             {check === 'busy' && (
               <span
                 className="spinner-border spinner-border-sm position-absolute top-50 end-0 translate-middle-y me-2"
