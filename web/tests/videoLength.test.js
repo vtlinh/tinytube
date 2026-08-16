@@ -86,8 +86,10 @@ describe('filtering the grid by length', () => {
     expect(ids({})).toEqual(['short', 'mid', 'long', 'unknown'])
   })
 
-  it('applies the floor, and an unmeasured video counts as too short', () => {
-    expect(ids({ minVideoMins: 15 })).toEqual(['mid', 'long'])
+  it('applies the floor, and an unmeasured video is kept', () => {
+    // the Worker scrape has no durations; treating those as zero emptied
+    // the grid for anyone with a floor set
+    expect(ids({ minVideoMins: 15 })).toEqual(['mid', 'long', 'unknown'])
   })
 
   it('applies the ceiling', () => {
@@ -95,7 +97,7 @@ describe('filtering the grid by length', () => {
   })
 
   it('applies both at once', () => {
-    expect(ids({ minVideoMins: 15, maxVideoMins: 60 })).toEqual(['mid'])
+    expect(ids({ minVideoMins: 15, maxVideoMins: 60 })).toEqual(['mid', 'unknown'])
   })
 })
 

@@ -16,11 +16,15 @@ html, body, #root {
    100dvh on Android Chrome is the LAYOUT viewport and is taller than what
    you can see (URL bar, the gap above the system nav), so an in-flow tab
    bar at the bottom of a 100dvh column sat below the fold and scrolled
-   away. inset:0 pins the shell to what is on screen; the column below
-   then keeps the bar in the layout so it cannot cover the last row. */
+   away. inset:0 pins the shell to what is on screen; making it a column
+   (not height:100% on the children) is what actually gives the gallery
+   a height — a percentage against inset:0 is auto in some browsers, and
+   then flex-basis:0 on the grid pane draws no videos. */
 #root {
   position: fixed;
   inset: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
@@ -30,7 +34,9 @@ html, body, #root {
    A guessed padding-bottom was always a few pixels short of the real bar, so
    the last channel sat behind it. The body pane scrolls; the bar does not. */
 .gallery {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -44,7 +50,7 @@ html, body, #root {
 }
 
 .gallery-body {
-  flex: 1 1 0;
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -109,7 +115,9 @@ html, body, #root {
 }
 
 .settings {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -118,7 +126,7 @@ html, body, #root {
 }
 
 .settings-body {
-  flex: 1 1 0;
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
