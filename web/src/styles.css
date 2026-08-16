@@ -1,11 +1,27 @@
-html, body, #root {
+html, body {
   height: 100%;
-  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html, body, #root {
   background: #0e1621; /* Android values-night bg */
   touch-action: manipulation; /* no double-tap zoom on kid taps; pull-to-refresh still works */
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* The visual viewport — the same box `position:fixed; bottom:0` uses.
+   100dvh on Android Chrome is the LAYOUT viewport and is taller than what
+   you can see (URL bar, the gap above the system nav), so an in-flow tab
+   bar at the bottom of a 100dvh column sat below the fold and scrolled
+   away. inset:0 pins the shell to what is on screen; the column below
+   then keeps the bar in the layout so it cannot cover the last row. */
+#root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
 }
 
 /* ---------- gallery ---------- */
@@ -28,7 +44,7 @@ html, body, #root {
 }
 
 .gallery-body {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -39,7 +55,7 @@ html, body, #root {
    Android font boosting — rather than a rem we guessed. Safe-area padded for
    phones with a home indicator. */
 .bottom-tabs {
-  flex: none;
+  flex: 0 0 auto;
   background: rgba(24, 37, 52, 0.95);
   backdrop-filter: blur(6px);
   border-color: #2a3b4d !important;
@@ -102,7 +118,7 @@ html, body, #root {
 }
 
 .settings-body {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
