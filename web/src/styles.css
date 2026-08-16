@@ -205,6 +205,19 @@ html, body, #root {
   min-width: 0;
 }
 
+/* the key is long and a password input will not shrink below its value, so
+   the field has to be the thing that clips — otherwise the checkmark rides
+   over the delete button on a phone */
+.settings-api-key-field {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.settings-api-key-field .form-control {
+  min-width: 0;
+  padding-right: 2rem;
+}
+
 .settings-version {
   text-align: center;
   padding: 0.65rem 0.85rem;
