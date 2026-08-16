@@ -10,6 +10,7 @@ describe('bottom tabs', () => {
     render(<Gallery channels={channels} watchStore={watchStore} onPlay={() => {}} onParents={() => {}} />)
     const nav = document.querySelector('.bottom-tabs')
     expect(nav.classList.contains('fixed-bottom')).toBe(false)
+    expect(nav.parentElement.classList.contains('gallery')).toBe(true)
     expect(nav.previousElementSibling.classList.contains('gallery-body')).toBe(true)
   })
 })

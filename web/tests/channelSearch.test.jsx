@@ -95,6 +95,7 @@ describe('the Channels tab', () => {
     expect(screen.queryByText('← Kids mode')).toBeNull()
     const nav = document.querySelector('.bottom-tabs')
     expect(nav.classList.contains('fixed-bottom')).toBe(false)
+    expect(nav.parentElement.classList.contains('settings')).toBe(true)
     expect(document.querySelector('.settings-body')).toBeTruthy()
   })
 
@@ -103,6 +104,8 @@ describe('the Channels tab', () => {
     const nav = document.querySelector('.bottom-tabs')
     const body = document.querySelector('.settings-body')
     expect(nav.classList.contains('fixed-bottom')).toBe(false)
+    expect(nav.parentElement.classList.contains('settings')).toBe(true)
+    expect(nav.previousElementSibling).toBe(body)
     expect(body.contains(screen.getByText(/shown to/))).toBe(true)
     expect(nav.contains(screen.getByText(/shown to/))).toBe(false)
   })
