@@ -15,12 +15,7 @@ import {
   activeBonusMins,
   quotaState,
   QUOTA_PERIODS,
-  LENGTH_STOPS,
-  lengthIndex,
-  lengthLabel,
-  minuteLabel,
   limitLabel,
-  clampLengthRange,
   settingsLock,
   PLAYBACK_IN_ORDER,
   PLAYBACK_RANDOM,
@@ -114,10 +109,6 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
           />
           <BirthdayRow value={settings.birthday} onChange={store.setBirthday} />
           <QuotaRow store={store} />
-          <VideoLengthRow
-            value={[settings.minVideoMins, settings.maxVideoMins]}
-            onChange={store.setVideoLength}
-          />
           <HideWatchedRow value={settings.hideWatched} onChange={store.setHideWatched} />
           <PlaybackRow value={settings.playback} onChange={store.setPlayback} />
           <ApiKeyRow apiKey={settings.apiKey} onChange={store.setApiKey} />
@@ -286,24 +277,24 @@ function ChildEmailRow({ value, signedInAs, onChange }) {
 
   return (
     <div className="settings-row settings-row-stack">
-      <div className="d-flex align-items-center gap-2">
+      <label className="d-flex align-items-center gap-2">
         <span
           className="settings-label text-nowrap"
           title="If this child signs in with this account, these settings lock. Leave blank if they have no account."
         >
-          <i className="fa-sharp-duotone fa-regular fa-envelope me-2" />
+          <i className="fa-sharp-duotone fa-regular fa-envelope me-2" aria-hidden="true" />
           Email
         </span>
         <input
           type="email"
           className={`form-control ${error ? 'is-invalid' : ''}`}
-          aria-label="Child’s email"
-          placeholder="none"
           autoComplete="off"
+          autoCorrect="off"
+          spellCheck="false"
           value={text}
           onChange={e => commit(e.target.value)}
         />
-      </div>
+      </label>
       {error && <div className="text-danger" style={{ fontSize: '0.75rem' }}>{error}</div>}
     </div>
   )
@@ -768,15 +759,17 @@ function NameRow({ value, onChange }) {
   const [text, setText] = useState(value)
   useEffect(() => setText(value), [value])
   return (
-    <div className="settings-row">
+    <label className="settings-row">
       <span className="settings-label text-nowrap">
-        <i className="fa-sharp-duotone fa-regular fa-child me-2" />
+        <i className="fa-sharp-duotone fa-regular fa-child me-2" aria-hidden="true" />
         Name
       </span>
       <input
         type="text"
         className="form-control"
-        aria-label="Child’s name"
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck="false"
         value={text}
         onChange={e => {
           setText(e.target.value)
@@ -785,7 +778,7 @@ function NameRow({ value, onChange }) {
           if (e.target.value.trim()) onChange(e.target.value)
         }}
       />
-    </div>
+    </label>
   )
 }
 
@@ -1104,104 +1097,6 @@ function QuotaRow({ store }) {
           onCancel={() => setEditing(null)}
         />
       )}
-    </div>
-  )
-}
-
-/**
- * The length range: two thumbs on the 0…2h scale, in 15-minute steps, with
- * "any" at both ends — no floor on the left, no ceiling on the right.
- *
- * Built on the same pointer surface as the age slider (the native thumbs
- * cannot be trusted to stay reachable once two of them meet), stepping over
- * LENGTH_STOPS by index rather than by minutes so the last stop can be
- * "no ceiling" rather than a number.
- */
-function VideoLengthSlider({ value: [minMins, maxMins], onChange }) {
-  const track = useRef(null)
-  const grabbed = useRef(null)
-  const last = LENGTH_STOPS.length - 1
-  const lo = lengthIndex(minMins)
-  const hi = lengthIndex(maxMins)
-  const pos = i => `calc(${i / last} * (100% - 36px) + 18px)`
-
-  const indexAt = clientX => {
-    const r = track.current.getBoundingClientRect()
-    const t = (clientX - r.left - 18) / Math.max(1, r.width - 36)
-    return Math.round(Math.min(1, Math.max(0, t)) * last)
-  }
-  const apply = (end, v) => {
-    const [nextLo, nextHi] = clampLengthRange([lo, hi], end, v)
-    onChange([LENGTH_STOPS[nextLo], Number.isFinite(LENGTH_STOPS[nextHi]) ? LENGTH_STOPS[nextHi] : null])
-  }
-
-  const onPointerDown = e => {
-    const v = indexAt(e.clientX)
-    grabbed.current = grabEnd(v, lo, hi)
-    e.currentTarget.setPointerCapture(e.pointerId)
-    if (grabbed.current !== 'pending') apply(grabbed.current, v)
-  }
-  const onPointerMove = e => {
-    if (!grabbed.current) return
-    const v = indexAt(e.clientX)
-    if (grabbed.current === 'pending') {
-      if (v === lo) return
-      grabbed.current = v > hi ? 'hi' : 'lo'
-    }
-    apply(grabbed.current, v)
-  }
-  const release = () => {
-    grabbed.current = null
-  }
-
-  return (
-    <div className="dual-slider quota-slider flex-grow-1" ref={track}>
-      <input
-        type="range"
-        min="0"
-        max={last}
-        value={lo}
-        aria-label="Shortest video"
-        onChange={e => apply('lo', +e.target.value)}
-      />
-      <input
-        type="range"
-        min="0"
-        max={last}
-        value={hi}
-        aria-label="Longest video"
-        onChange={e => apply('hi', +e.target.value)}
-      />
-      {/* MINUTES ONLY, inside the thumb: "1h 15m" beside "1h" was two wide
-          labels colliding whenever the ends came close. A bare number is
-          three characters at its worst and fits the thumb it belongs to. */}
-      <span className="thumb-label" style={{ left: pos(lo) }}>{minuteLabel(LENGTH_STOPS[lo])}</span>
-      <span className="thumb-label" style={{ left: pos(hi) }}>{minuteLabel(LENGTH_STOPS[hi])}</span>
-      <div
-        className="slider-surface"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={release}
-        onPointerCancel={release}
-      />
-    </div>
-  )
-}
-
-function VideoLengthRow({ value: [minMins, maxMins], onChange }) {
-  return (
-    <div className="settings-row settings-row-stack">
-      {/* the values live HERE, not inside the thumbs: two thumbs that meet
-          used to print their labels on top of each other, and a slider with
-          the room to be dragged is worth more than one with words in it */}
-      <span
-        className="settings-label text-nowrap"
-        title="Show only videos between these lengths — either end can be “any”"
-      >
-        <i className="fa-duotone fa-solid fa-video-arrow-up-right me-2" />
-        Video Length
-      </span>
-      <VideoLengthSlider value={[minMins, maxMins]} onChange={onChange} />
     </div>
   )
 }

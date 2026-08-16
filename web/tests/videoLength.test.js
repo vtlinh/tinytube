@@ -1,13 +1,7 @@
-/** The video-length RANGE and the week-long bonus grant. */
+/** Quota periods, today's override, and the week-long bonus grant. */
 
 import { renderHook, act } from '@testing-library/react'
 import {
-  LENGTH_STOPS,
-  LENGTH_MAX_MINS,
-  lengthIndex,
-  lengthLabel,
-  clampLengthRange,
-  mergeChannels,
   activeBonusMins,
   effectiveQuota,
   quotaState,
@@ -20,84 +14,6 @@ import {
   shortDuration,
   limitLabel,
 } from '../src/lib.js'
-
-describe('the length scale', () => {
-  it('runs 0 to 2h in quarter hours, then stops filtering entirely', () => {
-    expect(LENGTH_STOPS[0]).toBe(0)
-    expect(LENGTH_STOPS[1]).toBe(15)
-    expect(LENGTH_STOPS.at(-2)).toBe(LENGTH_MAX_MINS)
-    expect(LENGTH_STOPS.at(-1)).toBe(Infinity)
-    expect(LENGTH_STOPS).toHaveLength(10)
-  })
-
-  it('labels both open ends "any"', () => {
-    expect(lengthLabel(0)).toBe('any') // no floor
-    expect(lengthLabel(Infinity)).toBe('any') // no ceiling
-    expect(lengthLabel(null)).toBe('any')
-    expect(lengthLabel(15)).toBe('15m')
-    expect(lengthLabel(120)).toBe('2h')
-  })
-
-  it('maps minutes to stops, and treats a missing ceiling as the last one', () => {
-    expect(lengthIndex(0)).toBe(0)
-    expect(lengthIndex(30)).toBe(2)
-    expect(lengthIndex(null)).toBe(LENGTH_STOPS.length - 1)
-    expect(lengthIndex(Infinity)).toBe(LENGTH_STOPS.length - 1)
-  })
-})
-
-describe('clampLengthRange', () => {
-  it('keeps the ends a step apart however hard either is pushed', () => {
-    // floor pushed up into the ceiling stops one step short
-    expect(clampLengthRange([0, 4], 'lo', 9)).toEqual([3, 4])
-    // ceiling pushed down into the floor likewise
-    expect(clampLengthRange([4, 8], 'hi', 0)).toEqual([4, 5])
-    // and neither can leave the scale
-    expect(clampLengthRange([2, 6], 'lo', -3)).toEqual([0, 6])
-    expect(clampLengthRange([2, 6], 'hi', 99)).toEqual([2, 9])
-  })
-
-  it('moves the end asked for and leaves the other alone', () => {
-    expect(clampLengthRange([0, 9], 'lo', 2)).toEqual([2, 9])
-    expect(clampLengthRange([0, 9], 'hi', 5)).toEqual([0, 5])
-  })
-})
-
-describe('filtering the grid by length', () => {
-  const records = {
-    UCa: {
-      title: 'Chan',
-      videos: [
-        { id: 'short', duration: 5 * 60 },
-        { id: 'mid', duration: 30 * 60 },
-        { id: 'long', duration: 180 * 60 },
-        { id: 'unknown' }, // no duration at all
-      ],
-    },
-  }
-  const ids = extra =>
-    mergeChannels(records, {
-      ...DEFAULTS,
-      customChannels: [{ channel_id: 'UCa', min_age: 1, max_age: 15 }],
-      ...extra,
-    })[0].videos.map(v => v.id)
-
-  it('shows everything when both ends say any', () => {
-    expect(ids({})).toEqual(['short', 'mid', 'long', 'unknown'])
-  })
-
-  it('applies the floor, and an unmeasured video counts as too short', () => {
-    expect(ids({ minVideoMins: 15 })).toEqual(['mid', 'long'])
-  })
-
-  it('applies the ceiling', () => {
-    expect(ids({ maxVideoMins: 60 })).toEqual(['short', 'mid', 'unknown'])
-  })
-
-  it('applies both at once', () => {
-    expect(ids({ minVideoMins: 15, maxVideoMins: 60 })).toEqual(['mid'])
-  })
-})
 
 describe('bonus time', () => {
   const now = new Date(2026, 7, 12, 18, 0).getTime() // a Wednesday evening

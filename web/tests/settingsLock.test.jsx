@@ -82,7 +82,7 @@ describe('a locked Parents Mode', () => {
   it('greys the controls out and says why', () => {
     render(<Harness sync={signedOut} />)
     expect(screen.getByRole('alert').textContent).toMatch(/Sign in with a grown-up/)
-    expect(screen.getByLabelText('Child’s name').closest('fieldset').disabled).toBe(true)
+    expect(screen.getByLabelText('Name').closest('fieldset').disabled).toBe(true)
   })
 
   /* The escape hatch: every route out of a lock runs through signing in, so
@@ -101,22 +101,30 @@ describe('a locked Parents Mode', () => {
   it('opens up for a grown-up', () => {
     render(<Harness sync={{ session: { email: 'parent@example.com' }, pull: vi.fn(), pulling: false }} />)
     expect(screen.queryByRole('alert')).toBe(null)
-    expect(screen.getByLabelText('Child’s name').closest('fieldset').disabled).toBe(false)
+    expect(screen.getByLabelText('Name').closest('fieldset').disabled).toBe(false)
   })
 })
 
 describe('the child email field', () => {
   const parent = { session: { email: 'parent@example.com' }, pull: vi.fn(), pulling: false }
 
+  /* The row already names the field. A placeholder on a filled value is what
+     iOS paints on top of the name and the address — so there is none. */
+  it('does not put a placeholder on the name or the email', () => {
+    render(<Harness sync={parent} />)
+    expect(screen.getByLabelText('Name').getAttribute('placeholder')).toBe(null)
+    expect(screen.getByLabelText('Email').getAttribute('placeholder')).toBe(null)
+  })
+
   it('stores the address folded down, so the lock cannot miss it', () => {
     render(<Harness sync={parent} />)
-    fireEvent.change(screen.getByLabelText('Child’s email'), { target: { value: '  Ann@Example.COM ' } })
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: '  Ann@Example.COM ' } })
     expect(JSON.parse(localStorage.getItem('tinytube:settings:v1')).children[0].email).toBe('ann@example.com')
   })
 
   it('clears back to none', () => {
     render(<Harness sync={parent} />)
-    const field = screen.getByLabelText('Child’s email')
+    const field = screen.getByLabelText('Email')
     fireEvent.change(field, { target: { value: 'ann@example.com' } })
     fireEvent.change(field, { target: { value: '' } })
     expect(JSON.parse(localStorage.getItem('tinytube:settings:v1')).children[0].email).toBe(null)
@@ -126,7 +134,7 @@ describe('the child email field', () => {
      signed in with and every route out of the resulting lock lands on a lock. */
   it('refuses the address the parent is signed in with', () => {
     render(<Harness sync={parent} />)
-    fireEvent.change(screen.getByLabelText('Child’s email'), { target: { value: 'Parent@example.com' } })
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'Parent@example.com' } })
     expect(screen.getByText(/would lock you out/)).toBeTruthy()
     // nothing was stored at all — the refusal is before the write, not after
     const stored = localStorage.getItem('tinytube:settings:v1')
