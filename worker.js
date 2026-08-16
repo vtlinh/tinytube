@@ -1359,6 +1359,43 @@ export function usableRecord(cached) {
   return videos.some((v) => Number.isFinite(v.duration));
 }
 
+/** A title-bearing row whose videos were stored without a clock — rewrite it. */
+export function missingLengths(cached) {
+  if (!cached || !("title" in cached) || "lengths" in cached) return false;
+  const videos = cached.videos ?? [];
+  return videos.length > 0 && !videos.some((v) => Number.isFinite(v.duration));
+}
+
+/** Walk the cache and refetch channels that still have no video lengths.
+ *  Bounded: this is a backfill, not a full sweep, and /videos plus the cron
+ *  both call it so the DB fills in without waiting 23 hours. */
+export async function refreshMissingLengths(db, ytKey, limit = CRON_REFRESH_LIMIT) {
+  const { results } = await db
+    .prepare("SELECT channel_id, data FROM channel_cache WHERE json_extract(data, '$.lengths') IS NULL LIMIT ?1")
+    .bind(Math.max(limit * 4, 50))
+    .all();
+  const due = [];
+  for (const row of results ?? []) {
+    let cached;
+    try {
+      cached = JSON.parse(row.data);
+    } catch {
+      continue;
+    }
+    if (missingLengths(cached)) due.push(row.channel_id);
+    if (due.length >= limit) break;
+  }
+  let refreshed = 0;
+  for (const id of due) {
+    const fresh = await fetchChannelRecord(id, ytKey).catch(() => null);
+    if (fresh) {
+      await writeChannelRecord(db, fresh);
+      refreshed++;
+    }
+  }
+  return { looked: due.length, refreshed };
+}
+
 /** The cached record for one channel, refreshing it first when it is stale. */
 async function channelRecord(db, channelId, ytKey) {
   const row = await db
@@ -1412,11 +1449,16 @@ const CRON_REFRESH_LIMIT = 25;
 
 export async function refreshStaleChannels(db, ytKey, now = Date.now()) {
   await ensureSchema(db);
+  /* Lengths first: a row fetched an hour ago with duration: null is not
+     "fresh". The clock backfill must not wait for the 23h floor. */
+  const missing = await refreshMissingLengths(db, ytKey, CRON_REFRESH_LIMIT);
+  const budget = CRON_REFRESH_LIMIT - missing.refreshed;
+  if (budget <= 0) return missing;
   const { results } = await db
     .prepare("SELECT channel_id FROM channel_cache WHERE fetched_at < ?1 ORDER BY fetched_at ASC LIMIT ?2")
-    .bind(now - MIN_REFRESH_MS, CRON_REFRESH_LIMIT)
+    .bind(now - MIN_REFRESH_MS, budget)
     .all();
-  let refreshed = 0;
+  let refreshed = missing.refreshed;
   for (const { channel_id: id } of results ?? []) {
     const fresh = await fetchChannelRecord(id, ytKey).catch(() => null);
     if (fresh) {
@@ -1424,7 +1466,7 @@ export async function refreshStaleChannels(db, ytKey, now = Date.now()) {
       refreshed++;
     }
   }
-  return { looked: (results ?? []).length, refreshed };
+  return { looked: missing.looked + (results ?? []).length, refreshed };
 }
 
 function corsPreflight() {
@@ -1467,7 +1509,7 @@ export default {
     );
   },
 
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
@@ -1514,7 +1556,18 @@ export default {
       if (request.method === "OPTIONS") return corsPreflight();
       if (request.method !== "POST") return json({ error: "use POST" }, 405);
       if (!env.DB) return json({ error: "cache not configured" }, 503);
-      return channelVideos(request, env.DB, env.YOUTUBE_API_KEY ?? "");
+      const ytKey = env.YOUTUBE_API_KEY ?? "";
+      const res = await channelVideos(request, env.DB, ytKey);
+      /* The asked-for channels are rewritten in channelRecord when they have
+         no lengths. The rest of the table is the same shape — fill it in
+         behind the reply so one gallery load updates the shared DB. */
+      ctx?.waitUntil?.(
+        refreshMissingLengths(env.DB, ytKey).then(
+          r => console.log(`videos: backfilled lengths ${r.refreshed}/${r.looked}`),
+          e => console.log(`videos: length backfill failed: ${e}`),
+        ),
+      );
+      return res;
     }
 
     /* The web app's per-account state. Same terms again, one binding wider:

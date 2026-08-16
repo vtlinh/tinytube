@@ -764,7 +764,7 @@ test("the migration child id is the literal both sides agree on", () => {
    channel id where a name belongs. Caught on a live preview, not in a test —
    so here is the test. */
 
-import { usableRecord } from "./worker.js";
+import { usableRecord, missingLengths } from "./worker.js";
 
 test("a cached row without a title is not a usable record", () => {
   assert.equal(usableRecord({ channel_id: "UC", videos: [{ id: "x" }] }), false);
@@ -777,6 +777,14 @@ test("a scrape that stored no lengths is stale, once", () => {
   assert.equal(usableRecord({ title: "Chan", videos: [{ id: "x", duration: null }] }), false);
   assert.equal(usableRecord({ title: "Chan", videos: [{ id: "x", duration: 36 }] }), true);
   assert.equal(usableRecord({ title: "Chan", videos: [{ id: "x", duration: null }], lengths: true }), true);
+});
+
+test("missingLengths is the backfill predicate: videos and no clock", () => {
+  assert.equal(missingLengths({ title: "Chan", videos: [{ id: "x", duration: null }] }), true);
+  assert.equal(missingLengths({ title: "Chan", videos: [{ id: "x", duration: 36 }] }), false);
+  assert.equal(missingLengths({ title: "Chan", videos: [{ id: "x" }], lengths: true }), false);
+  assert.equal(missingLengths({ title: "Chan", videos: [] }), false);
+  assert.equal(missingLengths({ videos: [{ id: "x" }] }), false);
 });
 
 /* The refresh floor: 23 hours, and 23 rather than 24 on purpose — a daily
