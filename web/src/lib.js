@@ -176,6 +176,13 @@ export function ageLabel(age) {
   return age == null ? 'any' : String(age)
 }
 
+/** What the channel chip says: a pair of bounds, or just “any” when both
+ *  ends are unbounded — “any–any” is two words for one fact. */
+export function ageRangeLabel(min, max) {
+  if (min == null && max == null) return 'any'
+  return `${ageLabel(min)}–${ageLabel(max)}`
+}
+
 /**
  * Move one end of the age range, in stop indexes.
  *

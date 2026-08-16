@@ -31,6 +31,7 @@ import {
   ageIndex,
   ageFromIndex,
   ageLabel,
+  ageRangeLabel,
   AGE_LAST,
   clampAgeRange,
   canGroup,
@@ -1615,7 +1616,7 @@ function ChannelRow({ ch, store, selected, onToggle, onEdit, onDelete }) {
         aria-label={`Ages for ${ch.channel_title}`}
         onClick={onEdit}
       >
-        {ageLabel(ch.min_age)}–{ageLabel(ch.max_age)}
+        {ageRangeLabel(ch.min_age, ch.max_age)}
         <i className="fa-sharp-duotone fa-regular fa-pencil ms-2" />
       </button>
       <button
