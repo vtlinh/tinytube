@@ -14,6 +14,7 @@ import {
   ageIndex,
   ageFromIndex,
   ageLabel,
+  ageRangeLabel,
   clampAgeRange,
   decisionOnly,
   overlaps,
@@ -42,6 +43,16 @@ describe('ageIndex / ageFromIndex', () => {
     expect(ageIndex(15, 'hi')).toBe(AGE_LAST) // old ceiling
     expect(ageLabel(null)).toBe('any')
     expect(ageLabel(4)).toBe('4')
+  })
+})
+
+describe('ageRangeLabel', () => {
+  it('collapses any–any to any, and keeps a real bound as a pair', () => {
+    expect(ageRangeLabel(null, null)).toBe('any')
+    expect(ageRangeLabel(3, 8)).toBe('3–8')
+    expect(ageRangeLabel(5, null)).toBe('5–any')
+    expect(ageRangeLabel(null, 10)).toBe('any–10')
+    expect(ageRangeLabel(7, 7)).toBe('7–7')
   })
 })
 
