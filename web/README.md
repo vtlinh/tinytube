@@ -1,4 +1,4 @@
-# TinyTube [![Deploy](https://github.com/pathikrit/TinyTube/actions/workflows/deploy.yml/badge.svg)](https://github.com/pathikrit/TinyTube/actions/workflows/deploy.yml)
+# TinyTube [![Pages](https://github.com/vtlinh/tinytube/actions/workflows/pages.yml/badge.svg)](https://github.com/vtlinh/tinytube/actions/workflows/pages.yml)
 
 ```sh
 npm install && npm run dev
