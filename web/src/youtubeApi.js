@@ -7,7 +7,6 @@
 const API = 'https://www.googleapis.com/youtube/v3'
 const CACHE_KEY = 'tinytube:videocache:v1'
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
-const UC_ID = /UC[0-9A-Za-z_-]{22}/
 
 async function get(path, params) {
   const url = `${API}/${path}?${new URLSearchParams(params)}`
@@ -15,60 +14,6 @@ async function get(path, params) {
   const body = await resp.json().catch(() => ({}))
   if (!resp.ok) throw new Error(body?.error?.message ?? `YouTube API: HTTP ${resp.status}`)
   return body
-}
-
-function channelFromSnippet(id, snippet) {
-  return {
-    channel_id: id,
-    channel_title: snippet.title,
-    thumbnail: snippet.thumbnails?.medium?.url ?? snippet.thumbnails?.default?.url,
-  }
-}
-
-/** topicCategories are Wikipedia URLs, e.g. .../wiki/Children%27s_music -> "Children's music" */
-function topicNames(topicDetails) {
-  const names = (topicDetails?.topicCategories ?? []).map(url =>
-    decodeURIComponent(url.split('/').pop()).replace(/_/g, ' '),
-  )
-  return [...new Set(names)]
-}
-
-/** Full channels.list item -> channel blob with the kid-relevant extras and stats. */
-function channelFromItem(item) {
-  return {
-    ...channelFromSnippet(item.id, item.snippet),
-    made_for_kids: item.status?.madeForKids ?? null, // COPPA designation; null = unknown
-    topics: topicNames(item.topicDetails),
-    subscribers: Number(item.statistics?.subscriberCount) || null,
-    video_count: Number(item.statistics?.videoCount) || null,
-    view_count: Number(item.statistics?.viewCount) || null,
-  }
-}
-
-/**
- * Free-text channel search with preview stats. search.list costs 100 quota
- * units per call — callers must debounce (the 10k/day default quota affords
- * ~100 fired searches). The follow-up channels.list (1 unit) upgrades results
- * with real avatars and subscriber counts for previews.
- */
-export async function searchChannels(apiKey, query) {
-  const body = await get('search', { part: 'snippet', type: 'channel', q: query, maxResults: 6, key: apiKey })
-  const results = (body.items ?? []).map(item => channelFromSnippet(item.id.channelId, item.snippet))
-  if (!results.length) return results
-  try {
-    const details = await get('channels', {
-      part: 'snippet,statistics,status,topicDetails',
-      id: results.map(r => r.channel_id).join(','),
-      key: apiKey,
-    })
-    const byId = Object.fromEntries((details.items ?? []).map(it => [it.id, it]))
-    return results.map(r => {
-      const d = byId[r.channel_id]
-      return d ? channelFromItem(d) : r
-    })
-  } catch {
-    return results // preview enrichment is best-effort
-  }
 }
 
 /** Key sanity-check via the cheapest keyed endpoint (i18nLanguages, 1 unit). */
@@ -80,37 +25,12 @@ export function formatCount(n) {
   return n ? Intl.NumberFormat('en', { notation: 'compact' }).format(n) : ''
 }
 
-/** Resolve a pasted UC id, channel URL (with or without @), or @handle to a channel. 1 unit. */
-export async function resolveChannel(apiKey, input) {
-  const text = input.trim()
-  const id = text.match(UC_ID)?.[0]
-  const handle = text.match(/@[\w.-]+/)?.[0]
-  // legacy URLs carry no @: /user/Name has its own lookup param, while /c/Name
-  // and bare youtube.com/Name custom URLs nearly always match today's handle
-  const user = text.match(/youtube\.com\/user\/([\w.-]+)/)?.[1]
-  const legacy = text.match(
-    /youtube\.com\/(?:c\/)?(?!(?:watch|shorts|playlist|embed|results|feed|channel|user)\b)([\w.-]+)/,
-  )?.[1]
-  const params = { part: 'snippet,statistics,status,topicDetails', key: apiKey }
-  if (id) params.id = id
-  else if (handle) params.forHandle = handle
-  else if (user) params.forUsername = user
-  else if (legacy) params.forHandle = legacy
-  else throw new Error('Paste a channel URL, @handle, or UC… id')
-  const body = await get('channels', params)
-  const item = (body.items ?? [])[0]
-  if (!item) throw new Error('Channel not found')
-  return channelFromItem(item)
-}
-
 /* ---- parent-mode YouTube URLs (YouTubeUrls.kt, ported) ----
  *
  * What a channel id looks like, whether the parent is standing on a channel
  * page, and what a pasted URL may name. The same rules the phone WebView
  * uses: match on the parsed host, never a substring, and a watch page that
  * merely MENTIONS a channel is not one. */
-
-export const PARENT_START = 'https://m.youtube.com/'
 
 const CHANNEL_ID_EXACT = /^UC[A-Za-z0-9_-]{22}$/
 const CHANNEL_PATH = /^\/channel\/(UC[A-Za-z0-9_-]{22})(?:\/.*)?$/
@@ -160,13 +80,6 @@ export function channelIdFromUrl(url) {
   if (!path) return null
   const m = CHANNEL_PATH.exec(path)
   return m && isValidChannelId(m[1]) ? m[1] : null
-}
-
-export function handleFromUrl(url) {
-  if (!urlHost(url)) return null
-  const path = urlPath(url)
-  if (!path) return null
-  return HANDLE_PATH.exec(path)?.[1] ?? null
 }
 
 /** Is the parent standing on a channel, such that "approve" means something
@@ -292,7 +205,7 @@ async function fetchSharedChannels(ids) {
   const body = await resp.json()
   const out = {}
   for (const [id, rec] of Object.entries(body.channels ?? {})) {
-    if (!UC_ID.test(id)) continue
+    if (!isValidChannelId(id)) continue
     out[id] = normalizeRecord(rec)
   }
   return out
@@ -331,20 +244,6 @@ function safeAvatar(url) {
   } catch {
     return null
   }
-}
-
-/** What the parent already saw when they added a channel, so its name and
- * avatar are on screen before the Worker has ever been asked about it. */
-export function seedChannelMeta(ch) {
-  const cache = readCache()
-  const entry = cache[ch.channel_id]
-  cache[ch.channel_id] = {
-    fetchedAt: 0, // meta only: still due a real fetch for the videos
-    ...entry,
-    title: ch.channel_title ?? entry?.title ?? null,
-    thumbnail: safeAvatar(ch.thumbnail) ?? entry?.thumbnail ?? null,
-  }
-  writeCache(cache)
 }
 
 /** The phone's ChannelResolver, for channel search: POST the URL to the
@@ -431,7 +330,7 @@ export function cacheResolvedChannel(ch) {
 export async function getChannelsCached(apiKey, ids) {
   const cache = readCache()
   const now = Date.now()
-  const wanted = [...new Set(ids)].filter(id => UC_ID.test(id))
+  const wanted = [...new Set(ids)].filter(isValidChannelId)
   const stale = wanted.filter(id => !(cache[id] && now - cache[id].fetchedAt < CACHE_TTL_MS))
 
   if (stale.length) {

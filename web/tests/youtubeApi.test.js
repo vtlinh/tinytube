@@ -1,14 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  searchChannels,
   searchChannelsViaWorker,
-  resolveChannel,
   resolveChannelPage,
   cacheResolvedChannel,
   parseDuration,
   fetchChannelVideos,
   getChannelsCached,
-  seedChannelMeta,
   validateApiKey,
 } from '../src/youtubeApi.js'
 
@@ -50,63 +47,6 @@ describe('parseDuration', () => {
     expect(parseDuration('PT45S')).toBe(45)
     expect(parseDuration('P0D')).toBeNull()
     expect(parseDuration(undefined)).toBeNull()
-  })
-})
-
-describe('resolveChannel', () => {
-  const snippet = { title: 'Chan', thumbnails: { medium: { url: 't.jpg' } } }
-
-  it.each([
-    [`https://www.youtube.com/channel/${UC}`, 'id', UC],
-    [UC, 'id', UC],
-    ['https://www.youtube.com/@SciShowKids', 'forHandle', '@SciShowKids'],
-    ['@SciShowKids', 'forHandle', '@SciShowKids'],
-    ['https://www.youtube.com/c/SciShowKids', 'forHandle', 'SciShowKids'],
-    ['https://www.youtube.com/SciShowKids/videos', 'forHandle', 'SciShowKids'],
-    ['youtube.com/user/scishow', 'forUsername', 'scishow'],
-  ])('parses %s', async (input, param, expected) => {
-    const fetch = mockFetch({ channels: params => {
-      expect(params.get(param)).toBe(expected)
-      return { items: [{ id: UC, snippet }] }
-    } })
-    vi.stubGlobal('fetch', fetch)
-    const ch = await resolveChannel('KEY', input)
-    expect(ch).toEqual({
-      channel_id: UC,
-      channel_title: 'Chan',
-      thumbnail: 't.jpg',
-      made_for_kids: null,
-      topics: [],
-      subscribers: null,
-      video_count: null,
-      view_count: null,
-    })
-  })
-
-  it('surfaces the made-for-kids flag and topic categories', async () => {
-    vi.stubGlobal('fetch', mockFetch({ channels: { items: [{
-      id: UC,
-      snippet,
-      status: { madeForKids: true },
-      topicDetails: { topicCategories: [
-        'https://en.wikipedia.org/wiki/Children%27s_music',
-        'https://en.wikipedia.org/wiki/Education',
-        'https://en.wikipedia.org/wiki/Education', // API repeats parents; deduped
-      ] },
-    }] } }))
-    const ch = await resolveChannel('KEY', UC)
-    expect(ch.made_for_kids).toBe(true)
-    expect(ch.topics).toEqual(["Children's music", 'Education'])
-  })
-
-  it('rejects unparsable input without a network call', async () => {
-    const fetch = vi.fn()
-    vi.stubGlobal('fetch', fetch)
-    await expect(resolveChannel('KEY', 'just words')).rejects.toThrow(/Paste a channel/)
-    await expect(resolveChannel('KEY', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')).rejects.toThrow(
-      /Paste a channel/,
-    )
-    expect(fetch).not.toHaveBeenCalled()
   })
 })
 
@@ -200,47 +140,6 @@ describe('searchChannelsViaWorker', () => {
       { channel_id: UC, channel_title: 'Cocomelon', thumbnail: 'https://yt3.ggpht.com/a.jpg' },
       { channel_id: UC2, channel_title: 'Other', thumbnail: null },
     ])
-  })
-})
-
-describe('searchChannels', () => {
-  it('searches type=channel and enriches with subscriber counts for preview', async () => {
-    vi.stubGlobal('fetch', mockFetch({
-      search: params => {
-        expect(params.get('type')).toBe('channel')
-        expect(params.get('q')).toBe('blippi')
-        return { items: [{ id: { channelId: UC }, snippet: { title: 'Blippi', thumbnails: {} } }] }
-      },
-      channels: {
-        items: [{
-          id: UC,
-          snippet: { title: 'Blippi', thumbnails: { medium: { url: 'avatar.jpg' } } },
-          statistics: { subscriberCount: '1000000', videoCount: '850', viewCount: '2500000000' },
-        }],
-      },
-    }))
-    const results = await searchChannels('KEY', 'blippi')
-    expect(results).toEqual([
-      {
-        channel_id: UC,
-        channel_title: 'Blippi',
-        thumbnail: 'avatar.jpg',
-        subscribers: 1000000,
-        video_count: 850,
-        view_count: 2500000000,
-        made_for_kids: null,
-        topics: [],
-      },
-    ])
-  })
-
-  it('falls back to bare search snippets if the preview lookup fails', async () => {
-    vi.stubGlobal('fetch', mockFetch({
-      search: { items: [{ id: { channelId: UC }, snippet: { title: 'Blippi', thumbnails: {} } }] },
-      // no `channels` route -> 404 -> enrichment swallowed
-    }))
-    const results = await searchChannels('KEY', 'blippi')
-    expect(results).toEqual([{ channel_id: UC, channel_title: 'Blippi', thumbnail: undefined }])
   })
 })
 
@@ -388,6 +287,13 @@ describe('getChannelsCached', () => {
     expect(byId[UC].videos.map(v => v.id)).toEqual(['dQw4w9WgXcQ'])
   })
 
+  it('rejects channel ids that only contain a valid id', async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    expect(await getChannelsCached('', [`prefix-${UC}-suffix`])).toEqual({})
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it("falls back to the parent's key when the Worker has nothing, and keeps stale entries otherwise", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(3_000_000)
@@ -406,14 +312,5 @@ describe('getChannelsCached', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const later = await getChannelsCached('', [UC])
     expect(later[UC].videos.map(v => v.id)).toEqual(['aqz-KE-bpKQ'])
-  })
-
-  it('seedChannelMeta puts the name on screen before the Worker is ever asked', async () => {
-    seedChannelMeta({ channel_id: UC, channel_title: 'Just added', thumbnail: 'https://yt3.ggpht.com/x.jpg' })
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const byId = await getChannelsCached('', [UC])
-    expect(byId[UC].title).toBe('Just added')
-    expect(byId[UC].thumbnail).toBe('https://yt3.ggpht.com/x.jpg')
   })
 })

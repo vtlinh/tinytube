@@ -3,11 +3,9 @@ import {
   overlaps,
   fmtMins,
   usageStats,
-  usedSecs,
   statsUsage,
   loadGoogleSignIn,
   GOOGLE_CLIENT_ID,
-  QUOTA_WINDOW_MS,
   ageFromBirthday,
   effectiveAgeRange,
   activeDayOverride,
@@ -42,7 +40,6 @@ import {
 } from './lib.js'
 import {
   evictChannelCache,
-  seedChannelMeta,
   formatCount,
   validateApiKey,
   parentBrowseUrl,
@@ -54,7 +51,7 @@ import {
 import { TabButton } from './gallery.jsx'
 
 const API_CONSOLE_URL = 'https://console.cloud.google.com/apis/library/youtube.googleapis.com'
-const channelUrl = ch => ch.source_url ?? `https://www.youtube.com/channel/${ch.channel_id}`
+const channelUrl = ch => `https://www.youtube.com/channel/${ch.channel_id}`
 
 export default function Settings({ customById = {}, store, watchStore, sync, onDone }) {
   // every valid change persists the moment it is made — no draft, no Save
@@ -1392,7 +1389,6 @@ function SearchRow({ store }) {
                     type="button"
                     className="btn btn-danger btn-sm flex-shrink-0"
                     onClick={() => {
-                      seedChannelMeta(ch)
                       cacheResolvedChannel(ch)
                       store.addCustomChannel({ ...ch, min_age: null, max_age: null })
                       setQuery('')
