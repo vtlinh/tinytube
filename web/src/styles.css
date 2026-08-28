@@ -403,21 +403,15 @@ html, body, #root {
   border-color: #2a3b4d;
   color: inherit;
   -webkit-text-fill-color: inherit;
+  /* iOS needs the opt-in directly on editable controls for the caret to land. */
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .settings .form-control:focus {
   background-color: #0e1621;
   border-color: #7cc4ff;
   box-shadow: 0 0 0 0.15rem rgba(124, 196, 255, 0.15);
-}
-
-/* Kid-proofing turns selection off on the whole app so a child cannot
-   highlight the gallery. Inputs have to opt back in: iOS Safari otherwise
-   paints the placeholder (or the aria-label, used as one) on top of a
-   filled value, and the caret will not land. */
-.settings input {
-  -webkit-user-select: text;
-  user-select: text;
 }
 
 .settings .form-control:-webkit-autofill,
