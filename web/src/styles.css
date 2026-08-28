@@ -441,21 +441,6 @@ html, body, #root {
   font-size: 0.7rem;
 }
 
-/* channel rows the kid won't see (outside the age filter, or checkbox off):
-   still editable, visibly inactive — but the enable checkbox in the first
-   cell keeps full strength so the way back stays obvious */
-tr.out-of-range td {
-  opacity: 0.35;
-}
-
-tr.out-of-range td:first-child {
-  opacity: 1;
-}
-
-tr.out-of-range img {
-  filter: grayscale(1);
-}
-
 /* ---------- player ---------- */
 
 .player-view {
@@ -615,13 +600,6 @@ tr.out-of-range img {
 
 .spinner-border.text-danger {
   color: #7cc4ff !important;
-}
-
-/* the settings tables sit on the page, not on a black card */
-.table-dark {
-  --bs-table-bg: transparent;
-  --bs-table-color: #e9f1f8;
-  --bs-table-border-color: #2a3b4d;
 }
 
 /* The dual age slider's pointer surface — see DualAgeSlider. Last in the DOM
