@@ -146,8 +146,8 @@ export function parseBirthdayInput(text) {
 // the age slider's arithmetic, pure so it can be tested without a layout
 //
 // Stops are any | 1 … 14 | any. Finite ages are 1–14; null is “any” at that
-// end. Unlike video length the thumbs MAY meet on a finite age (exactly 7
-// is a real choice) — they just cannot both sit on an “any”.
+// end. The thumbs MAY meet on a finite age (exactly 7 is a real choice) —
+// they just cannot both sit on an “any”.
 
 export const AGE_MIN = 1
 export const AGE_MAX = 14
@@ -719,13 +719,6 @@ export function decisionOnly(ch) {
   return { channel_id: ch.channel_id, min_age, max_age }
 }
 
-/** Video length used to be a parent setting. A leftover pair would keep
- * hiding videos with no control left to turn it off, so it is dropped. */
-function dropVideoLength(child) {
-  const { minVideoMins, maxVideoMins, ...rest } = child
-  return rest
-}
-
 /** Stored shape -> stored shape, with legacy blobs folded in. Idempotent. */
 export function normalizeSettings(parsed = {}) {
   // fold pre-refactor fields into the unified overrides map
@@ -743,9 +736,13 @@ export function normalizeSettings(parsed = {}) {
     }
   }
 
-  const children = (
+  const children =
     Array.isArray(parsed.children) && parsed.children.length
-      ? parsed.children.map((c, i) => ({
+      ? /* video length used to be a parent setting; a leftover pair would keep
+           hiding videos with no control left to turn it off, so the spread
+           must not carry it (the fresh-child branch below can't — it copies
+           only CHILD_DEFAULTS' own keys, which no longer include the pair) */
+        parsed.children.map(({ minVideoMins, maxVideoMins, ...c }, i) => ({
           ...CHILD_DEFAULTS,
           ...c,
           // the one 12h number became four periods; a daily cap is the
@@ -777,7 +774,6 @@ export function normalizeSettings(parsed = {}) {
             name: parsed.children?.[0]?.name ?? 'Child 1',
           },
         ]
-  ).map(dropVideoLength)
   const activeChildId = children.some(c => c.id === parsed.activeChildId) ? parsed.activeChildId : children[0].id
   return {
     ...ACCOUNT_DEFAULTS,
