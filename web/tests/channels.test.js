@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { overlaps, mergeChannels } from '../src/lib.js'
-import { DEFAULTS } from '../src/lib.js'
+import { overlaps, mergeChannels, DEFAULTS } from '../src/lib.js'
 
 const decisions = [
   { channel_id: 'UCa', min_age: 2, max_age: 4 },
