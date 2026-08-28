@@ -2,13 +2,11 @@ import { describe, it, expect } from 'vitest'
 import {
   isValidChannelId,
   channelIdFromUrl,
-  handleFromUrl,
   isChannelPage,
   isParentBrowsable,
   isAllowedAvatar,
   urlPath,
   parentBrowseUrl,
-  PARENT_START,
 } from '../src/youtubeApi.js'
 
 const ok = 'UC' + 'a'.repeat(22)
@@ -57,21 +55,6 @@ describe('channelIdFromUrl', () => {
     expect(channelIdFromUrl(`https://m.youtube.com/results?q=/channel/${ok}`)).toBeNull()
     expect(channelIdFromUrl(`https://m.youtube.com/@SomeChannel#/channel/${ok}`)).toBeNull()
     expect(channelIdFromUrl(`https://m.youtube.com/channel/${ok}?x=/@Someone`)).toBe(ok)
-  })
-})
-
-describe('handleFromUrl', () => {
-  it('finds the handle in a handle url', () => {
-    expect(handleFromUrl('https://www.youtube.com/@SomeChannel')).toBe('SomeChannel')
-    expect(handleFromUrl('https://m.youtube.com/@some.channel/videos')).toBe('some.channel')
-    expect(handleFromUrl(`https://www.youtube.com/channel/${ok}`)).toBeNull()
-    expect(handleFromUrl('javascript:/@nope')).toBeNull()
-  })
-
-  it('a handle in the query is not the page’s own', () => {
-    expect(handleFromUrl(`https://m.youtube.com/channel/${ok}?x=/@Someone`)).toBeNull()
-    expect(handleFromUrl('https://m.youtube.com/watch?v=aaaaaaaaaaa&u=/@Someone')).toBeNull()
-    expect(handleFromUrl(`https://m.youtube.com/@SomeChannel?u=/channel/${ok}`)).toBe('SomeChannel')
   })
 })
 
@@ -194,9 +177,8 @@ describe('isParentBrowsable', () => {
 })
 
 describe('parentBrowseUrl', () => {
-  it('starts at mobile youtube', () => {
-    expect(PARENT_START).toBe('https://m.youtube.com/')
-    expect(parentBrowseUrl(PARENT_START)).toBe(PARENT_START)
+  it('keeps a mobile YouTube URL', () => {
+    expect(parentBrowseUrl('https://m.youtube.com/')).toBe('https://m.youtube.com/')
   })
 
   it('turns a bare id or handle into a mobile channel page', () => {

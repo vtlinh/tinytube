@@ -2,8 +2,9 @@
 # every push to main. Non-main branches get their own preview hostnames and
 # cannot affect what installed apps talk to.
 #
-# The Worker serves the app's own release assets and nothing else. Curation
-# lives on the device — see README.
+# The Worker serves release assets, resolves/searches YouTube channels, caches
+# channel videos, and stores the web app's cross-device state in D1. Curation
+# decisions stay per account/device — see README and web/AGENTS.md.
 #
 # The `name` here decides the hostname, and the Android app has that hostname
 # compiled in (android/.../Endpoints.kt).
