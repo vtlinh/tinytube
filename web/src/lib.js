@@ -736,13 +736,11 @@ export function normalizeSettings(parsed = {}) {
     }
   }
 
+  // Drop legacy video-length fields so stale blobs cannot retain a filter
+  // with no control left to turn it off.
   const children =
     Array.isArray(parsed.children) && parsed.children.length
-      ? /* video length used to be a parent setting; a leftover pair would keep
-           hiding videos with no control left to turn it off, so the spread
-           must not carry it (the fresh-child branch below can't — it copies
-           only CHILD_DEFAULTS' own keys, which no longer include the pair) */
-        parsed.children.map(({ minVideoMins, maxVideoMins, ...c }, i) => ({
+      ? parsed.children.map(({ minVideoMins, maxVideoMins, ...c }, i) => ({
           ...CHILD_DEFAULTS,
           ...c,
           // the one 12h number became four periods; a daily cap is the
