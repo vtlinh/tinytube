@@ -6,7 +6,7 @@
 import { render, screen, fireEvent, renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import Settings from '../src/settings.jsx'
-import { useSettings, useWatchStore, settingsLock, matchingChild, normEmail, CHILD_DEFAULTS } from '../src/lib.js'
+import { useSettings, useWatchStore, settingsLock, effectiveSettingsLock, matchingChild, normEmail, CHILD_DEFAULTS } from '../src/lib.js'
 
 vi.mock('react-youtube', () => ({ default: () => null }))
 
@@ -70,6 +70,14 @@ describe('settingsLock', () => {
     expect(settingsLock(kids, null, '')).toBe(null)
     expect(settingsLock(kids, { email: 'ann@example.com' }, '')).toBe(null)
   })
+
+  it('the Parent gate lifts the child lock — that screen is how a grown-up edits', () => {
+    const child = settingsLock(kids, { email: 'ann@example.com' }, CLIENT)
+    expect(effectiveSettingsLock(child, { fromGate: true })).toBe(null)
+    expect(effectiveSettingsLock(child, { fromGate: false })).toEqual(child)
+    const signedOut = settingsLock(kids, null, CLIENT)
+    expect(effectiveSettingsLock(signedOut, { fromGate: true })).toEqual(signedOut)
+  })
 })
 
 function Harness({ sync }) {
@@ -106,7 +114,7 @@ describe('a locked Parents Mode', () => {
     expect(screen.getByLabelText('Name').closest('fieldset').disabled).toBe(false)
   })
 
-  it('locks for a child but still shows their settings', async () => {
+  it('stays locked for a child when the device gate has not been passed', async () => {
     const { result } = renderHook(() => useSettings())
     act(() => result.current.setChildEmail('ann@example.com'))
     act(() => result.current.renameChild('Ann'))
@@ -114,8 +122,19 @@ describe('a locked Parents Mode', () => {
     const watchStore = { usage: { window: { start: null, secs: 0 }, days: {}, hours: {} }, watched: {}, remote: null }
     render(<Settings store={store} watchStore={watchStore} sync={{ session: { email: 'ann@example.com' }, pull: vi.fn(), pulling: false }} onDone={() => {}} />)
     expect(screen.getByRole('alert').textContent).toMatch(/Ann/)
-    expect(screen.getByLabelText('Name').value).toBe('Ann')
     expect(screen.getByLabelText('Name').closest('fieldset').disabled).toBe(true)
+  })
+
+  it('unlocks for a child once the Parent button’s gate has been passed', async () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => result.current.setChildEmail('ann@example.com'))
+    act(() => result.current.renameChild('Ann'))
+    const store = result.current
+    const watchStore = { usage: { window: { start: null, secs: 0 }, days: {}, hours: {} }, watched: {}, remote: null }
+    render(<Settings store={store} watchStore={watchStore} sync={{ session: { email: 'ann@example.com' }, pull: vi.fn(), pulling: false }} onDone={() => {}} fromGate />)
+    expect(screen.queryByRole('alert')).toBe(null)
+    expect(screen.getByLabelText('Name').value).toBe('Ann')
+    expect(screen.getByLabelText('Name').closest('fieldset').disabled).toBe(false)
   })
 })
 

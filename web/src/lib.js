@@ -708,6 +708,15 @@ export function settingsLock(children, session, clientId = GOOGLE_CLIENT_ID) {
   return child ? { kind: 'child', name: child.name, email: who } : null
 }
 
+/** Settings is only reachable through the Parent button's device gate
+ * (biometric or arithmetic). That gate already proved a grown-up is here, so
+ * a child Google session must not lock the controls — that made Parent look
+ * broken after child login: Face ID succeeded, then everything stayed grey. */
+export function effectiveSettingsLock(lock, { fromGate } = {}) {
+  if (fromGate && lock?.kind === 'child') return null
+  return lock ?? null
+}
+
 /** A parent-added channel, reduced to the decision: which channel, for what
  * ages. Everything else about a channel is the channel's own and comes from
  * the Worker's shared cache.
@@ -928,6 +937,30 @@ export function useSettings() {
 
   const switchChild = useCallback(id => update({ activeChildId: id }), [update])
 
+  const selectChild = useCallback(
+    id =>
+      write(prev => {
+        if (prev.activeChildId === id || !prev.children.some(c => c.id === id)) return prev
+        return { ...prev, activeChildId: id }
+      }),
+    [write],
+  )
+
+  /* Sync adopt: keep THIS device's passkey even if the pull closure's blob
+     was stale (enroll while a pull was in flight used to wipe it, and then
+     the Parent button called verify() on nothing / a foreign id). */
+  const replaceSettings = useCallback(
+    patch =>
+      write(prev =>
+        normalizeSettings({
+          ...patch,
+          passkeyId: prev.passkeyId ?? null,
+          updatedAt: patch.updatedAt ?? prev.updatedAt,
+        }),
+      ),
+    [write],
+  )
+
   const renameChild = useCallback(name => updateChild({ name: name.trim() || 'Child' }), [updateChild])
 
   /* The last child cannot be removed — an account with no child has no grid to
@@ -956,14 +989,14 @@ export function useSettings() {
        make empty defaults look newer than the account blob and wipe it. */
     setPasskey: id => write(prev => ({ ...prev, passkeyId: id })),
     save: update,
+    replaceSettings,
     stored: settings, // the un-flattened blob: what sync pushes
     children: settings.children,
     addChild,
     switchChild,
     /* Who is looking at this phone, not an edit: a child signing in must see
        their own channels without stamping the account blob. */
-    selectChild: id =>
-      write(prev => (prev.children.some(c => c.id === id) ? { ...prev, activeChildId: id } : prev)),
+    selectChild,
     renameChild,
     removeChild,
   }
@@ -1691,7 +1724,7 @@ export function useSync(settingsStore, watchStore) {
   }, [])
 
   // pull on boot / sign-in / child switch
-  const { save, selectChild } = settingsStore
+  const { save, replaceSettings, selectChild } = settingsStore
   const { applyRemote } = watchStore
   // the STORED blob (every child), not the flattened view — the view's child
   // fields are a copy, and pushing them would round-trip duplicates
@@ -1720,8 +1753,10 @@ export function useSync(settingsStore, watchStore) {
         const blob = adopted ?? stored
         const mine = matchingChild(blob.children, session)
         if (adopted) {
-          // keep the remote stamp: picking the signed-in child is not an edit
-          save(mine ? { ...adopted, activeChildId: mine.id, updatedAt: adopted.updatedAt } : adopted)
+          // keep the remote stamp: picking the signed-in child is not an edit.
+          // replaceSettings keeps the passkey already on this device.
+          const next = mine ? { ...adopted, activeChildId: mine.id, updatedAt: adopted.updatedAt } : adopted
+          ;(replaceSettings ?? save)(next)
         } else if (mine && stored.activeChildId !== mine.id && selectChild) {
           selectChild(mine.id)
         }
@@ -1736,7 +1771,7 @@ export function useSync(settingsStore, watchStore) {
         setPulling(false)
       }
     },
-    [session, childId, stored, save, selectChild, applyRemote, dead],
+    [session, childId, stored, save, replaceSettings, selectChild, applyRemote, dead],
   )
 
   // pull on boot / sign-in / child switch — a child with no mark yet is due one

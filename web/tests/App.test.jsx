@@ -100,6 +100,23 @@ describe('parent gate', () => {
     expect(screen.queryByText(/Grown-ups only/)).toBeNull()
   })
 
+  it('opens editable Parents Mode even when a child is the one signed in', async () => {
+    saveSettings({
+      passkeyId: 'abc',
+      children: [{ id: 'default', name: 'Emma', email: 'emma@example.com', customChannels: APPROVED }],
+      activeChildId: 'default',
+    })
+    localStorage.setItem(
+      'tinytube:sync:v1',
+      JSON.stringify({ token: 't', email: 'emma@example.com', expiresAt: Date.now() + 1e9, deviceId: 'd1', lastPushAt: {} }),
+    )
+    render(<App />)
+    fireEvent.click(await screen.findByLabelText('Parents'))
+    expect(await screen.findByText(/Parents Mode/)).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBe(null)
+    expect(screen.getByLabelText('Name').closest('fieldset').disabled).toBe(false)
+  })
+
   it('stays on the gallery when the biometric is cancelled', async () => {
     saveSettings({ passkeyId: 'abc' })
     verify.mockResolvedValueOnce(false)

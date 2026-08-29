@@ -19,6 +19,7 @@ import {
   PLAYBACK_RANDOM,
   hydrateChannel,
   arrangeChannels,
+  effectiveSettingsLock,
   grabEnd,
   ageAtFraction,
   ageIndex,
@@ -53,7 +54,7 @@ import { TabButton } from './gallery.jsx'
 const API_CONSOLE_URL = 'https://console.cloud.google.com/apis/library/youtube.googleapis.com'
 const channelUrl = ch => `https://www.youtube.com/channel/${ch.channel_id}`
 
-export default function Settings({ customById = {}, store, watchStore, sync, onDone }) {
+export default function Settings({ customById = {}, store, watchStore, sync, onDone, fromGate = false }) {
   // every valid change persists the moment it is made — no draft, no Save
   // button; half-typed values are held locally by their rows (see BirthdayRow)
   // and only committed once they parse
@@ -61,11 +62,10 @@ export default function Settings({ customById = {}, store, watchStore, sync, onD
   // 'settings' | 'channels' | 'stats' — the bottom bar below switches
   const [tab, setTab] = useState('settings')
   const titles = { settings: 'Parents Mode', channels: 'Channels', stats: 'Stats' }
-  /* Locked when a child is the one signed in, or when nobody is. Everything
-     below is wrapped in a disabled fieldset; the header is NOT, because
-     signing in is the only way out of either state and the control that does
-     it lives up there. */
-  const lock = settingsLock(store.children, sync?.session)
+  /* Locked when nobody is signed in. A child Google session does NOT lock
+     here: this screen is only reached through the Parent button's device
+     gate, which already proved a grown-up is holding the phone. */
+  const lock = effectiveSettingsLock(settingsLock(store.children, sync?.session), { fromGate })
 
   return (
     <div className="settings">

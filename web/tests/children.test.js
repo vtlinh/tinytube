@@ -150,6 +150,22 @@ describe('useSettings with several children', () => {
     expect(result.current.stored.updatedAt).toBe(stamped)
   })
 
+  it('replaceSettings keeps the device passkey when adopting a remote blob', () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => result.current.setPasskey('this-phone'))
+    act(() =>
+      result.current.replaceSettings({
+        children: [{ id: FIRST_CHILD_ID, name: 'Emma', customChannels: [] }],
+        activeChildId: FIRST_CHILD_ID,
+        passkeyId: 'other-phone',
+        updatedAt: 1000,
+      }),
+    )
+    expect(result.current.settings.passkeyId).toBe('this-phone')
+    expect(result.current.settings.childName).toBe('Emma')
+    expect(result.current.stored.updatedAt).toBe(1000)
+  })
+
   it('does not stamp the sync clock when only the passkey changes', () => {
     const { result } = renderHook(() => useSettings())
     act(() => result.current.setApiKey('KEY'))
