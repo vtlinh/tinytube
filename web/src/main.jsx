@@ -113,7 +113,7 @@ export default function App() {
   }
 
   if (view === 'settings') {
-    return <Settings customById={customById} store={store} watchStore={watchStore} sync={sync} onDone={close} />
+    return <Settings customById={customById} store={store} watchStore={watchStore} sync={sync} onDone={close} fromGate />
   }
 
   // enrolled device -> OS biometric prompt (called inside the tap handler to
