@@ -822,6 +822,15 @@ stops, green publishes.
   devices, and why a device must never fold pulled totals back into the
   buckets it pushes). The Worker enforces the same settings rule.
 
+  **A child signing in with their own Google account is still this
+  household.** Settings live under the parent email; the child's address is
+  a field on their row, used for the lock. `/sync/pull` finds that parent
+  row when the signer is listed as a child and answers with the family plus
+  that child's history; `/sync/push` will not let them write settings, and
+  writes watched/usage under the parent so two phones stay on the same
+  quota. The web app then shows that child's channels and keeps Parents
+  Mode locked.
+
   **The `/sync/*` rows are keyed by CHILD as well as by account.** One
   household has several children and each owns their own age, quota, channels
   and watch history, so `sync_watched_v2`/`sync_usage_v2` carry a `child_id` in

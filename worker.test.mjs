@@ -556,6 +556,8 @@ import {
   validUsageBuckets,
   isVirginSettings,
   shouldReplaceSettings,
+  childIdInSettings,
+  pickHousehold,
 } from "./worker.js";
 
 const b64url = obj => bytesToB64url(new TextEncoder().encode(JSON.stringify(obj)));
@@ -746,6 +748,39 @@ test("a virgin settings blob never replaces a family, and a family always heals 
     false,
     "older family loses to a newer one",
   );
+});
+
+test("a child signing in is this household, not an empty account under their email", () => {
+  const family = {
+    children: [
+      { id: "default", name: "Ann", email: "ann@example.com", customChannels: [] },
+      {
+        id: "bob-1",
+        name: "Bob",
+        email: "bob@example.com",
+        customChannels: [{ channel_id: "UCabcdefghijklmnopqrstuv" }],
+      },
+    ],
+  };
+  assert.equal(childIdInSettings(family, "bob@example.com"), "bob-1");
+  assert.equal(childIdInSettings(family, "  Bob@Example.com "), "bob-1");
+  assert.equal(childIdInSettings(family, "parent@example.com"), null);
+  assert.equal(childIdInSettings({ email: "ann@example.com" }, "ann@example.com"), "default", "pre-children top-level email");
+
+  const parentRow = { email: "parent@example.com", data: family, updated_at: 1000 };
+  const leftover = { email: "bob@example.com", data: { children: [{ id: "default", name: "Child 1" }] }, updated_at: 9999 };
+  const asChild = pickHousehold("bob@example.com", leftover, parentRow);
+  assert.equal(asChild.asChild, true);
+  assert.equal(asChild.owner, "parent@example.com");
+  assert.equal(asChild.childId, "bob-1");
+  assert.equal(asChild.data.children[1].name, "Bob");
+
+  const parent = pickHousehold("parent@example.com", parentRow, null);
+  assert.equal(parent.asChild, false);
+  assert.equal(parent.owner, "parent@example.com");
+  assert.equal(parent.childId, null);
+
+  assert.equal(pickHousehold("nobody@example.com", null, null), null);
 });
 
 /* The cache outlived its own shape once: its first version stored videos and

@@ -3,10 +3,10 @@
  * out of both is the same sign-in control, which is why it has to stay live
  * inside a locked screen. */
 
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import Settings from '../src/settings.jsx'
-import { useSettings, useWatchStore, settingsLock, normEmail, CHILD_DEFAULTS } from '../src/lib.js'
+import { useSettings, useWatchStore, settingsLock, matchingChild, normEmail, CHILD_DEFAULTS } from '../src/lib.js'
 
 vi.mock('react-youtube', () => ({ default: () => null }))
 
@@ -37,6 +37,8 @@ describe('settingsLock', () => {
 
   it('locks for a child’s own account, naming who', () => {
     expect(settingsLock(kids, { email: 'ann@example.com' }, CLIENT)).toMatchObject({ kind: 'child', name: 'Ann' })
+    expect(matchingChild(kids, { email: 'ann@example.com' })).toMatchObject({ id: 'a', name: 'Ann' })
+    expect(matchingChild(kids, { email: 'parent@example.com' })).toBe(null)
   })
 
   it('locks when nobody is signed in — settings anyone can open are not a control', () => {
@@ -102,6 +104,18 @@ describe('a locked Parents Mode', () => {
     render(<Harness sync={{ session: { email: 'parent@example.com' }, pull: vi.fn(), pulling: false }} />)
     expect(screen.queryByRole('alert')).toBe(null)
     expect(screen.getByLabelText('Name').closest('fieldset').disabled).toBe(false)
+  })
+
+  it('locks for a child but still shows their settings', async () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => result.current.setChildEmail('ann@example.com'))
+    act(() => result.current.renameChild('Ann'))
+    const store = result.current
+    const watchStore = { usage: { window: { start: null, secs: 0 }, days: {}, hours: {} }, watched: {}, remote: null }
+    render(<Settings store={store} watchStore={watchStore} sync={{ session: { email: 'ann@example.com' }, pull: vi.fn(), pulling: false }} onDone={() => {}} />)
+    expect(screen.getByRole('alert').textContent).toMatch(/Ann/)
+    expect(screen.getByLabelText('Name').value).toBe('Ann')
+    expect(screen.getByLabelText('Name').closest('fieldset').disabled).toBe(true)
   })
 })
 

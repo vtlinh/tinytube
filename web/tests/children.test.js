@@ -140,6 +140,16 @@ describe('useSettings with several children', () => {
     expect(result.current.settings.passkeyId).toBe('pk')
   })
 
+  it('selectChild changes who is in front without stamping the sync clock', () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => result.current.addChild('Bob'))
+    const stamped = result.current.stored.updatedAt
+    expect(result.current.settings.childName).toBe('Bob') // addChild switches to them
+    act(() => result.current.selectChild(FIRST_CHILD_ID))
+    expect(result.current.settings.childName).toBe('Child 1')
+    expect(result.current.stored.updatedAt).toBe(stamped)
+  })
+
   it('does not stamp the sync clock when only the passkey changes', () => {
     const { result } = renderHook(() => useSettings())
     act(() => result.current.setApiKey('KEY'))
