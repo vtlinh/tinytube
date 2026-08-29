@@ -693,11 +693,18 @@ export function normEmail(email) {
  * a build with no `GOOGLE_CLIENT_ID` cannot sign in AT ALL, which would make
  * this a permanent lock with no recovery. There, sync is inert and so is
  * this: no client id, no lock. */
+/** The child whose email is this session, or null. Same match the lock uses. */
+export function matchingChild(children, session) {
+  const who = normEmail(session?.email)
+  if (!who) return null
+  return (children ?? []).find(c => normEmail(c.email) === who) ?? null
+}
+
 export function settingsLock(children, session, clientId = GOOGLE_CLIENT_ID) {
   if (!clientId) return null
   const who = normEmail(session?.email)
   if (!who) return { kind: 'signed-out' }
-  const child = (children ?? []).find(c => normEmail(c.email) && normEmail(c.email) === who)
+  const child = matchingChild(children, session)
   return child ? { kind: 'child', name: child.name, email: who } : null
 }
 
@@ -953,6 +960,10 @@ export function useSettings() {
     children: settings.children,
     addChild,
     switchChild,
+    /* Who is looking at this phone, not an edit: a child signing in must see
+       their own channels without stamping the account blob. */
+    selectChild: id =>
+      write(prev => (prev.children.some(c => c.id === id) ? { ...prev, activeChildId: id } : prev)),
     renameChild,
     removeChild,
   }
@@ -1680,7 +1691,7 @@ export function useSync(settingsStore, watchStore) {
   }, [])
 
   // pull on boot / sign-in / child switch
-  const { save } = settingsStore
+  const { save, selectChild } = settingsStore
   const { applyRemote } = watchStore
   // the STORED blob (every child), not the flattened view — the view's child
   // fields are a copy, and pushing them would round-trip duplicates
@@ -1706,7 +1717,14 @@ export function useSync(settingsStore, watchStore) {
         applyRemote({ watched: remote.watched, usage: remote.usage })
         remoteSettings.current = remote.settings
         const adopted = applyRemoteSettings(stored, remote.settings)
-        if (adopted) save(adopted)
+        const blob = adopted ?? stored
+        const mine = matchingChild(blob.children, session)
+        if (adopted) {
+          // keep the remote stamp: picking the signed-in child is not an edit
+          save(mine ? { ...adopted, activeChildId: mine.id, updatedAt: adopted.updatedAt } : adopted)
+        } else if (mine && stored.activeChildId !== mine.id && selectChild) {
+          selectChild(mine.id)
+        }
         setReadyToPush(true)
         return remote
       } catch (err) {
@@ -1718,13 +1736,20 @@ export function useSync(settingsStore, watchStore) {
         setPulling(false)
       }
     },
-    [session, childId, stored, save, applyRemote, dead],
+    [session, childId, stored, save, selectChild, applyRemote, dead],
   )
 
   // pull on boot / sign-in / child switch — a child with no mark yet is due one
   useEffect(() => {
     pull()
   }, [session, childId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // a child signed in on this phone always sees their own grid, even when
+  // the account blob still has a sibling as activeChildId
+  useEffect(() => {
+    const mine = matchingChild(stored.children, session)
+    if (mine && stored.activeChildId !== mine.id && selectChild) selectChild(mine.id)
+  }, [session, stored.children, stored.activeChildId, selectChild])
 
   // the other phone's edits land when this one is looked at, and keep landing
   // while it stays open — two signed-in devices stay within LIVE_PULL_MS
@@ -1758,7 +1783,11 @@ export function useSync(settingsStore, watchStore) {
       }
       const deltas = watchedDeltas(watched, since)
       if (deltas.length) payload.watched = deltas
-      if (shouldPushSettings(stored, remoteSettings.current, since)) {
+      /* A child signed in with their own Google account must not write the
+         household blob — that is the parent's, and a push keyed by the
+         child's email would fork an empty copy. Watched and usage still go
+         up; the Worker stores them under the parent. */
+      if (settingsLock(stored.children, session)?.kind !== 'child' && shouldPushSettings(stored, remoteSettings.current, since)) {
         payload.settings = settingsPushPayload(stored)
       }
       syncFetch('/sync/push', payload, session.token)

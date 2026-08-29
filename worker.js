@@ -760,7 +760,13 @@ async function uploads(request) {
  * by the client's updatedAt clock — fine for a family's devices. Settings have
  * one extra rule: a factory-default blob must not replace one that already
  * has children or channels, even when its clock is newer. Signing in on a
- * fresh phone used to stamp empty defaults and wipe the account. Usage buckets
+ * fresh phone used to stamp empty defaults and wipe the account.
+ *
+ * A child signing in with THEIR Google account is still this household: the
+ * settings row is keyed by the parent, and the child's address lives inside
+ * the blob. Pull finds that row by child email and answers with the family
+ * plus that child's history; push will not let them write settings, and
+ * writes watched/usage under the parent so the quota still holds. Usage buckets
  * are per DEVICE and only ever grow, so the upsert takes the larger value;
  * /sync/pull sums across devices, which is what lets the watch quota hold when
  * a child switches devices.
@@ -988,25 +994,31 @@ async function syncPull(request, db) {
   const body = await readBody(request);
   /* Settings are ACCOUNT-wide (the blob carries every child); history and
      usage are per child. An absent or malformed child means the migrated
-     first one, so an older client keeps working. */
-  const child = CHILD_ID.test(body?.child ?? "") ? body.child : DEFAULT_CHILD;
+     first one, so an older client keeps working. A child signed in with
+     their own Google account is still this household: resolveHousehold
+     finds the parent row and pins history to that child's id. */
+  const household = await resolveHousehold(db, email);
+  const child = household?.asChild
+    ? household.childId
+    : CHILD_ID.test(body?.child ?? "")
+      ? body.child
+      : DEFAULT_CHILD;
+  const owner = household?.owner ?? email;
 
-  const [settings, watched, usage] = await db.batch([
-    db.prepare("SELECT data, updated_at FROM sync_settings WHERE email = ?1").bind(email),
+  const [watched, usage] = await db.batch([
     db.prepare(
       "SELECT video_id, pos, dur, completed, updated_at FROM sync_watched_v2 WHERE email = ?1 AND child_id = ?2 ORDER BY updated_at DESC LIMIT ?3",
-    ).bind(email, child, MAX_WATCHED_ROWS),
+    ).bind(owner, child, MAX_WATCHED_ROWS),
     db.prepare(
       "SELECT kind, bucket, SUM(secs) AS secs FROM sync_usage_v2 WHERE email = ?1 AND child_id = ?2 GROUP BY kind, bucket",
-    ).bind(email, child),
+    ).bind(owner, child),
   ]);
 
-  const settingsRow = settings.results[0];
   const days = {};
   const hours = {};
   for (const row of usage.results) (row.kind === "day" ? days : hours)[row.bucket] = row.secs;
   return json({
-    settings: settingsRow ? { data: JSON.parse(settingsRow.data), updatedAt: settingsRow.updated_at } : null,
+    settings: household?.data ? { data: household.data, updatedAt: household.updated_at } : null,
     watched: watched.results.map((r) => ({
       id: r.video_id,
       pos: r.pos,
@@ -1068,6 +1080,69 @@ export function isVirginSettings(data) {
   return true;
 }
 
+/** The child id listed under this email, or null. Exported for the tests. */
+export function childIdInSettings(data, email) {
+  const who = typeof email === "string" ? email.trim().toLowerCase() : "";
+  if (!who || !data || typeof data !== "object") return null;
+  if (typeof data.email === "string" && data.email.trim().toLowerCase() === who) return DEFAULT_CHILD;
+  const children = Array.isArray(data.children) ? data.children : [];
+  const child = children.find((c) => typeof c?.email === "string" && c.email.trim().toLowerCase() === who);
+  return child?.id && CHILD_ID.test(child.id) ? child.id : null;
+}
+
+function parseSettingsData(data) {
+  if (data == null) return null;
+  if (typeof data === "object" && !Array.isArray(data)) return data;
+  if (typeof data !== "string") return null;
+  try {
+    const parsed = JSON.parse(data);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Own row vs a household that listed this address as a child. A child
+ * signing in must see the family, not an empty account under their email. */
+export function pickHousehold(signer, ownRow, asChildRow) {
+  const asChildData = parseSettingsData(asChildRow?.data);
+  const asChildId = childIdInSettings(asChildData, signer);
+  if (asChildId) {
+    return {
+      owner: asChildRow.email,
+      childId: asChildId,
+      data: asChildData,
+      updated_at: asChildRow.updated_at,
+      asChild: true,
+    };
+  }
+  if (ownRow) {
+    return {
+      owner: signer,
+      childId: null,
+      data: parseSettingsData(ownRow.data),
+      updated_at: ownRow.updated_at,
+      asChild: false,
+    };
+  }
+  return null;
+}
+
+const HOUSEHOLD_AS_CHILD_SQL =
+  "SELECT email, data, updated_at FROM sync_settings WHERE email != ?1 AND (" +
+  "lower(trim(COALESCE(json_extract(data, '$.email'), ''))) = ?1 OR EXISTS (" +
+  "SELECT 1 FROM json_each(data, '$.children') " +
+  "WHERE lower(trim(COALESCE(json_extract(value, '$.email'), ''))) = ?1" +
+  ")) LIMIT 1";
+
+async function resolveHousehold(db, signer) {
+  const [own, asChild] = await db.batch([
+    db.prepare("SELECT email, data, updated_at FROM sync_settings WHERE email = ?1").bind(signer),
+    db.prepare(HOUSEHOLD_AS_CHILD_SQL).bind(signer),
+  ]);
+  return pickHousehold(signer, own.results[0], asChild.results[0]);
+}
+
 /** Whether incoming settings should replace the stored row. A curated blob
  * always heals a virgin one; a virgin blob never wipes a curated one. */
 export function shouldReplaceSettings(existing, incoming, incomingUpdatedAt) {
@@ -1116,23 +1191,27 @@ async function syncPush(request, db) {
   const body = await readBody(request);
   if (!body) return json({ error: "bad body" }, 400);
   if (body.child != null && !CHILD_ID.test(body.child)) return json({ error: "bad child" }, 400);
-  const child = body.child ?? DEFAULT_CHILD;
+  const household = await resolveHousehold(db, email);
+  const child = household?.asChild ? household.childId : (body.child ?? DEFAULT_CHILD);
+  const owner = household?.owner ?? email;
 
   const statements = [];
 
-  if (body.settings != null) {
+  if (body.settings != null && !household?.asChild) {
     const { data, updatedAt } = body.settings;
     if (typeof data !== "object" || data === null || Array.isArray(data)) return json({ error: "bad settings" }, 400);
     const text = JSON.stringify(data);
     if (text.length > MAX_SETTINGS_BYTES) return json({ error: "settings too large" }, 400);
     if (!Number.isInteger(updatedAt) || updatedAt <= 0) return json({ error: "bad settings" }, 400);
-    const existing = await db.prepare("SELECT data, updated_at FROM sync_settings WHERE email = ?1").bind(email).first();
+    const existing = household
+      ? { data: household.data, updated_at: household.updated_at }
+      : null;
     if (shouldReplaceSettings(existing, data, updatedAt)) {
       statements.push(
         db.prepare(
           "INSERT INTO sync_settings (email, data, updated_at) VALUES (?1, ?2, ?3) " +
             "ON CONFLICT (email) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
-        ).bind(email, text, updatedAt),
+        ).bind(owner, text, updatedAt),
       );
     }
   }
@@ -1152,7 +1231,7 @@ async function syncPush(request, db) {
             "ON CONFLICT (email, child_id, video_id) DO UPDATE SET pos = excluded.pos, dur = excluded.dur, " +
             "completed = excluded.completed, updated_at = excluded.updated_at " +
             "WHERE excluded.updated_at > sync_watched_v2.updated_at",
-        ).bind(email, child, JSON.stringify(rows)),
+        ).bind(owner, child, JSON.stringify(rows)),
       );
     }
   }
@@ -1170,7 +1249,7 @@ async function syncPush(request, db) {
             `SELECT ?1, ?2, ?3, '${kind}', key, value FROM json_each(?4) WHERE true ` +
             "ON CONFLICT (email, device_id, child_id, kind, bucket) DO UPDATE SET secs = excluded.secs " +
             "WHERE excluded.secs > sync_usage_v2.secs",
-        ).bind(email, usage.deviceId, child, JSON.stringify(buckets)),
+        ).bind(owner, usage.deviceId, child, JSON.stringify(buckets)),
       );
     }
   }

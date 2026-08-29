@@ -164,6 +164,49 @@ describe('restoring the account onto a new phone', () => {
     expect(result.current.settings.stored.updatedAt).toBe(1000)
   })
 
+  it('a child signing in restores their channels and sits on their own grid', async () => {
+    localStorage.setItem(
+      'tinytube:sync:v1',
+      JSON.stringify({ token: 't', email: 'emma@example.com', expiresAt: Date.now() + 1e9, deviceId: 'dev-1', lastPushAt: {} }),
+    )
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) })
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          settings: {
+            updatedAt: 1000,
+            data: {
+              children: [
+                { id: FIRST_CHILD_ID, name: 'Ann', email: 'ann@example.com', customChannels: [] },
+                {
+                  id: 'emma-1',
+                  name: 'Emma',
+                  email: 'emma@example.com',
+                  customChannels: [{ channel_id: UC, min_age: null, max_age: null }],
+                  birthday: '2020-01',
+                },
+              ],
+              activeChildId: FIRST_CHILD_ID, // the parent last looked at Ann
+            },
+          },
+          watched: [],
+          usage: { days: {}, hours: {} },
+        }),
+      }
+    }))
+    const { result } = await act(async () => renderHook(() => {
+      const settings = useSettings()
+      const watch = useWatchStore(settings.settings.childId)
+      return { sync: useSync(settings, watch), settings }
+    }))
+    expect(result.current.settings.settings.childId).toBe('emma-1')
+    expect(result.current.settings.settings.childName).toBe('Emma')
+    expect(result.current.settings.settings.customChannels).toHaveLength(1)
+    expect(result.current.settings.settings.passkeyId).toBeFalsy()
+  })
+
   it('pulls again when the app has been in the background past LIVE_PULL_MS', async () => {
     signedIn()
     const { result } = await act(async () => renderSync())
