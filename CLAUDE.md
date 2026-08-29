@@ -815,10 +815,12 @@ stops, green publishes.
   stored as SHA-256 hashes, so a leaked database impersonates nobody. The
   routes answer 503 until `wrangler.toml`'s D1 binding and worker.js's
   `GOOGLE_CLIENT_ID` are both filled in. Merge semantics live in
-  `web/src/lib.js` (row-wise last-write-wins; usage buckets are per-device and
+  `web/src/lib.js` (row-wise last-write-wins for watched; settings additionally
+  refuse a factory-default blob over one that already has a family, so signing
+  in on a new phone cannot wipe the account; usage buckets are per-device and
   summed server-side — that summing is what makes the watch quota hold across
   devices, and why a device must never fold pulled totals back into the
-  buckets it pushes).
+  buckets it pushes). The Worker enforces the same settings rule.
 
   **The `/sync/*` rows are keyed by CHILD as well as by account.** One
   household has several children and each owns their own age, quota, channels

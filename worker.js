@@ -757,7 +757,10 @@ async function uploads(request) {
  * a signed-in parent.
  *
  * Merging is last-write-wins PER ROW (per video, per settings blob), decided
- * by the client's updatedAt clock — fine for a family's devices. Usage buckets
+ * by the client's updatedAt clock — fine for a family's devices. Settings have
+ * one extra rule: a factory-default blob must not replace one that already
+ * has children or channels, even when its clock is newer. Signing in on a
+ * fresh phone used to stamp empty defaults and wipe the account. Usage buckets
  * are per DEVICE and only ever grow, so the upsert takes the larger value;
  * /sync/pull sums across devices, which is what lets the watch quota hold when
  * a child switches devices.
@@ -1031,6 +1034,59 @@ export function validWatchedRows(watched) {
   return rows;
 }
 
+const DEFAULT_CHILD_NAME = "Child 1";
+const DEFAULT_QUOTA_DAY = 180;
+
+/** True when a settings blob is factory defaults — the shape a new phone
+ * pushes if it signs in before it has pulled. Exported so the tests can pin
+ * the wipe case without standing up D1. */
+export function isVirginSettings(data) {
+  if (!data || typeof data !== "object") return true;
+  if (typeof data.apiKey === "string" && data.apiKey.trim()) return false;
+  const children = Array.isArray(data.children) ? data.children : [];
+  const channels = [
+    ...(Array.isArray(data.customChannels) ? data.customChannels : []),
+    ...children.flatMap((c) => (Array.isArray(c?.customChannels) ? c.customChannels : [])),
+  ];
+  if (channels.length) return false;
+  if (children.length > 1) return false;
+  const names = [...(data.name ? [data.name] : []), ...children.map((c) => c?.name).filter(Boolean)];
+  if (names.some((n) => n !== DEFAULT_CHILD_NAME)) return false;
+  if (data.birthday || children.some((c) => c?.birthday)) return false;
+  if (data.email || children.some((c) => c?.email)) return false;
+  if ((data.groups ?? []).length || children.some((c) => (c?.groups ?? []).length)) return false;
+  if (data.hideWatched || children.some((c) => c?.hideWatched)) return false;
+  if (data.day || children.some((c) => c?.day)) return false;
+  const ageOffDefault = (r) => Array.isArray(r) && (r[0] !== 1 || r[1] !== 15);
+  if (ageOffDefault(data.ageRange) || children.some((c) => ageOffDefault(c?.ageRange))) return false;
+  const quotas = [data.quota, ...children.map((c) => c?.quota)].filter(Boolean);
+  for (const q of quotas) {
+    if (q.per6h != null || q.perWeek != null || q.perMonth != null) return false;
+    if (q.perDay != null && q.perDay !== DEFAULT_QUOTA_DAY) return false;
+  }
+  if (data.quotaMins != null && data.quotaMins !== DEFAULT_QUOTA_DAY) return false;
+  return true;
+}
+
+/** Whether incoming settings should replace the stored row. A curated blob
+ * always heals a virgin one; a virgin blob never wipes a curated one. */
+export function shouldReplaceSettings(existing, incoming, incomingUpdatedAt) {
+  if (!existing) return true;
+  let existingData = existing.data;
+  if (typeof existingData === "string") {
+    try {
+      existingData = JSON.parse(existingData);
+    } catch {
+      existingData = null;
+    }
+  }
+  const incomingVirgin = isVirginSettings(incoming);
+  const existingVirgin = isVirginSettings(existingData);
+  if (existingVirgin && !incomingVirgin) return true;
+  if (!existingVirgin && incomingVirgin) return false;
+  return incomingUpdatedAt > existing.updated_at;
+}
+
 /** {days, hours} with every key and value validated and capped, or null. Exported for the tests. */
 export function validUsageBuckets(usage) {
   const buckets = (obj, keyPattern, cap, maxSecs) => {
@@ -1070,13 +1126,15 @@ async function syncPush(request, db) {
     const text = JSON.stringify(data);
     if (text.length > MAX_SETTINGS_BYTES) return json({ error: "settings too large" }, 400);
     if (!Number.isInteger(updatedAt) || updatedAt <= 0) return json({ error: "bad settings" }, 400);
-    statements.push(
-      db.prepare(
-        "INSERT INTO sync_settings (email, data, updated_at) VALUES (?1, ?2, ?3) " +
-          "ON CONFLICT (email) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at " +
-          "WHERE excluded.updated_at > sync_settings.updated_at",
-      ).bind(email, text, updatedAt),
-    );
+    const existing = await db.prepare("SELECT data, updated_at FROM sync_settings WHERE email = ?1").bind(email).first();
+    if (shouldReplaceSettings(existing, data, updatedAt)) {
+      statements.push(
+        db.prepare(
+          "INSERT INTO sync_settings (email, data, updated_at) VALUES (?1, ?2, ?3) " +
+            "ON CONFLICT (email) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+        ).bind(email, text, updatedAt),
+      );
+    }
   }
 
   if (body.watched != null) {

@@ -5,7 +5,7 @@
 
 import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { useSync, useSettings, useWatchStore, PULL_MIN_MS } from '../src/lib.js'
+import { useSync, useSettings, useWatchStore, PULL_MIN_MS, LIVE_PULL_MS, FIRST_CHILD_ID } from '../src/lib.js'
 
 function fakeStorage() {
   let store = {}
@@ -113,5 +113,71 @@ describe('the pull throttle', () => {
     await act(async () => { out = await result.current.pull({ force: true }) })
     expect(out).toBe(null)
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('restoring the account onto a new phone', () => {
+  const UC = 'UC' + 'a'.repeat(22)
+
+  it('adopts the DB family even when empty local defaults stamped a newer clock', async () => {
+    localStorage.setItem(
+      'tinytube:settings:v1',
+      JSON.stringify({
+        updatedAt: 9_000,
+        passkeyId: 'phone-b',
+        children: [{ id: FIRST_CHILD_ID, name: 'Child 1', customChannels: [] }],
+        activeChildId: FIRST_CHILD_ID,
+      }),
+    )
+    signedIn()
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) })
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          settings: {
+            updatedAt: 1000,
+            data: {
+              children: [{
+                id: FIRST_CHILD_ID,
+                name: 'Emma',
+                customChannels: [{ channel_id: UC, min_age: null, max_age: null }],
+                birthday: '2020-01',
+              }],
+              activeChildId: FIRST_CHILD_ID,
+            },
+          },
+          watched: [],
+          usage: { days: {}, hours: {} },
+        }),
+      }
+    }))
+    const { result } = await act(async () => renderHook(() => {
+      const settings = useSettings()
+      const watch = useWatchStore(settings.settings.childId)
+      return { sync: useSync(settings, watch), settings }
+    }))
+    expect(result.current.settings.settings.childName).toBe('Emma')
+    expect(result.current.settings.settings.customChannels).toHaveLength(1)
+    expect(result.current.settings.settings.passkeyId).toBe('phone-b')
+    expect(result.current.settings.stored.updatedAt).toBe(1000)
+  })
+
+  it('pulls again when the app has been in the background past LIVE_PULL_MS', async () => {
+    signedIn()
+    const { result } = await act(async () => renderSync())
+    expect(pulls()).toHaveLength(1)
+
+    vi.setSystemTime(Date.now() + LIVE_PULL_MS + 1)
+    await act(async () => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(pulls()).toHaveLength(2)
+    // the playback throttle has not elapsed — an ordinary ask is still refused
+    await act(async () => { await result.current.pull() })
+    expect(pulls()).toHaveLength(2)
+    vi.useRealTimers()
   })
 })

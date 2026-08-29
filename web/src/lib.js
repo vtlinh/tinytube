@@ -944,6 +944,10 @@ export function useSettings() {
   const view = childView(settings)
   return {
     ...storeApi(view, update, updateChild),
+    /* Device-local: a WebAuthn credential id is bound to this authenticator
+       and must not stamp the sync clock. Enrolling on a new phone used to
+       make empty defaults look newer than the account blob and wipe it. */
+    setPasskey: id => write(prev => ({ ...prev, passkeyId: id })),
     save: update,
     stored: settings, // the un-flattened blob: what sync pushes
     children: settings.children,
@@ -1432,10 +1436,14 @@ export const SYNC_URL = 'https://tinytube.vtlinh87.workers.dev'
 export const GOOGLE_CLIENT_ID = '559900350228-kamkqhee408lf7nh0kg5p9njgo71qjtt.apps.googleusercontent.com'
 
 const SYNC_KEY = 'tinytube:sync:v1' // {token, email, expiresAt, deviceId, lastPushAt}
-const PUSH_DEBOUNCE_MS = 5_000
+export const PUSH_DEBOUNCE_MS = 5_000
 /* How often a re-pull is actually answered. Every playback asks; this is what
    keeps that from being a request per video. `force` bypasses it. */
 export const PULL_MIN_MS = 15 * 60_000
+/* Opening the app, or leaving it sitting in the foreground, is when the other
+   phone's edits have to show up. Shorter than the playback throttle on
+   purpose: tapping videos asks freely, coming back to the app is the ask. */
+export const LIVE_PULL_MS = 60_000
 const RECENT_HOURS = 12 // mirror of the quota window, in whole clock hours
 
 export function loadSyncSession() {
@@ -1505,6 +1513,75 @@ export function watchedDeltas(watched, since) {
     .map(([id, e]) => ({ id, pos: e.pos ?? 0, dur: e.dur ?? 0, completed: !!e.completed, updatedAt: e.updatedAt }))
 }
 
+const DEFAULT_CHILD_NAME = 'Child 1'
+
+/** True when a settings blob has no parental setup — factory defaults, maybe
+ * a passkey, maybe a fresh updatedAt. A new phone looks like this, and that
+ * is exactly what must not win last-write-wins against the account. */
+export function isVirginSettings(data) {
+  if (!data || typeof data !== 'object') return true
+  if (typeof data.apiKey === 'string' && data.apiKey.trim()) return false
+  const children = Array.isArray(data.children) ? data.children : []
+  const channels = [
+    ...(Array.isArray(data.customChannels) ? data.customChannels : []),
+    ...children.flatMap(c => (Array.isArray(c?.customChannels) ? c.customChannels : [])),
+  ]
+  if (channels.length) return false
+  if (children.length > 1) return false
+  const names = [...(data.name ? [data.name] : []), ...children.map(c => c?.name).filter(Boolean)]
+  if (names.some(n => n !== DEFAULT_CHILD_NAME)) return false
+  if (data.birthday || children.some(c => c?.birthday)) return false
+  if (normEmail(data.email) || children.some(c => normEmail(c?.email))) return false
+  if ((data.groups ?? []).length || children.some(c => (c?.groups ?? []).length)) return false
+  if (data.hideWatched || children.some(c => c?.hideWatched)) return false
+  if (data.day || children.some(c => c?.day)) return false
+  const ageOffDefault = r => Array.isArray(r) && (r[0] !== 1 || r[1] !== 15)
+  if (ageOffDefault(data.ageRange) || children.some(c => ageOffDefault(c?.ageRange))) return false
+  const quotas = [data.quota, ...children.map(c => c?.quota)].filter(Boolean)
+  for (const q of quotas) {
+    if (q.per6h != null || q.perWeek != null || q.perMonth != null) return false
+    if (q.perDay != null && q.perDay !== CHILD_DEFAULTS.quota.perDay) return false
+  }
+  if (data.quotaMins != null && data.quotaMins !== CHILD_DEFAULTS.quota.perDay) return false
+  const playbackOff = m => m != null && playbackMode(m) !== PLAYBACK_IN_ORDER
+  if (playbackOff(data.playback) || children.some(c => playbackOff(c?.playback))) return false
+  return true
+}
+
+/** Adopt the account blob when it has the family's setup and we do not, even
+ * if our empty defaults stamped a newer clock; never the other way around. */
+export function shouldAdoptRemoteSettings(local, remote) {
+  if (!remote?.data) return false
+  if (isVirginSettings(remote.data) && !isVirginSettings(local)) return false
+  if (isVirginSettings(local) && !isVirginSettings(remote.data)) return true
+  return (remote.updatedAt ?? 0) > (local?.updatedAt ?? 0)
+}
+
+/** The blob to store when adopting: remote children/channels/quotas, THIS
+ * device's passkey (WebAuthn does not travel), remote stamp kept. */
+export function applyRemoteSettings(local, remote) {
+  if (!shouldAdoptRemoteSettings(local, remote)) return null
+  return normalizeSettings({
+    ...remote.data,
+    passkeyId: local?.passkeyId ?? null,
+    updatedAt: remote.updatedAt,
+  })
+}
+
+/** Push settings only after a pull has landed, and never send factory
+ * defaults over an account that already has a family. */
+export function shouldPushSettings(local, remote, since = 0) {
+  if ((local?.updatedAt ?? 0) <= since) return false
+  if (isVirginSettings(local) && remote?.data && !isVirginSettings(remote.data)) return false
+  return true
+}
+
+/** What /sync/push receives: the stored blob minus the device-local passkey. */
+export function settingsPushPayload(local) {
+  const { passkeyId: _passkeyId, ...data } = local
+  return { data, updatedAt: local.updatedAt }
+}
+
 async function syncFetch(path, body, token) {
   const resp = await fetch(SYNC_URL + path, {
     method: 'POST',
@@ -1547,11 +1624,18 @@ export function loadGoogleSignIn() {
  * The sync loop. Inert without a session (and entirely so when
  * GOOGLE_CLIENT_ID is empty): tests and signed-out devices never touch the
  * network. With one: pull once per boot and fold the answer in, then push
- * this device's deltas, debounced, as state changes.
+ * this device's deltas, debounced, as state changes. Settings never go up
+ * until that first pull has landed — a new phone's empty defaults must not
+ * race the account blob and overwrite it.
  */
 export function useSync(settingsStore, watchStore) {
   const [session, setSession] = useState(loadSyncSession)
   const [pulling, setPulling] = useState(false)
+  /* Settings push is gated on a successful pull this launch. A ref for the
+     last remote blob (so a virgin local can see it has something to lose);
+     state so the push effect re-runs once the gate opens. */
+  const [readyToPush, setReadyToPush] = useState(false)
+  const remoteSettings = useRef(null)
   /* When each child was last pulled, so a re-pull can be asked for freely and
      answered at most every PULL_MIN_MS. A ref, not storage: every launch is
      entitled to a fresh pull, and a child never pulled has no entry at all. */
@@ -1563,6 +1647,8 @@ export function useSync(settingsStore, watchStore) {
     saveSyncSession(null)
     setSession(null)
     pulledAt.current = {}
+    remoteSettings.current = null
+    setReadyToPush(false)
   }, [])
 
   /* 401 means the session aged out server-side — surface as signed-out so the
@@ -1587,6 +1673,8 @@ export function useSync(settingsStore, watchStore) {
     }
     saveSyncSession(session)
     pulledAt.current = {}
+    remoteSettings.current = null
+    setReadyToPush(false)
     setSession(session)
     return email
   }, [])
@@ -1602,23 +1690,24 @@ export function useSync(settingsStore, watchStore) {
      and most asks cost nothing. `force` is for the two cases where the answer
      is the point rather than a refresh: the parent's Refresh button, and a
      child standing at a spent quota, where the DB is the only place a grown-up
-     could have granted more time from another device.
+     could have granted more time from another device. `minMs` is the
+     foreground path: coming back to the app, or a live poll, uses LIVE_PULL_MS.
 
      Returns the remote payload when it actually pulled, else null. */
   const pull = useCallback(
-    async ({ force = false } = {}) => {
+    async ({ force = false, minMs = PULL_MIN_MS } = {}) => {
       if (!session) return null
       const last = pulledAt.current[childId] ?? 0
-      if (!force && Date.now() - last < PULL_MIN_MS) return null
+      if (!force && Date.now() - last < minMs) return null
       pulledAt.current[childId] = Date.now()
       setPulling(true)
       try {
         const remote = await syncFetch('/sync/pull', { child: childId }, session.token)
         applyRemote({ watched: remote.watched, usage: remote.usage })
-        if (remote.settings && (remote.settings.updatedAt ?? 0) > (stored.updatedAt ?? 0)) {
-          // keep the remote stamp: adopting a blob is not an edit
-          save({ ...remote.settings.data, updatedAt: remote.settings.updatedAt })
-        }
+        remoteSettings.current = remote.settings
+        const adopted = applyRemoteSettings(stored, remote.settings)
+        if (adopted) save(adopted)
+        setReadyToPush(true)
         return remote
       } catch (err) {
         // a failed pull is not a pull: let the next ask through immediately
@@ -1637,10 +1726,26 @@ export function useSync(settingsStore, watchStore) {
     pull()
   }, [session, childId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // push deltas, debounced, whenever local state moves
+  // the other phone's edits land when this one is looked at, and keep landing
+  // while it stays open — two signed-in devices stay within LIVE_PULL_MS
+  useEffect(() => {
+    if (!session || typeof document === 'undefined') return
+    const ask = () => {
+      if (document.visibilityState === 'visible') pull({ minMs: LIVE_PULL_MS })
+    }
+    document.addEventListener('visibilitychange', ask)
+    const id = setInterval(ask, LIVE_PULL_MS)
+    return () => {
+      document.removeEventListener('visibilitychange', ask)
+      clearInterval(id)
+    }
+  }, [session, pull])
+
+  // push deltas, debounced, whenever local state moves — settings wait for
+  // the first successful pull so a new phone cannot wipe the account
   const { watched, usage } = watchStore
   useEffect(() => {
-    if (!session) return
+    if (!session || !readyToPush) return
     clearTimeout(timer.current)
     timer.current = setTimeout(() => {
       // per child: each has its own history, so its own high-water mark
@@ -1653,8 +1758,8 @@ export function useSync(settingsStore, watchStore) {
       }
       const deltas = watchedDeltas(watched, since)
       if (deltas.length) payload.watched = deltas
-      if ((stored.updatedAt ?? 0) > since) {
-        payload.settings = { data: stored, updatedAt: stored.updatedAt }
+      if (shouldPushSettings(stored, remoteSettings.current, since)) {
+        payload.settings = settingsPushPayload(stored)
       }
       syncFetch('/sync/push', payload, session.token)
         .then(() => {
@@ -1665,7 +1770,7 @@ export function useSync(settingsStore, watchStore) {
         .catch(dead)
     }, PUSH_DEBOUNCE_MS)
     return () => clearTimeout(timer.current)
-  }, [session, stored, watched, usage, childId, dead])
+  }, [session, stored, watched, usage, childId, dead, readyToPush])
 
   return { session, signIn, signOut, pull, pulling }
 }
