@@ -554,6 +554,8 @@ import {
   sha256hex,
   validWatchedRows,
   validUsageBuckets,
+  isVirginSettings,
+  shouldReplaceSettings,
 } from "./worker.js";
 
 const b64url = obj => bytesToB64url(new TextEncoder().encode(JSON.stringify(obj)));
@@ -701,6 +703,49 @@ test("CHILD_ID accepts uuids and the migration id, and refuses anything that cou
    an account that was already syncing silently starts from an empty history. */
 test("the migration child id is the literal both sides agree on", () => {
   assert.equal(DEFAULT_CHILD, "default");
+});
+
+/* A new phone's empty defaults must not replace an account that already has
+   children or channels, even when the empty blob's clock is newer. The other
+   direction — a curated blob healing a wiped row — must still go through. */
+test("a virgin settings blob never replaces a family, and a family always heals a virgin row", () => {
+  const family = {
+    children: [
+      {
+        id: "default",
+        name: "Emma",
+        customChannels: [{ channel_id: "UCabcdefghijklmnopqrstuv", min_age: null, max_age: null }],
+      },
+    ],
+  };
+  const empty = { children: [{ id: "default", name: "Child 1", customChannels: [] }] };
+  assert.equal(isVirginSettings(empty), true);
+  assert.equal(isVirginSettings({}), true);
+  assert.equal(isVirginSettings(family), false);
+  assert.equal(isVirginSettings({ children: [{ id: "default", name: "Emma" }] }), false, "a renamed child is setup");
+  assert.equal(isVirginSettings({ apiKey: "KEY" }), false);
+  assert.equal(isVirginSettings({ birthday: "2020-01" }), false);
+  assert.equal(
+    shouldReplaceSettings({ data: family, updated_at: 1000 }, empty, 9999),
+    false,
+    "newer empty must not wipe",
+  );
+  assert.equal(
+    shouldReplaceSettings({ data: JSON.stringify(empty), updated_at: 9999 }, family, 1000),
+    true,
+    "older family heals a wiped row",
+  );
+  assert.equal(shouldReplaceSettings(null, empty, 1), true, "first device may seed");
+  assert.equal(
+    shouldReplaceSettings({ data: family, updated_at: 1000 }, { ...family, children: [{ ...family.children[0], name: "Em" }] }, 2000),
+    true,
+    "two family blobs still LWW",
+  );
+  assert.equal(
+    shouldReplaceSettings({ data: family, updated_at: 2000 }, { ...family, children: [{ ...family.children[0], name: "Em" }] }, 1000),
+    false,
+    "older family loses to a newer one",
+  );
 });
 
 /* The cache outlived its own shape once: its first version stored videos and

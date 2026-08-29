@@ -10,6 +10,14 @@ import {
   watchedDeltas,
   usagePushDelta,
   PUSH_RECENT_HOURS,
+  isVirginSettings,
+  shouldAdoptRemoteSettings,
+  applyRemoteSettings,
+  shouldPushSettings,
+  settingsPushPayload,
+  CHILD_DEFAULTS,
+  FIRST_CHILD_ID,
+  normalizeSettings,
 } from '../src/lib.js'
 
 const HOUR_MS = 3600_000
@@ -153,5 +161,82 @@ describe('watchedDeltas', () => {
     ])
     expect(watchedDeltas(watched, 300)).toEqual([])
     expect(watchedDeltas({}, 0)).toEqual([])
+  })
+})
+
+const UC = 'UC' + 'a'.repeat(22)
+const family = {
+  children: [{
+    id: FIRST_CHILD_ID,
+    name: 'Emma',
+    customChannels: [{ channel_id: UC, min_age: null, max_age: null }],
+    birthday: '2020-01',
+  }],
+  activeChildId: FIRST_CHILD_ID,
+}
+const empty = normalizeSettings({})
+
+describe('isVirginSettings', () => {
+  it('treats factory defaults as empty, and any parental setup as not', () => {
+    expect(isVirginSettings(empty)).toBe(true)
+    expect(isVirginSettings({})).toBe(true)
+    expect(isVirginSettings(null)).toBe(true)
+    expect(isVirginSettings({ ...empty, passkeyId: 'pk', updatedAt: 9999 })).toBe(true)
+    expect(isVirginSettings(family)).toBe(false)
+    expect(isVirginSettings({ children: [{ id: FIRST_CHILD_ID, name: 'Emma' }] })).toBe(false)
+    expect(isVirginSettings({ apiKey: 'KEY' })).toBe(false)
+    expect(isVirginSettings({ birthday: '2020-01' })).toBe(false)
+    expect(isVirginSettings({ quota: { ...CHILD_DEFAULTS.quota, perDay: 30 } })).toBe(false)
+  })
+})
+
+describe('shouldAdoptRemoteSettings / applyRemoteSettings', () => {
+  it('a new phone adopts the account even when its empty defaults look newer', () => {
+    const local = { ...empty, updatedAt: 9000, passkeyId: 'phone-b' }
+    const remote = { data: family, updatedAt: 1000 }
+    expect(shouldAdoptRemoteSettings(local, remote)).toBe(true)
+    const adopted = applyRemoteSettings(local, remote)
+    expect(adopted.children[0].name).toBe('Emma')
+    expect(adopted.children[0].customChannels).toHaveLength(1)
+    expect(adopted.passkeyId).toBe('phone-b') // this device's authenticator
+    expect(adopted.updatedAt).toBe(1000) // adopting is not an edit
+  })
+
+  it('never adopts a wiped remote over a phone that still has the family', () => {
+    const local = { ...normalizeSettings(family), updatedAt: 1000 }
+    const remote = { data: empty, updatedAt: 9999 }
+    expect(shouldAdoptRemoteSettings(local, remote)).toBe(false)
+    expect(applyRemoteSettings(local, remote)).toBe(null)
+  })
+
+  it('two family blobs still last-write-wins', () => {
+    const local = { ...normalizeSettings(family), updatedAt: 2000 }
+    const newer = { data: { ...family, children: [{ ...family.children[0], name: 'Em' }] }, updatedAt: 3000 }
+    const older = { data: { ...family, children: [{ ...family.children[0], name: 'Em' }] }, updatedAt: 1000 }
+    expect(shouldAdoptRemoteSettings(local, newer)).toBe(true)
+    expect(shouldAdoptRemoteSettings(local, older)).toBe(false)
+  })
+})
+
+describe('shouldPushSettings / settingsPushPayload', () => {
+  it('will not send factory defaults over an account that already has a family', () => {
+    const local = { ...empty, updatedAt: 9000 }
+    expect(shouldPushSettings(local, { data: family }, 0)).toBe(false)
+    expect(shouldPushSettings(local, null, 0)).toBe(true) // first device may seed
+    expect(shouldPushSettings({ ...normalizeSettings(family), updatedAt: 2000 }, { data: empty }, 0)).toBe(true)
+  })
+
+  it('does not push when the stamp has not moved past the last push', () => {
+    expect(shouldPushSettings({ ...empty, updatedAt: 100 }, null, 100)).toBe(false)
+    expect(shouldPushSettings({ ...empty, updatedAt: 100 }, null, 50)).toBe(true)
+  })
+
+  it('strips the device-local passkey from what goes to the Worker', () => {
+    const local = { ...normalizeSettings(family), passkeyId: 'phone-b', updatedAt: 5 }
+    const payload = settingsPushPayload(local)
+    expect(payload.updatedAt).toBe(5)
+    expect(payload.data.passkeyId).toBeUndefined()
+    expect(payload.data.children[0].name).toBe('Emma')
+    expect('passkeyId' in payload.data).toBe(false)
   })
 })
