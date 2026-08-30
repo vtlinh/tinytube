@@ -2,7 +2,7 @@
  * math-gate fallback for devices without a platform authenticator, and the
  * watch-quota-exceeded screen. */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { enroll, makeChallenge } from './lib.js'
 
 /**
@@ -106,6 +106,15 @@ const SECONDS = 5
 export function MathGate({ onPass, onFail }) {
   const [challenge] = useState(() => makeChallenge())
   const [left, setLeft] = useState(SECONDS)
+  // first outcome wins: a correct tap must not lose to the leftover interval
+  // (or to a parent re-render that recreates onFail while left is already 0)
+  const settled = useRef(false)
+  const finish = ok => {
+    if (settled.current) return
+    settled.current = true
+    if (ok) onPass()
+    else onFail()
+  }
 
   useEffect(() => {
     const interval = setInterval(() => setLeft(s => s - 1), 1000)
@@ -113,8 +122,8 @@ export function MathGate({ onPass, onFail }) {
   }, [])
 
   useEffect(() => {
-    if (left <= 0) onFail()
-  }, [left, onFail])
+    if (left <= 0) finish(false)
+  }, [left])
 
   return (
     <div className="math-gate d-flex flex-column align-items-center justify-content-center gap-4 p-4">
@@ -137,7 +146,7 @@ export function MathGate({ onPass, onFail }) {
             <button
               type="button"
               className="btn btn-outline-light btn-lg w-100 py-3 fs-3"
-              onClick={() => (choice === challenge.answer ? onPass() : onFail())}
+              onClick={() => finish(choice === challenge.answer)}
             >
               {choice}
             </button>

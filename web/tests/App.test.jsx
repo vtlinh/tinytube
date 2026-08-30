@@ -4,11 +4,13 @@ import App from '../src/main.jsx'
 import { verify } from '../src/lib.js'
 
 // partial mock: webauthn now lives in lib.js next to the hooks, which must stay real
+const GATE = { a: 19, b: 52, answer: 71, choices: [71, 61, 72, 81] }
 vi.mock('../src/lib.js', async importOriginal => ({
   ...(await importOriginal()),
   verify: vi.fn(async () => true),
   isBiometricAvailable: vi.fn(async () => false),
   enroll: vi.fn(async () => 'fresh-credential'),
+  makeChallenge: () => GATE,
 }))
 import { isBiometricAvailable } from '../src/lib.js'
 
@@ -89,6 +91,15 @@ describe('parent gate', () => {
     fireEvent.click(await screen.findByLabelText('Parents'))
     expect(await screen.findByText(/Grown-ups only/)).toBeTruthy()
     expect(verify).not.toHaveBeenCalled()
+  })
+
+  it('opens Parents Mode after a correct math-gate answer', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByLabelText('Parents'))
+    expect(await screen.findByText(/Grown-ups only/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '71' }))
+    expect(await screen.findByText(/Parents Mode/)).toBeTruthy()
+    expect(screen.getByLabelText('Name')).toBeTruthy()
   })
 
   it('goes straight to the biometric and into settings when enrolled', async () => {
