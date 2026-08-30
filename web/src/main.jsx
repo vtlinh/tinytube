@@ -1,7 +1,7 @@
 /** App shell: view routing (gallery | player | gate | settings | quota), the
  * parent gate dispatch, and the browser boot. */
 
-import { StrictMode, useEffect, useRef, useState } from 'react'
+import { StrictMode, useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import './styles.css'
@@ -60,7 +60,8 @@ export default function App() {
     history.pushState({ tinytube: true }, '')
     fn(arg)
   }
-  const close = () => history.back() // popstate does the state reset
+  const close = useCallback(() => history.back(), []) // popstate does the state reset
+  const openSettings = useCallback(() => setView('settings'), [])
 
   if (biometric === null) {
     return (
@@ -106,7 +107,7 @@ export default function App() {
   if (view === 'gate') {
     return (
       <MathGate
-        onPass={() => setView('settings')} // same history depth: back from settings -> gallery
+        onPass={openSettings} // same history depth: back from settings -> gallery
         onFail={close}
       />
     )

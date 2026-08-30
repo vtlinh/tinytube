@@ -9,12 +9,12 @@ vi.mock('../src/lib.js', async importOriginal => ({
   makeChallenge: () => challenge,
 }))
 
-let onPass, onFail
+let onPass, onFail, rerender
 beforeEach(() => {
   vi.useFakeTimers()
   onPass = vi.fn()
   onFail = vi.fn()
-  render(<MathGate onPass={onPass} onFail={onFail} />)
+  ;({ rerender } = render(<MathGate onPass={onPass} onFail={onFail} />))
 })
 afterEach(() => vi.useRealTimers())
 
@@ -36,9 +36,19 @@ describe('MathGate', () => {
     expect(onPass).not.toHaveBeenCalled()
   })
 
-  it('passes on the correct answer and the countdown stops mattering', () => {
+  it('passes on the correct answer and the leftover countdown does not fail', () => {
     fireEvent.click(screen.getByText('125'))
     expect(onPass).toHaveBeenCalledTimes(1)
+    act(() => vi.advanceTimersByTime(5000))
     expect(onFail).not.toHaveBeenCalled()
+  })
+
+  it('fails at most once when onFail is a new function after timeout', () => {
+    act(() => vi.advanceTimersByTime(5000))
+    expect(onFail).toHaveBeenCalledTimes(1)
+    const nextFail = vi.fn()
+    rerender(<MathGate onPass={onPass} onFail={nextFail} />)
+    expect(onFail).toHaveBeenCalledTimes(1)
+    expect(nextFail).not.toHaveBeenCalled()
   })
 })
